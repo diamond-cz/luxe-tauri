@@ -1,0 +1,33 @@
+/* Tailwind layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global resets / dark-first defaults */
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: #1b1b1f;
+  color: #e6e6eb;
+  font-family:
+    "Segoe UI Variable", "Segoe UI", system-ui, ui-sans-serif, sans-serif;
+  overflow: hidden;
+}
+
+/* Replace the QSS scrollbar hack from the Python version (CLAUDE.md note). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 100, 200, 0.5) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(140, 100, 200, 0.5);
+  border-radius: 5px;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(170, 130, 230, 0.7); }
+*::-webkit-scrollbar-corner { background: transparent; }

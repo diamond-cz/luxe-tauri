@@ -1,0 +1,53 @@
+[package]
+name = "luxe-tauri"
+version = "0.1.0"
+description = "LUXE — Camera Tuning AE Visualization (Rust + Tauri)"
+authors = ["LUXE"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "luxe_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.1", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2.2"
+tauri-plugin-fs = "2.2"
+tauri-plugin-global-shortcut = "2.2"
+tauri-plugin-notification = "2.2"
+tauri-plugin-os = "2.2"
+tauri-plugin-single-instance = "2.2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+tokio = { version = "1", features = ["full"] }
+parking_lot = "0.12"
+dashmap = "6"
+once_cell = "1"
+
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# tree-sitter & C grammar (M3 will add concrete integration; declared now to lock the version)
+tree-sitter = "0.22"
+tree-sitter-c = "0.21"
+
+# misc
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+regex = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
