@@ -10,25 +10,28 @@
  * outside FluentProvider's subtree. */
 html.dark {
   color-scheme: dark;
-  --luxe-bg:       #1b1b1f;
-  --luxe-fg:       #e6e6eb;
-  --luxe-scroll:   rgba(140, 100, 200, 0.5);
-  --luxe-scroll-h: rgba(170, 130, 230, 0.7);
+  --luxe-bg:        #1b1b1f;
+  --luxe-bg-grad:   radial-gradient(120% 80% at 0% 0%, #25212e 0%, #1b1b1f 60%);
+  --luxe-fg:        #e6e6eb;
+  --luxe-scroll:    rgba(140, 100, 200, 0.5);
+  --luxe-scroll-h:  rgba(170, 130, 230, 0.7);
 }
 html.light {
   color-scheme: light;
-  --luxe-bg:       #f5f6fa;
-  --luxe-fg:       #1f1f23;
-  --luxe-scroll:   rgba(120,  90, 200, 0.3);
-  --luxe-scroll-h: rgba(120,  90, 200, 0.55);
+  --luxe-bg:        #f3f4f8;
+  --luxe-bg-grad:   linear-gradient(135deg, #eef0f6 0%, #f6f4fb 45%, #f0eef8 100%);
+  --luxe-fg:        #1f1f23;
+  --luxe-scroll:    rgba(120,  90, 200, 0.3);
+  --luxe-scroll-h:  rgba(120,  90, 200, 0.55);
 }
 /* Default to dark until App.tsx attaches the class. */
 html:not(.light):not(.dark) {
   color-scheme: dark;
-  --luxe-bg:       #1b1b1f;
-  --luxe-fg:       #e6e6eb;
-  --luxe-scroll:   rgba(140, 100, 200, 0.5);
-  --luxe-scroll-h: rgba(170, 130, 230, 0.7);
+  --luxe-bg:        #1b1b1f;
+  --luxe-bg-grad:   radial-gradient(120% 80% at 0% 0%, #25212e 0%, #1b1b1f 60%);
+  --luxe-fg:        #e6e6eb;
+  --luxe-scroll:    rgba(140, 100, 200, 0.5);
+  --luxe-scroll-h:  rgba(170, 130, 230, 0.7);
 }
 
 html, body, #root {
@@ -40,6 +43,9 @@ html, body, #root {
     "Segoe UI Variable", "Segoe UI", system-ui, ui-sans-serif, sans-serif;
   overflow: hidden;
   transition: background 120ms ease-out, color 120ms ease-out;
+}
+body {
+  background-image: var(--luxe-bg-grad);
 }
 
 /* Replace the QSS scrollbar hack from the Python version (CLAUDE.md note). */

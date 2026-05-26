@@ -1,5 +1,4 @@
 import { NavLink } from "react-router-dom";
-import { tokens } from "@fluentui/react-components";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 
 interface NavItem {
@@ -22,10 +21,10 @@ const BOTTOM_ITEMS: NavItem[] = [
 export function SideNav() {
   return (
     <nav
-      className="flex h-full w-12 flex-col items-center justify-between border-r py-3"
+      className="flex h-full w-12 shrink-0 flex-col items-center justify-between py-3"
       style={{
-        background:  tokens.colorNeutralBackground2,
-        borderColor: tokens.colorNeutralStroke2,
+        background:  "var(--colorNeutralBackground2)",
+        borderRight: "1px solid var(--colorNeutralStroke2)",
       }}
     >
       <div className="flex flex-col items-center gap-2">
@@ -43,19 +42,33 @@ function NavButton({ to, icon, hint }: NavItem) {
     <NavLink
       to={to}
       title={hint}
-      className={({ isActive }) =>
-        [
-          "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
-          isActive
-            ? "text-white"
-            : "text-neutral-300 hover:text-white",
-        ].join(" ")
-      }
+      className="flex h-10 w-10 items-center justify-center rounded-md transition-colors"
       style={({ isActive }) => ({
         background: isActive
-          ? tokens.colorBrandBackground
+          ? "var(--colorBrandBackground)"
           : "transparent",
+        color: isActive
+          ? "var(--colorNeutralForegroundOnBrand)"
+          : "var(--colorNeutralForeground2)",
       })}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        if (!el.classList.contains("active")) {
+          el.style.background = "var(--colorNeutralBackground3)";
+          el.style.color      = "var(--colorNeutralForeground1)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        // NavLink doesn't add an `active` class by default; check aria-current.
+        const isActive = el.getAttribute("aria-current") === "page";
+        el.style.background = isActive
+          ? "var(--colorBrandBackground)"
+          : "transparent";
+        el.style.color = isActive
+          ? "var(--colorNeutralForegroundOnBrand)"
+          : "var(--colorNeutralForeground2)";
+      }}
     >
       <FluentIcon name={icon} />
     </NavLink>

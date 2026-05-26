@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { pickTheme } from "@/theme/fluent-tokens";
 import { SideNav } from "@/components/shell/SideNav";
+import { TitleBar } from "@/components/shell/TitleBar";
 import { CloseBehaviorDialog } from "@/components/shell/CloseBehaviorDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { HomeView } from "@/views/HomeView";
@@ -15,7 +16,6 @@ import { useShellBootstrap } from "@/hooks/useShellBootstrap";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 export default function App() {
-  /* React to settings.theme so the FluentProvider can switch dark↔light live. */
   const themeKey = useSettingsStore((s) => s.settings.theme);
   const theme    = pickTheme(themeKey);
 
@@ -39,8 +39,6 @@ function ShellRoot() {
 
   useShellBootstrap({ onNavigate, onRequestCloseAsk });
 
-  /* Drive global theme + scale at the <html> root so body bg / scrollbar /
-   * tooltips outside FluentProvider all stay consistent. */
   const themeKey = useSettingsStore((s) => s.settings.theme);
   const scale    = useSettingsStore((s) => s.settings.scale);
   useEffect(() => {
@@ -57,20 +55,23 @@ function ShellRoot() {
   }, [scale]);
 
   return (
-    <div className="flex h-full w-full">
-      <SideNav />
-      <main className="flex-1 min-w-0 min-h-0 overflow-hidden">
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/"         element={<Navigate to="/home" replace />} />
-            <Route path="/home"     element={<HomeView />} />
-            <Route path="/mtk/*"    element={<MtkView />} />
-            <Route path="/qualcomm" element={<QualcommView />} />
-            <Route path="/unisoc"   element={<UnisocView />} />
-            <Route path="/settings" element={<SettingsView />} />
-          </Routes>
-        </ErrorBoundary>
-      </main>
+    <div className="flex h-full w-full flex-col">
+      <TitleBar />
+      <div className="flex min-h-0 flex-1">
+        <SideNav />
+        <main className="flex-1 min-w-0 min-h-0 overflow-hidden">
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/"         element={<Navigate to="/home" replace />} />
+              <Route path="/home"     element={<HomeView />} />
+              <Route path="/mtk/*"    element={<MtkView />} />
+              <Route path="/qualcomm" element={<QualcommView />} />
+              <Route path="/unisoc"   element={<UnisocView />} />
+              <Route path="/settings" element={<SettingsView />} />
+            </Routes>
+          </ErrorBoundary>
+        </main>
+      </div>
       <CloseBehaviorDialog open={askClose} onClose={() => setAskClose(false)} />
     </div>
   );

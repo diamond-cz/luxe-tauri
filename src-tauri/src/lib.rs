@@ -42,6 +42,18 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
 
+            // Force window icon at runtime so dev builds reliably show the
+            // updated logo in the Windows class icon (taskbar / Alt+Tab) —
+            // `cargo run --no-default-features` skips the bundle/winres step
+            // that normally embeds the Win32 resource icon for release builds.
+            if let Some(win) = handle.get_webview_window("main") {
+                if let Ok(img) = tauri::image::Image::from_bytes(
+                    include_bytes!("../icons/icon.png"),
+                ) {
+                    let _ = win.set_icon(img);
+                }
+            }
+
             // Persistent state.
             let store = StateStore::load(handle).expect("state.toml load failed");
             let initial_shortcuts = store.snapshot().shortcuts.clone();

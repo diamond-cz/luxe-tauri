@@ -19,6 +19,7 @@ import {
 import { useWindowStore } from "@/stores/windowStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
+import { usePoetryStore } from "@/stores/poetryStore";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
 import {
@@ -120,7 +121,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       unlisteners.push(unTray);
 
       const unPoetry = await listen<string>(EVT_POETRY_UPDATED, ({ payload }) => {
+        usePoetryStore.getState().setLine(payload);
         handlersRef.current.onPoetryChanged?.(payload);
+        // Keep window title in sync too — taskbar tooltip / Alt+Tab still uses it.
         win.setTitle(`👀 ${payload}`).catch(() => {});
       });
       unlisteners.push(unPoetry);
