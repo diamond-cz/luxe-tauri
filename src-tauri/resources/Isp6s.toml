@@ -1,0 +1,405 @@
+# ISP6S AE 参数映射配置
+# 将图片同名 TOML 文件中的关键字映射到 Normal / Face 指示器下的参数显示。
+#
+# 格式说明：
+#   左侧 = 卡片中显示的参数名（即表格 key 列）
+#   右侧 = 图片同名 TOML 文件中对应的关键字（留空 "" 表示使用默认值 0）
+
+# ─────────────────────────────────────────────────────────────────────────
+# [card.Normal] 段：Normal 卡片（父卡 + 子卡片 MainT/HS/ABL/NS/BT/MT/DT）
+#   CWR → 父卡头部 CWR 值的 TOML 关键字
+#   wt  → 子卡片 WT 值的 TOML 关键字
+#   tar → 子卡片 Tar 值的 TOML 关键字（留空 → 0）
+# 驱动显示：
+#   1) 子卡片头部 "WT | Tar" 徽章
+#   2) Normal 父卡头部 "CWR | tar_abl_mt_hs | Cal" 复合徽章，计算公式：
+#      tar_abl_mt_hs = (ABL.tar*ABL.wt + MT.tar*MT.wt + HS.tar*HS.wt)
+#                      / (ABL.wt + MT.wt + HS.wt)
+#      Cal           = ( tar_abl_mt_hs * (1024 - NS.wt) + NS.tar * NS.wt ) / 1024
+#   3) Normal Tab 表格的 wt / tar 两列
+# ─────────────────────────────────────────────────────────────────────────
+
+[card.Normal]
+CWR = "AE_TAG_PURE_AE_CWR"
+
+[card.Normal.wt]
+MainT    = "AE_TAG_HSV6_MAINT_WET"
+HS    = "AE_TAG_HSV6_HS_WET"
+BT = "AE_TAG_HSV6_BT_WET"
+MT = "AE_TAG_HSV6_MT_WET"
+DT = "AE_TAG_HSV6_DT_WET"
+ABL   = "AE_TAG_PROB_ABL"
+NS    = "AE_TAG_NS_PROB"
+
+[card.Normal.tar]
+MainT    = "AE_TAG_MTV6_MAINT_TARGET"
+HS    = "AE_TAG_HSV6_HS_TARGET"
+BT = "AE_TAG_HSV6_BT_TARGET"
+MT = "AE_TAG_HSV6_MT_TARGET"
+DT = "AE_TAG_HSV6_DT_TARGET"
+ABL   = ""
+NS    = "AE_TAG_NS_FINAL_TARGET"
+
+# ─────────────────────────────────────────────────────────────────────────
+# [card.face_touch] 段：Face / Touch 卡片（父卡 + 子卡片 Face / Touch）
+#   CWR           → 父卡头部 CWR 值
+#   LCE_Gain_num  → LCE_Gain 公式的分子
+#   LCE_Gain_den  → LCE_Gain 公式的分母；分母为 0 时显示 0
+#   LCE_Gain      = LCE_Gain_num / LCE_Gain_den （父卡徽章展示 "CWR | LCE_Gain"）
+#
+# [card.face_touch.Face]
+#   wt_max  → 列表，wt 值取这些 TOML 关键字对应值的最大值
+#   FBT     → FBT 值的 TOML 关键字（留空 → 0；待用户根据实际字段填写）
+#   FLT     → FLT 值的 TOML 关键字
+#   子卡片 "Face" 头部徽章显示："WT:xx | FBT:xx | FLT:xx"
+#
+# [card.face_touch.Touch]
+#   wt_max  → 列表，wt 值取这些 TOML 关键字对应值的最大值
+#   tar     → Tar 值的 TOML 关键字（留空 → 0）
+#   子卡片 "Touch" 头部徽章显示："WT:xx | Tar:xx"
+# ─────────────────────────────────────────────────────────────────────────
+
+[card.face_touch]
+CWR          = "AE_TAG_LINK_FACE_CWR_STABLE"
+LCE_Gain_num = "AE_TAG_LINK_FACE_CWR_STABLE"
+LCE_Gain_den = "AE_TAG_LINK_AE_CWR_STABLE"
+
+[card.face_touch.Face]
+wt_max = [
+    "AE_TAG_PROB_FACE",
+    "AE_TAG_PROB_FACE_THD",
+    "AE_TAG_PROB_FACE_HBND",
+    "AE_TAG_PROB_FACE_LBND",
+    "AE_TAG_PROB_FACE_FLT_THD",
+    "AE_TAG_PROB_FACE_FLT_HBND",
+    "AE_TAG_PROB_FACE_FLT_DR",
+]
+FBT = "AE_TAG_FBT_TARGET"
+FLT = "AE_TAG_FLT_TARGET"
+
+[card.face_touch.Touch]
+wt_max = [
+    "AE_TAG_PROB_TOUCH",
+    "AE_TAG_PROB_TOUCH_THD",
+    "AE_TAG_PROB_TOUCH_HBND",
+    "AE_TAG_PROB_TOUCH_LBND",
+]
+tar = ""                       # 默认 0；按需填入 TOML 关键字
+
+# ─────────────────────────────────────────────────────────────────────────
+# [Image] 段：定义 Image Tab 表格中除 idx/name 之外的附加列
+# 格式：列名 = "图片同名 TOML 中的关键字"
+# 列值来源：每张图片同名的 .toml 文件解析后按关键字查找；缺失则显示 "-"
+# ─────────────────────────────────────────────────────────────────────────
+[Image]
+FaceSt      = "AE_TAG_FACE_20_FACE_AE_STABLE"
+"1sSt"      = "AE_TAG_FACE_20_FACE_AE_1STSTABLE"
+BV          = "AE_TAG_REALBVX1000"
+CWV         = "AE_TAG_CWV"
+hsevd       = "AE_TAG_HS_EVD"
+nsevd       = "AE_TAG_NS_EVD"
+FDR         = "AE_TAG_FLT_DR"
+avgfdy      = "AE_TAG_FACE_AVGFDY_0"
+gaufdy      = "AE_TAG_FACE_GAU_FDY_0"
+FDY     = "AE_TAG_FLT_FDY"
+Normal  = "AE_TAG_PURE_AE_CWR_STABLE"
+Link_AE = "AE_TAG_LINK_AE_CWR_STABLE"
+SZ_RA       = "AE_TAG_FLT_FDSZ_RA"
+NS_Prob     = "AE_TAG_NS_PROB"
+Link_Face   = "AE_TAG_LINK_FACE_CWR_STABLE"
+FdMinCWR    = "AE_TAG_LINK_FACE_CWR_MIN"
+
+# ─────────────────────────────────────────────────────────────────────────
+# [LCE] 段：定义 LCE 选项卡的多分组表格（共 4 列：行标签 + 3 个数据列）
+# 每个 [[LCE.group]] 对应一组，包含一行黄色高亮的列名标题 + 若干数据行
+#   type = "row"    → 单行组
+#       row_label 显示在数据行的首列（可省略，留空）
+#       columns / keys 对应后 3 个数据列（最多 3 列，不足留空）
+#   type = "series" → 序列组（如 LCE_P/LCE_O/GAP）
+#       labels    每个元素生成一行，并作为该行的首列标签显示
+#       columns   后 3 列的列名
+#       patterns  后 3 列的 TOML 关键字模板，"{n}" 会替换为 labels 中的当前值
+#                 留空字符串的列按 "前两列之差" 自动计算（典型用于 GAP = O - P）
+# ─────────────────────────────────────────────────────────────────────────
+
+[[LCE.group]]
+type      = "row"
+row_label = "LCE_LV"
+columns   = ["LV", "LV_L", "LV_H"]
+keys      = ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"]
+
+[[LCE.group]]
+type      = "row"
+row_label = "LCE_DR"
+columns   = ["DR", "DR_L", "DR_H"]
+keys      = ["SW_LCE_CurrDR", "SW_LCE_DRIdx_L", "SW_LCE_DRIdx_H"]
+
+[[LCE.group]]
+type     = "series"
+columns  = ["LCE_P", "LCE_O", "GAP"]
+labels   = ["0", "1", "50", "250", "500", "750", "950", "999"]
+patterns = ["SW_LCE_P{n}", "SW_LCE_O{n}", ""]   # GAP 列留空表示 = O - P
+
+[[LCE.group]]
+type      = "row"
+row_label = ""
+columns   = ["DStr", "BStr"]
+keys      = ["SW_LCE_DStrengthLevel", "SW_LCE_BStrengthLevel"]
+
+# ─────────────────────────────────────────────────────────────────────────
+# [para_check] 段：参数检查表配置
+# 每个 [[para_check.items]] 生成一行：
+#   label    → 关键字 列显示名称
+#   cpp_path → AE.cpp 参数文件中 TreeSitterCppParser.get_fields_at_path 的路径
+#   toml_key → 图片同名 TOML 中的关键字
+# ─────────────────────────────────────────────────────────────────────────
+
+[[para_check.items]]
+label = "HW"
+cpp_path = "[0][0][0].0"
+toml_key = "AE_TAG_HW_VER"
+
+[[para_check.items]]
+label = "STAT"
+cpp_path = "[0][1][0].0"
+toml_key = "AE_TAG_STAT_VER"
+
+[[para_check.items]]
+label = "FLOW"
+cpp_path = "[0][2][0].0"
+toml_key = "AE_TAG_FLOW_VER"
+
+[[para_check.items]]
+label = "METER"
+cpp_path = "[0][3][0].0"
+toml_key = "AE_TAG_METER_VER"
+
+[[para_check.items]]
+label = "FACE"
+cpp_path = "[0][4][0].0"
+toml_key = "AE_TAG_FACE_VER"
+
+[[para_check.items]]
+label = "SMOOTH"
+cpp_path = "[0][5][0].0"
+toml_key = "AE_TAG_SMOOTH_VER"
+
+[[para_check.items]]
+label = "SYNC"
+cpp_path = "[0][6][0].0"
+toml_key = "AE_TAG_SYNC_VER"
+
+[[para_check.items]]
+label = "HDR"
+cpp_path = "[0][7][0].0"
+toml_key = "AE_TAG_HDR_VER"
+
+[[para_check.items]]
+label = "BV_OFFSET"
+cpp_path = "[0][2][1].9"
+toml_key = "AE_TAG_BV_OFFSET"
+
+# ─────────────────────────────────────────────────────────────────────────
+# [preview_info] 段：右键"图片预览"图标进入三段式预览时，最底部 2 列表格的行配置
+# 每个 [[preview_info.items]] 生成一行：
+#   label    → 第一列显示的关键字名称
+#   toml_key → 图片同名 TOML 中对应的关键字；缺失则显示 "-"
+# ─────────────────────────────────────────────────────────────────────────
+
+[[preview_info.items]]
+label = "bv"
+toml_key = "AE_TAG_REALBVX1000"
+
+[[preview_info.items]]
+label = "hsevd"
+toml_key = "AE_TAG_HS_EVD"
+
+[[preview_info.items]]
+label = "nsevd"
+toml_key = "AE_TAG_NS_EVD"
+
+[[preview_info.items]]
+label = "B2D"
+toml_key = "AE_TAG_DRV6_B2D"
+
+[[preview_info.items]]
+label = "B2M"
+toml_key = "AE_TAG_DRV6_B2M"
+
+[[preview_info.items]]
+label = "CorrB2M"
+toml_key = "AE_TAG_DRV6_CORR_B2M"
+
+[[preview_info.items]]
+label = "M2D"
+toml_key = "AE_TAG_DRV6_M2D"
+
+[[preview_info.items]]
+label = "FDR"
+toml_key = "AE_TAG_FLT_DR"
+
+# [[preview_info.items]]
+# label = "LCE_LV"
+# toml_key = "SW_LCE_LV"
+
+# [[preview_info.items]]
+# label = "LV_L"
+# toml_key = "SW_LCE_LVIdx_L"
+
+# [[preview_info.items]]
+# label = "LCE_DR"
+# toml_key = "SW_LCE_CurrDR"
+
+# [[preview_info.items]]
+# label = "DR_L"
+# toml_key = "SW_LCE_DRIdx_L"
+
+# [[preview_info.items]]
+# label = "DR_H"
+# toml_key = "SW_LCE_DRIdx_H"
+
+# ─────────────────────────────────────────────────────────────────────────
+# [card_source] 段：卡片 → AE.cpp 源码位置映射（参数映射模式跳转用）
+#
+# 支持三类锚点，可任意组合（命中段全部合并，每段独立高亮）：
+#
+#   ① keywords    （推荐 · 易维护）
+#       字符串列表；行内含任一关键字即命中。以 "re:" 开头视为 Python 正则。
+#       维护方式：Notepad++ 里找到目标段的特征字符串（注释、字段名、TOML key
+#       的字面量等）抄过来即可，AE.cpp 增删行也不会失效。
+#
+#   ② paths       （旧 · 兼容保留）
+#       tree-sitter 字段路径列表，如 "[0][3][1][20]"。AE.cpp 结构改动后需要
+#       重新核对索引。
+#
+#   ③ line_ranges （兜底 · 最直接）
+#       [[start, end], ...] 直接写死 AE.cpp 行号区间；AE.cpp 增减行需手维护。
+#
+# 公共选项：
+#   context   = "block" | "line" | <int>     keywords 命中后展开方式
+#               - "block" : 展开到外层 { ... } 块（在嵌套结构上工作良好；
+#                           AE.cpp 字段大多是扁平排列，命中独立花括号块内
+#                           的字段时合适，命中段落注释如 "//CCU_strXxx" 时
+#                           会回溯到父大结构，体积偏大 → 此场景请改用 <int>）
+#               - "line"  : 仅高亮匹配行本身
+#               - <int N> : 命中行 + 之后 N 行（推荐用于段落注释类锚点）
+#   jump_to   = "first" | "min"     多段时滚动到哪段顶部，默认 "first"
+#   highlight = "ranges" | "union"  多段独立显示 / 合并成一大块，默认 "ranges"
+#
+# 写法示例：
+#   [card_source.MainT]
+#   # 段落注释类锚点：用 context = N 控制范围
+#   keywords = ["CCU_strMainTargetCFG"]
+#   context  = 25
+#
+#   [card_source.WeightTbl]
+#   # 字段名类锚点：在自带 {} 的嵌套块内 → block 模式精准定位
+#   keywords = ["mt_wei_tbl"]
+#   context  = "block"
+#
+#   [card_source.Face]
+#   # 多类锚点合并：keywords + line_ranges 都生效
+#   keywords    = ["face_lcelink_param"]
+#   line_ranges = [[1018, 1080]]
+#
+#  三类锚点都接受列表，并且可以混用，命中段会合并：
+#
+#  [card_source.SomeCard]
+#  keywords    = ["//HSv6p0CFG", "//MT", "re:^\\s*//DR\\b"]    # 多关键字 / 正则
+#  paths       = ["[0][3][1][28]", "[0][3][1][36]"]            # 多路径
+#  line_ranges = [[530, 568], [600, 640]]                      # 多行号段
+#
+#  context   = 30        # 关键字命中后展开多少行（也可 "block" / "line"）
+#  jump_to   = "first"   # 多段时滚动到第一段顶部；改 "min" 则滚到行号最小那段
+#  highlight = "ranges"  # 各段独立高亮；改 "union" 则合并成一大块
+
+# ─────────────────────────────────────────────────────────────────────────
+
+[card_source.MainT]
+paths = ["[0][3][1][20]"]
+
+[card_source.MTWV]
+paths = ["[0][3][1][20]"]
+
+[card_source.THD]
+paths = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"]
+jump_to = "first"
+highlight = "ranges"
+
+[card_source.CWV]
+paths = []   # TODO: 在 Notepad++ 中确认 CWV 对应字段索引或关键字后填入
+# 建议 keywords = ["CCU_strAECWRTempSmooth"]  context = 30
+
+[card_source.Weight]
+paths = ["[0][3][1][40]","[0][3][1][41]","[0][3][1][42]","[0][3][1][43]"]
+jump_to   = "first"      # 多段时滚动到第一段顶部；改 "min" 则滚到行号最小那段
+highlight = "ranges"     # 各段独立高亮；改 "union" 则合并成一大块
+
+[card_source.HS]
+# AE.cpp 中 HSv6p0CFG 整段（含 BT/MT/DT 三段，到 DR 前结束）
+keywords  = ["//HSv6p0CFG"]
+context   = 105
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.BT]
+keywords  = ["//BT"]
+context   = 36
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.MT]
+keywords  = ["//MT"]
+context   = 17
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.DT]
+keywords  = ["//DT"]
+context   = 48
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.AOE]
+keywords  = ["//CCU_strAEAOEInputParm", "hdr_aoe_*"]
+context   = "line"
+jump_to   = "first"
+highlight = "ranges"
+
+
+# NS 下的 BT / DT 子卡（内部 ID 为 NS_BT / NS_DT，显示文字仍是 "BT" / "DT"）
+# 跳转到 NSBVCFG 段（NS BV/THD 配置），与 HS 下的 BT/DT 区分开
+[card_source.NS]
+keywords  = ["//CCU_strNSBVCFG", "ns_bv_cfg_btthd"]
+context   = 6
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.NS_BT]
+keywords  = ["//CCU_strNSBVCFG", "ns_bv_cfg_btthd"]
+context   = 6
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.NS_DT]
+keywords  = ["//CCU_strNSBVCFG", "ns_bv_cfg_nsthd"]
+context   = 6
+jump_to   = "first"
+highlight = "ranges"
+
+[card_source.Face]
+paths = ["[0][4][1][21]"]
+
+[card_source.Touch]
+paths = ["[0][2][1].19","[0][2][1].21","[0][2][1].27"]
+jump_to = "first"
+highlight = "ranges"
+
+
+# ABL 段（//CCU_AE_ABL_SPEC_T）
+[card_source.ABL]
+keywords    = ["//CCU_AE_ABL_SPEC_T", "//CCU_strABL_absDiff"]    # 多关键字 / 正则
+paths       = ["[0][3][1][28]", "[0][3][1][36]"]            # 多路径
+context   = "line"       # 关键字命中后展开多少行（也可 "block" / "line"）
+jump_to   = "first"      # 多段时滚动到第一段顶部；改 "min" 则滚到行号最小那段
+highlight = "ranges"     # 各段独立高亮；改 "union" 则合并成一大块

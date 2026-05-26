@@ -1,7 +1,9 @@
 pub mod commands;
 pub mod config;
+pub mod cpp_parser;
 pub mod error;
 pub mod events;
+pub mod image_scan;
 pub mod poetry;
 pub mod shortcuts;
 pub mod state;
@@ -106,6 +108,21 @@ pub fn run() {
             commands::close_cmds::quit_app,
             commands::fs_cmds::get_config_dir,
             commands::fs_cmds::open_path,
+            commands::cpp_cmds::parse_cpp_file,
+            commands::cpp_cmds::cpp_get_fields_at_path,
+            commands::cpp_cmds::cpp_get_values_at_path,
+            commands::cpp_cmds::cpp_get_node_at_path,
+            commands::cpp_cmds::cpp_search_by_comment,
+            commands::cpp_cmds::cpp_search_by_value,
+            commands::cpp_cmds::cpp_get_fields_by_line,
+            commands::cpp_cmds::cpp_get_fields_in_range,
+            commands::cpp_cmds::cpp_get_section_names,
+            commands::cpp_cmds::cpp_clear_cache,
+            commands::cpp_cmds::cpp_resolve_card_source,
+            commands::cpp_cmds::get_isp6s_schema,
+            commands::image_cmds::scan_image_dir,
+            commands::image_cmds::load_image_toml,
+            commands::text_cmds::read_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

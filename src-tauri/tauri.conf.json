@@ -37,7 +37,8 @@
       "icons/icon.png"
     ],
     "resources": [
-      "resources/translations/*.json"
+      "resources/translations/*.json",
+      "resources/Isp6s.toml"
     ]
   }
 }

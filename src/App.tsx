@@ -1,4 +1,4 @@
-import { MemoryRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { FluentProvider } from "@fluentui/react-components";
 import { useCallback, useEffect, useState } from "react";
 
@@ -32,6 +32,7 @@ export default function App() {
 
 function ShellRoot() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [askClose, setAskClose] = useState(false);
 
   const onNavigate         = useCallback((path: string) => navigate(path), [navigate]);
@@ -60,7 +61,9 @@ function ShellRoot() {
       <div className="flex min-h-0 flex-1">
         <SideNav />
         <main className="flex-1 min-w-0 min-h-0 overflow-hidden">
-          <ErrorBoundary>
+          {/* Auto-reset on route change so a crash in one view doesn't
+              persist after the user navigates away. */}
+          <ErrorBoundary key={location.pathname}>
             <Routes>
               <Route path="/"         element={<Navigate to="/home" replace />} />
               <Route path="/home"     element={<HomeView />} />

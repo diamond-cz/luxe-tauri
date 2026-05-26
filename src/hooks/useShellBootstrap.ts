@@ -19,6 +19,8 @@ import {
 import { useWindowStore } from "@/stores/windowStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
+import { useMtkStore } from "@/stores/mtkStore";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
@@ -60,6 +62,8 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       setMainWindow(root.main_window);
       setSettings(root.settings);
       setShortcuts(root.shortcuts);
+      useMtkStore.setState((s) => { s.mtk = root.mtk; });
+      useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
 
       /* 2. Boot i18n with the saved locale index. */
       const lang = localeAt(root.settings.language);
