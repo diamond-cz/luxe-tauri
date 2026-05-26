@@ -86,8 +86,13 @@ export function useShellBootstrap(handlers: ShellHandlers) {
         } else if (decision === "ask") {
           event.preventDefault();
           handlersRef.current.onRequestCloseAsk?.();
+        } else {
+          // "quit" — the tray icon keeps the process alive when only the
+          // window closes (Tauri v2 doesn't auto-exit while a tray is
+          // registered). Force a full process exit via app.exit(0).
+          event.preventDefault();
+          await quitApp().catch(() => {});
         }
-        // decision === "quit" → let Tauri close naturally.
       });
       unlisteners.push(unCloseRequested);
 
