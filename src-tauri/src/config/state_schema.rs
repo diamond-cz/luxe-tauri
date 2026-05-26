@@ -31,15 +31,29 @@ pub struct MainWindow {
 pub struct Settings {
     #[serde(default = "default_close_behavior")] pub close_behavior: u8,    // 0/1/2
     #[serde(default)]                            pub language:       u32,   // _LANGUAGE_LOCALES index
-    #[serde(default = "default_theme")]          pub theme:          String,
+    #[serde(default = "default_theme")]          pub theme:          String, // "dark" | "light" | "system"
+    #[serde(default = "default_scale")]          pub scale:          u32,   // 50..=200 (percent)
+    #[serde(default)]                            pub cache_path:     String,
+    #[serde(default)]                            pub auto_update:    bool,
+    #[serde(default = "default_true_settings")]  pub update_notify:  bool,
 }
 
 fn default_close_behavior() -> u8 { 0 }
 fn default_theme() -> String { "dark".into() }
+fn default_scale() -> u32 { 100 }
+fn default_true_settings() -> bool { true }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { close_behavior: 0, language: 0, theme: "dark".into() }
+        Self {
+            close_behavior: 0,
+            language:       0,
+            theme:          "dark".into(),
+            scale:          100,
+            cache_path:     String::new(),
+            auto_update:    false,
+            update_notify:  true,
+        }
     }
 }
 

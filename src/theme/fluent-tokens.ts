@@ -1,4 +1,9 @@
-import { BrandVariants, createDarkTheme, Theme } from "@fluentui/react-components";
+import {
+  BrandVariants,
+  createDarkTheme,
+  createLightTheme,
+  Theme,
+} from "@fluentui/react-components";
 
 // Brand ramp generated to roughly match LUXE's purple. Refined in M6.
 export const luxeBrand: BrandVariants = {
@@ -20,4 +25,17 @@ export const luxeBrand: BrandVariants = {
   160: "#EDC0EB",
 };
 
-export const luxeDarkTheme: Theme = createDarkTheme(luxeBrand);
+export const luxeDarkTheme:  Theme = createDarkTheme(luxeBrand);
+export const luxeLightTheme: Theme = createLightTheme(luxeBrand);
+
+/** Resolve the persisted theme key ("dark" | "light" | "system") to a Theme. */
+export function pickTheme(key: string): Theme {
+  if (key === "light") return luxeLightTheme;
+  if (key === "system") {
+    return typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)").matches
+      ? luxeDarkTheme
+      : luxeLightTheme;
+  }
+  return luxeDarkTheme;
+}

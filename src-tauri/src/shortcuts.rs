@@ -1,8 +1,9 @@
 //! Global shortcut registration. Mirrors the Python `_register_shortcut` /
 //! `_on_shortcut_updated` flow: action_id ∈ {home, settings, exit, poetry}.
 //!
-//! On trigger, we emit `shortcut_triggered { action: <id> }` and let the
-//! front-end handle navigation / poetry refresh / app quit.
+//! Each registered accelerator carries a handler closure that emits
+//! `shortcut_triggered { action: <id> }`. The front-end handles navigation /
+//! poetry refresh / app quit.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -45,39 +46,13 @@ pub fn make_registry() -> Registry {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
-pub fn install_handler(app: &AppHandle, registry: Registry) -> AppResult<()> {
-    let app_handle = app.clone();
-    let reg = Arc::clone(&registry);
-
-    app.global_shortcut().on_shortcut(
-        |_app, shortcut, event| {
-            if event.state != ShortcutState::Pressed {
-                return;
-            }
-            // Match against our registry to find which action_id fired.
-            let reg = reg.read();
-            let hit = reg
-                .iter()
-                .find(|(_, sc)| **sc == *shortcut)
-                .map(|(id, _)| *id);
-            if let Some(action) = hit {
-                let _ = app_handle.emit(
-                    SHORTCUT_TRIGGERED,
-                    serde_json::json!({ "action": action }),
-                );
-            }
-        },
-    )?;
-    Ok(())
-}
-
 /// Re-register every action in `map`. Unregister anything that was previously
-/// registered but is now empty / changed.
+/// registered but is now empty / changed. Each registration attaches a handler
+/// that emits `shortcut_triggered { action }`.
 pub fn apply_map(app: &AppHandle, registry: &Registry, map: &ShortcutMap) -> AppResult<()> {
     let gs = app.global_shortcut();
 
-    // First, unregister everything we currently have on file. This avoids
-    // dangling registrations for action_ids whose binding was cleared.
+    // First, unregister everything we currently have on file.
     {
         let prev = registry.read().clone();
         for (_id, sc) in prev.iter() {
@@ -86,7 +61,7 @@ pub fn apply_map(app: &AppHandle, registry: &Registry, map: &ShortcutMap) -> App
         registry.write().clear();
     }
 
-    // Then register the new bindings.
+    // Then register the new bindings, one handler per accelerator.
     for (id, accel) in map.iter() {
         if accel.is_empty() {
             continue;
@@ -98,8 +73,19 @@ pub fn apply_map(app: &AppHandle, registry: &Registry, map: &ShortcutMap) -> App
                 continue;
             }
         };
-        if let Err(err) = gs.register(sc.clone()) {
-            tracing::warn!(action = id, accel, %err, "shortcut register failed");
+
+        let action_id = id;
+        let handler_app = app.clone();
+        if let Err(err) = gs.on_shortcut(sc.clone(), move |_app, _sc, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            let _ = handler_app.emit(
+                SHORTCUT_TRIGGERED,
+                serde_json::json!({ "action": action_id }),
+            );
+        }) {
+            tracing::warn!(action = id, accel, %err, "shortcut on_shortcut failed");
             continue;
         }
         registry.write().insert(id, sc);

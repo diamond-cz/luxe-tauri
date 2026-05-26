@@ -11,7 +11,11 @@ export interface MainWindow {
 export interface Settings {
   close_behavior: 0 | 1 | 2;
   language:       number;
-  theme:          string;
+  theme:          "dark" | "light" | "system" | string;
+  scale:          number;       // percent, 50..=200
+  cache_path:     string;
+  auto_update:    boolean;
+  update_notify:  boolean;
 }
 
 export interface Shortcuts {

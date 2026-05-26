@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("Tauri error: {0}")]
     Tauri(#[from] tauri::Error),
 
+    #[error("Global shortcut error: {0}")]
+    GlobalShortcut(#[from] tauri_plugin_global_shortcut::Error),
+
     #[error("Path resolution error: {0}")]
     Path(String),
 

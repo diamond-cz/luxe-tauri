@@ -3,31 +3,55 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global resets / dark-first defaults */
-:root {
+/* ────────── Theme palettes ────────── */
+/* Driven by <html class="dark" | "light"> (toggled from App.tsx). Fluent v9
+ * tokens cover all in-component surfaces; the variables below only style the
+ * root canvas (body / #root) and the scrollbar — they must therefore live
+ * outside FluentProvider's subtree. */
+html.dark {
   color-scheme: dark;
+  --luxe-bg:       #1b1b1f;
+  --luxe-fg:       #e6e6eb;
+  --luxe-scroll:   rgba(140, 100, 200, 0.5);
+  --luxe-scroll-h: rgba(170, 130, 230, 0.7);
+}
+html.light {
+  color-scheme: light;
+  --luxe-bg:       #f5f6fa;
+  --luxe-fg:       #1f1f23;
+  --luxe-scroll:   rgba(120,  90, 200, 0.3);
+  --luxe-scroll-h: rgba(120,  90, 200, 0.55);
+}
+/* Default to dark until App.tsx attaches the class. */
+html:not(.light):not(.dark) {
+  color-scheme: dark;
+  --luxe-bg:       #1b1b1f;
+  --luxe-fg:       #e6e6eb;
+  --luxe-scroll:   rgba(140, 100, 200, 0.5);
+  --luxe-scroll-h: rgba(170, 130, 230, 0.7);
 }
 
 html, body, #root {
-  height: 100%;
-  margin: 0;
-  background: #1b1b1f;
-  color: #e6e6eb;
+  height:   100%;
+  margin:   0;
+  background: var(--luxe-bg);
+  color:      var(--luxe-fg);
   font-family:
     "Segoe UI Variable", "Segoe UI", system-ui, ui-sans-serif, sans-serif;
   overflow: hidden;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
 
 /* Replace the QSS scrollbar hack from the Python version (CLAUDE.md note). */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(140, 100, 200, 0.5) transparent;
+  scrollbar-color: var(--luxe-scroll) transparent;
 }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
-  background: rgba(140, 100, 200, 0.5);
+  background: var(--luxe-scroll);
   border-radius: 5px;
 }
-*::-webkit-scrollbar-thumb:hover { background: rgba(170, 130, 230, 0.7); }
+*::-webkit-scrollbar-thumb:hover { background: var(--luxe-scroll-h); }
 *::-webkit-scrollbar-corner { background: transparent; }

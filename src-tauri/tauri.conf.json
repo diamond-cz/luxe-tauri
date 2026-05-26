@@ -26,10 +26,6 @@
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false
     }
   },
   "bundle": {
@@ -37,6 +33,9 @@
     "targets": "all",
     "icon": [
       "icons/icon.png"
+    ],
+    "resources": [
+      "resources/translations/*.json"
     ]
   }
 }
