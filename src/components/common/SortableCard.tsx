@@ -10,18 +10,22 @@ interface Props {
   /** When true, attaches the drag listeners to the whole tile rather than
    *  only the handle icon. Useful for nested grids where space is tight. */
   fullCardHandle?: boolean;
+  /** Header height in px. Used to vertically center the drag handle on the
+   *  card's header. Defaults to 48 (CollapsibleCard h-12); pass 44 for
+   *  AeParamCard h-11. */
+  headerHeight?: number;
 }
 
 /**
  * Generic dnd-kit Sortable wrapper. Provides a tiny drag handle in the
- * top-right corner; the rest of the card is normal click area.
+ * top-left corner; the rest of the card is normal click area.
  *
  * Visual nice-to-haves:
  *   - `isDragging` adds opacity + brand outline + raised shadow
  *   - keyboard support comes free with `useSortable`
  */
 export function SortableCard({
-  id, children, className, fullCardHandle,
+  id, children, className, fullCardHandle, headerHeight = 48,
 }: Props) {
   const {
     attributes, listeners, setNodeRef,
@@ -44,6 +48,9 @@ export function SortableCard({
   const wholeCardProps = fullCardHandle ? { ...attributes, ...listeners } : {};
   const handleProps    = fullCardHandle ? {} : { ...attributes, ...listeners };
 
+  /* Vertically centre the 24px handle inside the card header. */
+  const handleTop = Math.max(0, (headerHeight - 24) / 2);
+
   return (
     <div ref={setNodeRef} style={style} className={className} {...wholeCardProps}>
       {!fullCardHandle && (
@@ -51,8 +58,12 @@ export function SortableCard({
           type="button"
           {...handleProps}
           title="拖拽换位"
-          className="absolute left-1 top-1 z-10 flex h-6 w-6 cursor-grab items-center justify-center rounded transition-opacity opacity-30 hover:opacity-100"
-          style={{ color: "var(--colorNeutralForeground3)", touchAction: "none" }}
+          className="absolute left-1 z-10 flex h-6 w-6 cursor-grab items-center justify-center rounded transition-opacity opacity-30 hover:opacity-100"
+          style={{
+            top:        handleTop,
+            color:      "var(--colorNeutralForeground3)",
+            touchAction: "none",
+          }}
           onClick={(e) => { e.stopPropagation(); }}
         >
           <ReOrderDotsVertical24Regular className="h-4 w-4" />

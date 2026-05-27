@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Input, Select } from "@fluentui/react-components";
-import { Search24Regular } from "@fluentui/react-icons";
+import { Button, Input, Select } from "@fluentui/react-components";
+import {
+  Search24Regular,
+  ChevronDown24Regular,
+  ChevronUp24Regular,
+  Image24Regular,
+} from "@fluentui/react-icons";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { loadImageToml, type ImageEntry } from "@/ipc/imageScan";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -14,6 +20,8 @@ interface Props {
   current:   number;
   tomlData:  Record<string, string>;
   onPickImage: (idx: number) => void;
+  collapsed: boolean;
+  onToggleCollapsed: (next: boolean) => void;
 }
 
 const TABS: { id: TabId; label: string }[] = [
@@ -26,11 +34,17 @@ const TABS: { id: TabId; label: string }[] = [
 
 export function TablePane({
   schema, entries, current, tomlData, onPickImage,
+  collapsed, onToggleCollapsed,
 }: Props) {
   const [tab,    setTab]    = useState<TabId>("image");
   const [search, setSearch] = useState("");
 
-  const showSearch = tab !== "lce";
+  const currentEntry = entries[current];
+  const thumbUrl = useMemo(() => {
+    if (!currentEntry) return null;
+    try { return convertFileSrc(currentEntry.jpg_path); }
+    catch { return null; }
+  }, [currentEntry?.jpg_path]);
 
   return (
     <div className="flex h-full w-full flex-col"
@@ -40,59 +54,98 @@ export function TablePane({
            borderRadius: 12,
            overflow:    "hidden",
          }}>
-      <div className="flex shrink-0 items-center gap-2 px-2 py-1.5"
-           style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-        {TABS.map((t) => {
-          const active = t.id === tab;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className="rounded-md px-3 py-1.5 text-xs transition-colors"
-              style={{
-                background: active ? "var(--colorBrandBackground)" : "transparent",
-                color:      active
-                  ? "var(--colorNeutralForegroundOnBrand)"
-                  : "var(--colorNeutralForeground2)",
-                fontWeight: active ? 600 : 500,
-              }}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-        <div className="flex-1" />
-        {showSearch && (
-          <Input
-            value={search}
-            onChange={(_, d) => setSearch(d.value)}
-            placeholder="过滤…"
-            contentBefore={<Search24Regular />}
-            style={{ minWidth: 180 }}
-          />
-        )}
-        {tab === "lce" && entries.length > 0 && (
-          <Select
-            value={String(current)}
-            onChange={(_, d) => onPickImage(parseInt(d.value, 10))}
-            style={{ minWidth: 260 }}
-          >
-            {entries.map((e, i) => (
-              <option key={e.jpg_path} value={String(i)}>{e.name}</option>
-            ))}
-          </Select>
-        )}
+      {/* Header bar — always visible: thumbnail + name + search + collapse toggle */}
+      <div className="flex shrink-0 items-center gap-3 px-3 py-2"
+           style={!collapsed
+             ? { borderBottom: "1px solid var(--colorNeutralStroke2)" }
+             : undefined}>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md"
+             style={{
+               background: "var(--colorNeutralBackground3)",
+               color:      "var(--colorNeutralForeground2)",
+             }}>
+          {thumbUrl ? (
+            <img src={thumbUrl}
+                 alt={currentEntry?.name ?? ""}
+                 className="h-full w-full object-cover"
+                 draggable={false} />
+          ) : (
+            <Image24Regular />
+          )}
+        </div>
+        <div className="min-w-0 flex-1 truncate text-sm font-semibold"
+             style={{ color: "var(--colorNeutralForeground1)" }}
+             title={currentEntry?.name ?? ""}>
+          {currentEntry?.name ?? "未选择图片"}
+        </div>
+        <Input
+          value={search}
+          onChange={(_, d) => {
+            setSearch(d.value);
+            if (collapsed && d.value) onToggleCollapsed(false);
+          }}
+          placeholder="过滤…"
+          contentBefore={<Search24Regular />}
+          style={{ minWidth: 180 }}
+        />
+        <Button
+          appearance="subtle"
+          icon={collapsed ? <ChevronDown24Regular /> : <ChevronUp24Regular />}
+          onClick={() => onToggleCollapsed(!collapsed)}
+          aria-label={collapsed ? "展开" : "收起"}
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === "image"  && <ImageTab    schema={schema} entries={entries} current={current}
-                                         search={search} onPick={onPickImage} />}
-        {tab === "normal" && <Placeholder label="Normal 表格 · 待 normal_table.toml 映射" />}
-        {tab === "face"   && <Placeholder label="Face 表格 · 待 face_table.toml 映射" />}
-        {tab === "lce"    && <LceTab tomlData={tomlData} />}
-        {tab === "all"    && <AllTab tomlData={tomlData} search={search} />}
-      </div>
+      {!collapsed && (
+        <>
+          {/* Tabs row */}
+          <div className="flex shrink-0 items-center gap-2 px-2 py-1.5"
+               style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+            {TABS.map((t) => {
+              const active = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className="rounded-md px-3 py-1.5 text-xs transition-colors"
+                  style={{
+                    background: active ? "var(--colorBrandBackground)" : "transparent",
+                    color:      active
+                      ? "var(--colorNeutralForegroundOnBrand)"
+                      : "var(--colorNeutralForeground2)",
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+            <div className="flex-1" />
+            {tab === "lce" && entries.length > 0 && (
+              <Select
+                value={String(current)}
+                onChange={(_, d) => onPickImage(parseInt(d.value, 10))}
+                style={{ minWidth: 260 }}
+              >
+                {entries.map((e, i) => (
+                  <option key={e.jpg_path} value={String(i)}>{e.name}</option>
+                ))}
+              </Select>
+            )}
+          </div>
+
+          {/* Content */}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {tab === "image"  && <ImageTab    schema={schema} entries={entries} current={current}
+                                             search={search} onPick={onPickImage} />}
+            {tab === "normal" && <Placeholder label="Normal 表格 · 待 normal_table.toml 映射" />}
+            {tab === "face"   && <Placeholder label="Face 表格 · 待 face_table.toml 映射" />}
+            {tab === "lce"    && <LceTab tomlData={tomlData} />}
+            {tab === "all"    && <AllTab tomlData={tomlData} search={search} />}
+          </div>
+        </>
+      )}
     </div>
   );
 }

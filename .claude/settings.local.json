@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(kill bjxo7gmco *)"
+      "Bash(kill bjxo7gmco *)",
+      "Bash(cargo check *)"
     ]
   }
 }

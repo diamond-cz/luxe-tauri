@@ -109,6 +109,7 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub normal_col_ratios:          Vec<f32>,
     #[serde(default)] pub face_col_ratios:            Vec<f32>,
     #[serde(default)] pub normal_sub_order:           NormalSubOrder,
+    #[serde(default)] pub table_collapsed:            bool,
 }
 fn default_true() -> bool { true }
 fn default_split_ratio() -> f32 { 0.7 }
@@ -136,6 +137,7 @@ impl Default for Isp6sAeVisual {
             normal_col_ratios: vec![],
             face_col_ratios: vec![],
             normal_sub_order: NormalSubOrder::default(),
+            table_collapsed: false,
         }
     }
 }

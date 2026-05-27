@@ -116,14 +116,13 @@ export function MtkView() {
         </div>
       ) : (
         <>
-          <div className="shrink-0 px-4 pt-3">
+          <div className="shrink-0 px-5 pt-3">
             <MtkPickerBar
               cppFileHint={tab.fileHint}
               cppPath={imports.filePath}
               onCppPathChange={onCppPathChange}
               imageEnabled={isAeBasic}
               imageDir={imageDir.dir}
-              imageMessage={imageDir.message}
               onImageDirChange={onImageDirChange}
             />
           </div>

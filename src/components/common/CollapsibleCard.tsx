@@ -5,6 +5,9 @@ interface Props {
   title:     string;
   /** Optional badge area in the header right side. */
   badges?:   ReactNode;
+  /** Optional extra actions placed between badges and chevron. Click events
+   *  are stopped so they don't toggle the card. */
+  headerExtra?: ReactNode;
   /** Whether the card is collapsed initially. */
   defaultCollapsed?: boolean;
   /** Controlled-mode collapsed state. */
@@ -22,7 +25,7 @@ interface Props {
  *   trick so we don't have to measure content height
  */
 export function CollapsibleCard({
-  title, badges, defaultCollapsed = false,
+  title, badges, headerExtra, defaultCollapsed = false,
   collapsed, onToggle, children, className,
 }: Props) {
   const [internal, setInternal] = useState(defaultCollapsed);
@@ -45,7 +48,7 @@ export function CollapsibleCard({
       <button
         type="button"
         onClick={flip}
-        className="flex h-12 w-full items-center justify-between gap-3 rounded-t-xl px-4 transition-colors"
+        className="flex h-12 w-full items-center justify-between gap-3 rounded-t-xl pl-9 pr-4 transition-colors"
         style={{ color: "var(--colorNeutralForeground1)" }}
         onMouseEnter={(e) =>
           (e.currentTarget as HTMLButtonElement).style.background =
@@ -64,6 +67,12 @@ export function CollapsibleCard({
         <span className="flex items-center gap-3">
           {badges && (
             <span className="flex items-center gap-2">{badges}</span>
+          )}
+          {headerExtra && (
+            <span className="flex items-center gap-2"
+                  onClick={(e) => e.stopPropagation()}>
+              {headerExtra}
+            </span>
           )}
           <ChevronDown24Regular
             className="transition-transform"

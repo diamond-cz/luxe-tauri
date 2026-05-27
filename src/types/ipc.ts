@@ -60,6 +60,7 @@ export interface Isp6sAeVisual {
   normal_col_ratios:          number[];
   face_col_ratios:            number[];
   normal_sub_order:           NormalSubOrder;
+  table_collapsed:            boolean;
 }
 
 export interface StateRoot {

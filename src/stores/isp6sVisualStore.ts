@@ -20,6 +20,7 @@ const DEFAULT: Isp6sAeVisual = {
   normal_col_ratios:          [],
   face_col_ratios:            [],
   normal_sub_order:           { MainT: [], HS: [], NS: [] },
+  table_collapsed:            false,
 };
 
 interface VisualState {

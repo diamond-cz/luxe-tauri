@@ -7,10 +7,11 @@ import {
 } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Panel, PanelGroup } from "react-resizable-panels";
+import { Panel, PanelGroup, type ImperativePanelGroupHandle } from "react-resizable-panels";
 
 import { ensureDirectory } from "@/ipc/shell";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 
 interface Props {
   /** "AE.cpp" / "Tone.cpp" / ... — pure hint text */
@@ -21,7 +22,6 @@ interface Props {
   /** Set to false to grey-out the image folder slot (e.g. for ToneMap tab). */
   imageEnabled:       boolean;
   imageDir:           string | null;
-  imageMessage:       string | null;
   onImageDirChange:   (dir: string) => void;
 }
 
@@ -46,6 +46,69 @@ export function MtkPickerBar(props: Props) {
   const [hover, setHover] = useState<Slot>(null);
   /** "ok" = accepted ext / "bad" = wrong ext / null = no overlay */
   const [hoverValid, setHoverValid] = useState<"ok" | "bad" | null>(null);
+
+  /* Refs for the imperative PanelGroup and the two primary text nodes — used
+   * by the auto-balance effect below to rebalance the splitter so both paths
+   * fit on-screen whenever possible. */
+  const groupRef        = useRef<ImperativePanelGroupHandle | null>(null);
+  const imagePrimaryRef = useRef<HTMLDivElement | null>(null);
+  const cppPrimaryRef   = useRef<HTMLDivElement | null>(null);
+
+  /* Auto-balance the splitter when both slots have content. Compares each
+   * primary's natural width (scrollWidth) against the slot's fixed overhead
+   * (icon + paddings + gaps + action button); if the total required width
+   * fits inside the available PanelGroup space, allocates each slot exactly
+   * enough plus an equal share of the slack so both fully fit. Otherwise
+   * (combined required > available), falls back to a proportional split
+   * clamped to [25%, 75%] and the Tooltip wrapper still provides a hover
+   * preview. */
+  useEffect(() => {
+    if (!props.cppPath || !props.imageDir || !props.imageEnabled) return;
+
+    const rebalance = () => {
+      const group   = groupRef.current;
+      const imgEl   = imagePrimaryRef.current;
+      const cppEl   = cppPrimaryRef.current;
+      const imgSlot = imageRef.current;
+      const cppSlot = cppRef.current;
+      if (!group || !imgEl || !cppEl || !imgSlot || !cppSlot) return;
+
+      const imgSlotW = imgSlot.getBoundingClientRect().width;
+      const cppSlotW = cppSlot.getBoundingClientRect().width;
+      const total    = imgSlotW + cppSlotW;
+      if (total <= 0) return;
+
+      // Per-slot overhead = everything outside the primary text node
+      // (slot border + padding + icon + gaps + action button).
+      const imgOverhead = imgSlotW - imgEl.clientWidth;
+      const cppOverhead = cppSlotW - cppEl.clientWidth;
+
+      // Required widths to display each primary in full.
+      const imgRequired = imgEl.scrollWidth + imgOverhead;
+      const cppRequired = cppEl.scrollWidth + cppOverhead;
+
+      let imgPct: number;
+      if (imgRequired + cppRequired <= total) {
+        /* Both fit — give each what it needs and split leftover equally so
+         * the two slots stay visually balanced. */
+        const leftover = total - (imgRequired + cppRequired);
+        imgPct = ((imgRequired + leftover / 2) / total) * 100;
+      } else {
+        /* Can't fit both — proportional split, clamped. */
+        const ratio = imgRequired / (imgRequired + cppRequired);
+        imgPct = Math.max(25, Math.min(75, ratio * 100));
+      }
+
+      group.setLayout([imgPct, 100 - imgPct]);
+    };
+
+    const raf = requestAnimationFrame(rebalance);
+    window.addEventListener("resize", rebalance);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", rebalance);
+    };
+  }, [props.cppPath, props.imageDir, props.imageEnabled]);
 
   /* Hook into Tauri's native drag/drop event — only this surface gives us
    * absolute file paths (HTML5 DataTransfer in webview hides paths for security). */
@@ -123,6 +186,7 @@ export function MtkPickerBar(props: Props) {
 
   return (
     <PanelGroup
+      ref={groupRef}
       direction="horizontal"
       autoSaveId="mtk-picker-bar"
       className="w-full"
@@ -132,6 +196,7 @@ export function MtkPickerBar(props: Props) {
       <Panel defaultSize={50} minSize={25}>
         <Slot
           innerRef={imageRef}
+          primaryRef={imagePrimaryRef}
           active={hover === "image" && props.imageEnabled}
           valid={hover === "image" ? hoverValid : null}
           disabled={!props.imageEnabled}
@@ -144,7 +209,7 @@ export function MtkPickerBar(props: Props) {
           }
           secondary={
             props.imageEnabled
-              ? (props.imageMessage ?? "点 '浏览' 或拖入文件夹 / 任一图片")
+              ? (props.imageDir ? null : "点 '浏览' 或拖入文件夹 / 任一图片")
               : "其他 Tab 不需要图片"
           }
           action={
@@ -166,6 +231,7 @@ export function MtkPickerBar(props: Props) {
       <Panel defaultSize={50} minSize={25}>
         <Slot
           innerRef={cppRef}
+          primaryRef={cppPrimaryRef}
           active={hover === "cpp"}
           valid={hover === "cpp" ? hoverValid : null}
           icon={<DocumentText24Regular />}
@@ -173,7 +239,7 @@ export function MtkPickerBar(props: Props) {
           primary={props.cppPath ?? `期望 ${props.cppFileHint}`}
           secondary={
             props.cppPath
-              ? `当前：${baseName(props.cppPath)}`
+              ? null
               : "点 '浏览' 或拖入 .cpp / .c / .h 文件"
           }
           action={
@@ -195,13 +261,14 @@ interface SlotProps {
   icon:      React.ReactNode;
   title:     string;
   primary:   string;
-  secondary: string;
+  secondary: string | null;
+  primaryRef?: React.RefObject<HTMLDivElement>;
   action:    React.ReactNode;
 }
 
 function Slot({
   innerRef, active, valid, disabled,
-  icon, title, primary, secondary, action,
+  icon, title, primary, secondary, primaryRef, action,
 }: SlotProps) {
   const borderColor =
     !active        ? "var(--colorNeutralStroke2)" :
@@ -237,15 +304,22 @@ function Slot({
              style={{ color: "var(--colorNeutralForeground3)" }}>
           {title}
         </div>
-        <div className="mt-0.5 truncate text-sm font-semibold"
-             style={{ color: "var(--colorNeutralForeground1)" }}
-             title={primary}>
-          {primary}
-        </div>
-        <div className="mt-0.5 truncate text-[11px]"
-             style={{ color: "var(--colorNeutralForeground3)" }}>
-          {secondary}
-        </div>
+        <HoverTooltip content={primary}
+                      truncatableRef={primaryRef}
+                      positioning="below-start"
+                      wrap maxWidth={600}>
+          <div ref={primaryRef}
+               className="mt-0.5 truncate text-sm font-semibold"
+               style={{ color: "var(--colorNeutralForeground1)" }}>
+            {primary}
+          </div>
+        </HoverTooltip>
+        {secondary !== null && (
+          <div className="mt-0.5 truncate text-[11px]"
+               style={{ color: "var(--colorNeutralForeground3)" }}>
+            {secondary}
+          </div>
+        )}
       </div>
       {action}
     </div>
@@ -260,11 +334,6 @@ function matchExt(path: string, exts: string[]): boolean {
   if (dot < 0) return false;
   const ext = lower.slice(dot + 1);
   return exts.includes(ext);
-}
-
-function baseName(path: string): string {
-  const ix = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return ix >= 0 ? path.slice(ix + 1) : path;
 }
 
 function classify(slot: NonNullable<Slot>, paths: string[], imageEnabled: boolean): "ok" | "bad" {

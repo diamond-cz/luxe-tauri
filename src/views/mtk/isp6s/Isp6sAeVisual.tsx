@@ -5,6 +5,7 @@ import {
   Subtract24Regular,
   Apps24Regular,
   TextBulletList24Regular,
+  Board24Regular,
 } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
@@ -23,6 +24,7 @@ import { CollapsibleCard } from "@/components/common/CollapsibleCard";
 import { BadgeStrip } from "@/components/common/BadgeStrip";
 import { SortableCard } from "@/components/common/SortableCard";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { loadImageToml } from "@/ipc/imageScan";
 import { saveStateSection } from "@/ipc/stateIo";
@@ -186,11 +188,21 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
   /* ── Card area: visualization cards (no inline image switcher — TablePane
    *    handles picking now) ── */
   const renderCardArea = () => (
-    <div className="flex h-full w-full flex-col gap-4 overflow-auto p-4">
-      {/* Global controls */}
-      <div className="flex shrink-0 items-center justify-between">
-        <div className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
-          可视化卡片
+    <div className="flex h-full w-full flex-col"
+         style={{
+           background:  "var(--colorNeutralBackground2)",
+           border:      "1px solid var(--colorNeutralStroke2)",
+           borderRadius: 12,
+           overflow:    "hidden",
+         }}>
+      {/* Header bar — kept outside the scroll area so the divider stays put. */}
+      <div className="flex shrink-0 items-center justify-between px-4 py-2"
+           style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+        <div className="flex items-center gap-2 text-xs"
+             style={{ color: "var(--colorNeutralForeground2)" }}>
+          <Board24Regular className="h-4 w-4"
+                          style={{ color: "var(--colorBrandForeground1)" }} />
+          <span>可视化卡片</span>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -203,26 +215,23 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
         </div>
       </div>
 
-      {/* Top-level sortable */}
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={dragEndHandler(topOrder, (next) => patchVis({ top_card_order: next }))}
-      >
-        <SortableContext items={topOrder} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col gap-4">
-            {topOrder.map((name) => (
-              <SortableCard key={name} id={name}>
-                {renderTopCard(name)}
-              </SortableCard>
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
-
-      <div className="text-[11px]" style={{ color: "var(--colorNeutralForeground4)" }}>
-        点子卡片自动跳到右侧"源码映射"模式 · 状态全部持久化到 state.toml [isp6s_ae_visual]
-        {currentEntry && <> · 当前图：{currentEntry.name}</>}
+      {/* Scrollable body */}
+      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={dragEndHandler(topOrder, (next) => patchVis({ top_card_order: next }))}
+        >
+          <SortableContext items={topOrder} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-4">
+              {topOrder.map((name) => (
+                <SortableCard key={name} id={name}>
+                  {renderTopCard(name)}
+                </SortableCard>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   );
@@ -238,19 +247,20 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
             <BadgeStrip
               items={[
                 { label: "CWR",           value: normalBadges?.cwr ?? "—", hint: schema.card?.Normal?.CWR },
-                { label: "tar_abl_mt_hs", value: normalBadges?.tar_abl_mt_hs ?? "—" },
+                { label: "_",             value: normalBadges?.tar_abl_mt_hs ?? "—", hint: "tar_abl_mt_hs" },
                 { label: "Cal",           value: normalBadges?.cal ?? "—" },
               ]}
             />
           }
+          headerExtra={
+            <HoverTooltip content={visual.normal_wf_row_mode ? "切换网格" : "切换单行"}
+                          positioning="below-center" inline>
+              <Button size="small" appearance="subtle"
+                      icon={visual.normal_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
+                      onClick={toggleNormalLayout} />
+            </HoverTooltip>
+          }
         >
-          <div className="flex items-center justify-end gap-2 pb-2">
-            <Button size="small" appearance="subtle"
-                    icon={visual.normal_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
-                    onClick={toggleNormalLayout}>
-              {visual.normal_wf_row_mode ? "切换网格" : "切换单行"}
-            </Button>
-          </div>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -264,7 +274,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
                 ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"}>
                 {normalOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub}>
+                  <SortableCard key={sub} id={sub} headerHeight={44}>
                     <NormalSub name={sub} badges={normalBadges}
                                onClick={() => onCardClick(sub)} />
                   </SortableCard>
@@ -289,14 +299,15 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
               ]}
             />
           }
+          headerExtra={
+            <HoverTooltip content={visual.face_wf_row_mode ? "切换网格" : "切换单行"}
+                          positioning="below-center" inline>
+              <Button size="small" appearance="subtle"
+                      icon={visual.face_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
+                      onClick={toggleFaceLayout} />
+            </HoverTooltip>
+          }
         >
-          <div className="flex items-center justify-end gap-2 pb-2">
-            <Button size="small" appearance="subtle"
-                    icon={visual.face_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
-                    onClick={toggleFaceLayout}>
-              {visual.face_wf_row_mode ? "切换网格" : "切换单行"}
-            </Button>
-          </div>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -310,7 +321,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
                 ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
                 {faceOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub}>
+                  <SortableCard key={sub} id={sub} headerHeight={44}>
                     <FaceTouchSub name={sub} badges={faceBadges}
                                   onClick={() => onCardClick(sub)} />
                   </SortableCard>
@@ -333,7 +344,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
         minSize={28}
         onResize={(size) => patchVis({ split_ratio: size / 100 })}
       >
-        <div className="h-full w-full overflow-hidden">{renderCardArea()}</div>
+        <div className="h-full w-full overflow-hidden p-2">{renderCardArea()}</div>
       </Panel>
       <ResizeHandle direction="horizontal" />
       <Panel minSize={28}>
@@ -361,6 +372,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
         current={imageDir.current}
         tomlData={imageDir.tomlData}
         onPickImage={onPickImage}
+        collapsed={visual.table_collapsed}
+        onToggleCollapsed={(next) => patchVis({ table_collapsed: next })}
       />
     </div>
   );
@@ -383,6 +396,16 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
   /* Parameter parsed but no image folder → cards + ImagePane only. */
   if (!hasEntries && parsed) {
     return <div className="h-full w-full">{renderBottomRow()}</div>;
+  }
+
+  /* Both + table collapsed: stack with TablePane at natural height, bottom row fills the rest. */
+  if (visual.table_collapsed) {
+    return (
+      <div className="flex h-full w-full flex-col">
+        <div className="shrink-0">{renderTablePanel()}</div>
+        <div className="min-h-0 flex-1">{renderBottomRow()}</div>
+      </div>
+    );
   }
 
   /* Both: vertical stack — TablePane on top, cards+ImagePane LR on bottom. */
