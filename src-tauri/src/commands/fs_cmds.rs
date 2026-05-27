@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, AppResult};
@@ -15,7 +17,7 @@ pub fn get_config_dir(app: AppHandle) -> AppResult<String> {
 /// Reveal `path` in the system file explorer.
 #[tauri::command]
 pub fn open_path(path: String) -> AppResult<()> {
-    let p = std::path::Path::new(&path);
+    let p = Path::new(&path);
     if !p.exists() {
         return Err(AppError::NotFound(format!("path: {path}")));
     }
@@ -34,4 +36,24 @@ pub fn open_path(path: String) -> AppResult<()> {
         std::process::Command::new("xdg-open").arg(&path).spawn()?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn is_dir(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
+/// If `path` is a file → return its parent dir; if it's already a dir → return as-is.
+#[tauri::command]
+pub fn ensure_directory(path: String) -> AppResult<String> {
+    let p = Path::new(&path);
+    if p.is_dir() {
+        return Ok(path);
+    }
+    if let Some(parent) = p.parent() {
+        if parent.is_dir() {
+            return Ok(parent.to_string_lossy().into_owned());
+        }
+    }
+    Err(AppError::NotFound(format!("not a directory: {path}")))
 }

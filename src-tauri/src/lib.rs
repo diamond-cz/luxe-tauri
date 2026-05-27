@@ -108,6 +108,8 @@ pub fn run() {
             commands::close_cmds::quit_app,
             commands::fs_cmds::get_config_dir,
             commands::fs_cmds::open_path,
+            commands::fs_cmds::is_dir,
+            commands::fs_cmds::ensure_directory,
             commands::cpp_cmds::parse_cpp_file,
             commands::cpp_cmds::cpp_get_fields_at_path,
             commands::cpp_cmds::cpp_get_values_at_path,

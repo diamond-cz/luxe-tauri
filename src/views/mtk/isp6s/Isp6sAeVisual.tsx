@@ -1,17 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Select } from "@fluentui/react-components";
+import { Button } from "@fluentui/react-components";
 import {
-  Folder24Regular,
-  Image24Regular,
   Add24Regular,
   Subtract24Regular,
   Apps24Regular,
   TextBulletList24Regular,
-  PanelLeft24Regular,
-  PanelRight24Regular,
 } from "@fluentui/react-icons";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, PanelGroup } from "react-resizable-panels";
 
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
@@ -27,8 +22,9 @@ import {
 import { CollapsibleCard } from "@/components/common/CollapsibleCard";
 import { BadgeStrip } from "@/components/common/BadgeStrip";
 import { SortableCard } from "@/components/common/SortableCard";
+import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
-import { scanImageDir, loadImageToml } from "@/ipc/imageScan";
+import { loadImageToml } from "@/ipc/imageScan";
 import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
@@ -42,9 +38,12 @@ import { ImagePane, type PreviewMode } from "./ImagePane/ImagePane";
 import { TablePane } from "./TablePane/TablePane";
 
 interface Props {
-  isp:      IspId;
-  tabIdx:   number;
-  filePath: string;
+  isp:       IspId;
+  tabIdx:    number;
+  /** cpp file path — must be present when `parsed` is true so source jumps work. */
+  filePath:  string | null;
+  /** true once the parameter file has been successfully parsed. */
+  parsed:    boolean;
 }
 
 const NORMAL_SUB_ACCENTS: Record<string, string> = {
@@ -66,7 +65,7 @@ function sanitiseOrder(order: string[], canonical: readonly string[]): string[] 
   return cleaned;
 }
 
-export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
+export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
@@ -96,35 +95,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
     return () => { cancelled = true; };
   }, []);
 
-  /* Image folder helpers. */
-  const onPickDir = async () => {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked !== "string") return;
-    setImageDir(isp, tabIdx, { dir: picked, status: "scanning", message: null });
-    try {
-      const entries = await scanImageDir(picked);
-      if (entries.length === 0) {
-        setImageDir(isp, tabIdx, {
-          entries: [], current: 0, tomlData: {},
-          status: "error",
-          message: "目录下没有找到带同名 .toml 的图片",
-        });
-        return;
-      }
-      setImageDir(isp, tabIdx, { entries, current: 0, status: "loading", message: null });
-      const tomlData = await loadImageToml(entries[0].toml_path);
-      setImageDir(isp, tabIdx, {
-        tomlData, status: "done",
-        message: `已加载 ${entries.length} 张图片 · 当前 ${entries[0].name}`,
-      });
-    } catch (e) {
-      setImageDir(isp, tabIdx, {
-        status: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
-    }
-  };
-
+  /* Image switching is driven by TablePane row clicks; folder selection lives
+   *  in MtkPickerBar above. */
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
     setImageDir(isp, tabIdx, { current: idx, status: "loading", message: null });
@@ -178,20 +150,15 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
     patchVis({ normal_wf_row_mode: !visual.normal_wf_row_mode });
   const toggleFaceLayout = () =>
     patchVis({ face_wf_row_mode:   !visual.face_wf_row_mode });
-  const toggleSplitMode = () =>
-    patchVis({ split_mode: !visual.split_mode });
 
   /** When user clicks a sub-card, snap the right pane to param_map mode and
    *  remember the card so the source view can scroll there. */
   const onCardClick = (card: string) => {
     setActiveCard(card);
-    if (visual.split_mode) {
-      patchVis({ preview_mode: "param_map" });
-    } else {
-      // Auto-enter split mode so the user actually sees the source.
-      patchVis({ split_mode: true, preview_mode: "param_map" });
-    }
+    patchVis({ preview_mode: "param_map" });
   };
+
+  const setPreviewMode = (m: PreviewMode) => patchVis({ preview_mode: m });
 
   if (err) {
     return (
@@ -214,59 +181,18 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
   }
 
   const currentEntry = imageDir.entries[imageDir.current];
+  const hasEntries   = imageDir.entries.length > 0;
 
-  /* ── Card area (left side OR full width depending on split_mode) ── */
+  /* ── Card area: visualization cards (no inline image switcher — TablePane
+   *    handles picking now) ── */
   const renderCardArea = () => (
-    <div className="flex flex-col gap-4 p-4">
-      {/* Image folder picker */}
-      <div className="flex items-center gap-3 rounded-lg border p-3"
-           style={{
-             background:  "var(--colorNeutralBackground2)",
-             borderColor: "var(--colorNeutralStroke2)",
-           }}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-md"
-             style={{ background: "var(--colorNeutralBackground3)", color: "var(--colorNeutralForeground2)" }}>
-          <Image24Regular />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold"
-               style={{ color: "var(--colorNeutralForeground1)" }}>
-            {imageDir.dir ?? "未选择图片文件夹"}
-          </div>
-          <div className="mt-0.5 truncate text-xs"
-               style={{ color: "var(--colorNeutralForeground3)" }}>
-            {imageDir.message ?? "选择含 .jpg + 同名 .toml 的目录，徽章按当前图片实时刷新"}
-          </div>
-        </div>
-        {imageDir.entries.length > 0 && (
-          <Select
-            value={String(imageDir.current)}
-            onChange={(_, d) => onPickImage(parseInt(d.value, 10))}
-            style={{ minWidth: 220 }}
-          >
-            {imageDir.entries.map((e, i) => (
-              <option key={e.jpg_path} value={String(i)}>{e.name}</option>
-            ))}
-          </Select>
-        )}
-        <Button appearance="secondary" icon={<Folder24Regular />} onClick={onPickDir}>
-          {imageDir.dir ? "更换" : "选择文件夹"}
-        </Button>
-      </div>
-
+    <div className="flex h-full w-full flex-col gap-4 overflow-auto p-4">
       {/* Global controls */}
-      <div className="flex items-center justify-between">
+      <div className="flex shrink-0 items-center justify-between">
         <div className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
           可视化卡片
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="small" appearance="subtle"
-            icon={visual.split_mode ? <PanelRight24Regular /> : <PanelLeft24Regular />}
-            onClick={toggleSplitMode}
-          >
-            {visual.split_mode ? "退出分栅" : "进入分栅"}
-          </Button>
           <Button
             size="small" appearance="subtle"
             icon={bothCollapsed ? <Add24Regular /> : <Subtract24Regular />}
@@ -398,21 +324,24 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
     return null;
   };
 
-  const setPreviewMode = (m: PreviewMode) => patchVis({ preview_mode: m });
-
-  /* ── Right side: ImagePane (top) + TablePane (bottom) ── */
-  const rightSide = (
-    <PanelGroup direction="vertical" autoSaveId="isp6s-right-vertical">
+  /* ── Bottom row: Cards (left) | splitter | ImagePane (right). Only shown
+   *    after parameter parsing completes. ── */
+  const renderBottomRow = () => (
+    <PanelGroup direction="horizontal" autoSaveId="isp6s-main-horizontal">
       <Panel
-        defaultSize={Math.round(visual.image_splitter_ratio * 100) || 55}
-        minSize={20}
-        onResize={(size) => patchVis({ image_splitter_ratio: size / 100 })}
+        defaultSize={Math.round(visual.split_ratio * 100) || 55}
+        minSize={28}
+        onResize={(size) => patchVis({ split_ratio: size / 100 })}
       >
+        <div className="h-full w-full overflow-hidden">{renderCardArea()}</div>
+      </Panel>
+      <ResizeHandle direction="horizontal" />
+      <Panel minSize={28}>
         <div className="h-full w-full p-2">
           <ImagePane
             mode={(visual.preview_mode as PreviewMode) ?? "image"}
             onMode={setPreviewMode}
-            filePath={filePath}
+            filePath={filePath ?? ""}
             schema={schema}
             entry={currentEntry}
             tomlData={imageDir.tomlData}
@@ -420,44 +349,57 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
           />
         </div>
       </Panel>
-      <PanelResizeHandle className="h-2 transition-colors"
-        style={{ background: "transparent" }} />
-      <Panel minSize={20}>
-        <div className="h-full w-full p-2">
-          <TablePane
-            schema={schema}
-            entries={imageDir.entries}
-            current={imageDir.current}
-            tomlData={imageDir.tomlData}
-            onPickImage={onPickImage}
-          />
-        </div>
-      </Panel>
     </PanelGroup>
   );
 
-  /* ── Final layout ── */
-  if (!visual.split_mode) {
-    return renderCardArea();
-  }
-  return (
-    <div className="h-[calc(100vh-300px)] min-h-[600px] w-full">
-      <PanelGroup
-        direction="horizontal"
-        autoSaveId="isp6s-main-horizontal"
-      >
-        <Panel
-          defaultSize={Math.round(visual.split_ratio * 100) || 60}
-          minSize={28}
-          onResize={(size) => patchVis({ split_ratio: size / 100 })}
-        >
-          <div className="h-full w-full overflow-auto">{renderCardArea()}</div>
-        </Panel>
-        <PanelResizeHandle className="w-2 transition-colors"
-          style={{ background: "transparent" }} />
-        <Panel minSize={28}>{rightSide}</Panel>
-      </PanelGroup>
+  /* ── Table panel — wraps TablePane in standard padding. ── */
+  const renderTablePanel = () => (
+    <div className="h-full w-full p-2">
+      <TablePane
+        schema={schema}
+        entries={imageDir.entries}
+        current={imageDir.current}
+        tomlData={imageDir.tomlData}
+        onPickImage={onPickImage}
+      />
     </div>
+  );
+
+  /* ── Final layout ── */
+  if (!hasEntries && !parsed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm"
+           style={{ color: "var(--colorNeutralForeground3)" }}>
+        选择参数文件，或选择图片文件夹
+      </div>
+    );
+  }
+
+  /* Image folder loaded but parameter not yet parsed → table only. */
+  if (hasEntries && !parsed) {
+    return <div className="h-full w-full">{renderTablePanel()}</div>;
+  }
+
+  /* Parameter parsed but no image folder → cards + ImagePane only. */
+  if (!hasEntries && parsed) {
+    return <div className="h-full w-full">{renderBottomRow()}</div>;
+  }
+
+  /* Both: vertical stack — TablePane on top, cards+ImagePane LR on bottom. */
+  return (
+    <PanelGroup direction="vertical" autoSaveId="isp6s-table-body" className="h-full w-full">
+      <Panel
+        defaultSize={Math.round((visual.image_splitter_ratio || 0.4) * 100) || 40}
+        minSize={20}
+        onResize={(size) => patchVis({ image_splitter_ratio: size / 100 })}
+      >
+        {renderTablePanel()}
+      </Panel>
+      <ResizeHandle direction="vertical" />
+      <Panel minSize={25}>
+        {renderBottomRow()}
+      </Panel>
+    </PanelGroup>
   );
 }
 
