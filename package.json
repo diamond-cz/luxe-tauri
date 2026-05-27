@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "dev":          "vite",
+    "build":        "tsc --noEmit && vite build",
+    "preview":      "vite preview",
+    "tauri":        "tauri",
+    "tauri:dev":    "tauri dev",
+    "tauri:build":  "tauri build",
+    "tauri:msi":    "tauri build --bundles msi",
+    "tauri:debug":  "tauri build --debug",
+    "typecheck":    "tsc --noEmit",
+    "rust:test":    "cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
