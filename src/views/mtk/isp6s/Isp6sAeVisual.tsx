@@ -19,7 +19,6 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext, arrayMove,
-  horizontalListSortingStrategy,
   rectSortingStrategy,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
@@ -333,14 +332,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
           >
             <SortableContext
               items={normalOrder}
-              strategy={visual.normal_wf_row_mode ? horizontalListSortingStrategy : rectSortingStrategy}
+              strategy={visual.normal_wf_row_mode ? verticalListSortingStrategy : rectSortingStrategy}
             >
               <div className={visual.normal_wf_row_mode
-                ? "flex gap-3 overflow-x-auto pb-2"
+                ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"}>
                 {normalOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub}
-                                className={visual.normal_wf_row_mode ? "min-w-[220px]" : ""}>
+                  <SortableCard key={sub} id={sub}>
                     <NormalSub name={sub} badges={normalBadges}
                                onClick={() => onCardClick(sub)} />
                   </SortableCard>
@@ -380,14 +378,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath }: Props) {
           >
             <SortableContext
               items={faceOrder}
-              strategy={visual.face_wf_row_mode ? horizontalListSortingStrategy : rectSortingStrategy}
+              strategy={visual.face_wf_row_mode ? verticalListSortingStrategy : rectSortingStrategy}
             >
               <div className={visual.face_wf_row_mode
-                ? "flex gap-3 overflow-x-auto pb-2"
+                ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
                 {faceOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub}
-                                className={visual.face_wf_row_mode ? "min-w-[260px]" : ""}>
+                  <SortableCard key={sub} id={sub}>
                     <FaceTouchSub name={sub} badges={faceBadges}
                                   onClick={() => onCardClick(sub)} />
                   </SortableCard>
