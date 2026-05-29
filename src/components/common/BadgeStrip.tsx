@@ -1,3 +1,5 @@
+import { HoverTooltip } from "@/components/common/HoverTooltip";
+
 interface BadgePair {
   label: string;
   value: string;
@@ -23,24 +25,40 @@ export function BadgeStrip({ items, valueSize = 12 }: Props) {
     <span className="flex items-center gap-1 text-xs"
           style={{ color: "var(--colorNeutralForeground2)" }}>
       {items.map((it, i) => (
-        <span key={`${it.label}-${i}`} className="flex items-center" title={it.hint}>
-          {i > 0 && (
-            <span className="mx-1 opacity-40">|</span>
-          )}
-          <span style={{ color: "var(--colorNeutralForeground3)" }}>
-            {it.label}:
-          </span>
-          <span
-            className="ml-0.5 font-mono font-semibold"
-            style={{
-              fontSize: valueSize,
-              color: "var(--colorBrandForeground1)",
-            }}
-          >
-            {it.value}
-          </span>
-        </span>
+        <BadgeItem key={`${it.label}-${i}`} item={it} index={i} valueSize={valueSize} />
       ))}
     </span>
+  );
+}
+
+function BadgeItem({
+  item, index, valueSize,
+}: { item: BadgePair; index: number; valueSize: number }) {
+  const body = (
+    <span className="flex items-center">
+      {index > 0 && (
+        <span className="mx-1 opacity-40">|</span>
+      )}
+      <span style={{ color: "var(--colorNeutralForeground3)" }}>
+        {item.label}:
+      </span>
+      <span
+        className="ml-0.5 font-mono font-semibold"
+        style={{
+          fontSize: valueSize,
+          color: "var(--colorBrandForeground1)",
+        }}
+      >
+        {item.value}
+      </span>
+    </span>
+  );
+
+  if (!item.hint) return body;
+
+  return (
+    <HoverTooltip content={item.hint} positioning="below-center" inline>
+      {body}
+    </HoverTooltip>
   );
 }

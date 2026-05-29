@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 
 interface NavItem {
   to:    string;
@@ -39,38 +40,40 @@ export function SideNav() {
 
 function NavButton({ to, icon, hint }: NavItem) {
   return (
-    <NavLink
-      to={to}
-      title={hint}
-      className="flex h-10 w-10 items-center justify-center rounded-md transition-colors"
-      style={({ isActive }) => ({
-        background: isActive
-          ? "var(--colorBrandBackground)"
-          : "transparent",
-        color: isActive
-          ? "var(--colorNeutralForegroundOnBrand)"
-          : "var(--colorNeutralForeground2)",
-      })}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLAnchorElement;
-        if (!el.classList.contains("active")) {
-          el.style.background = "var(--colorNeutralBackground3)";
-          el.style.color      = "var(--colorNeutralForeground1)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLAnchorElement;
-        // NavLink doesn't add an `active` class by default; check aria-current.
-        const isActive = el.getAttribute("aria-current") === "page";
-        el.style.background = isActive
-          ? "var(--colorBrandBackground)"
-          : "transparent";
-        el.style.color = isActive
-          ? "var(--colorNeutralForegroundOnBrand)"
-          : "var(--colorNeutralForeground2)";
-      }}
-    >
-      <FluentIcon name={icon} />
-    </NavLink>
+    <HoverTooltip content={hint} positioning="right-center" inline>
+      <NavLink
+        to={to}
+        aria-label={hint}
+        className="flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+        style={({ isActive }) => ({
+          background: isActive
+            ? "var(--colorBrandBackground)"
+            : "transparent",
+          color: isActive
+            ? "var(--colorNeutralForegroundOnBrand)"
+            : "var(--colorNeutralForeground2)",
+        })}
+        onMouseEnter={(e) => {
+          const el = e.currentTarget as HTMLAnchorElement;
+          if (!el.classList.contains("active")) {
+            el.style.background = "var(--colorNeutralBackground3)";
+            el.style.color      = "var(--colorNeutralForeground1)";
+          }
+        }}
+        onMouseLeave={(e) => {
+          const el = e.currentTarget as HTMLAnchorElement;
+          // NavLink doesn't add an `active` class by default; check aria-current.
+          const isActive = el.getAttribute("aria-current") === "page";
+          el.style.background = isActive
+            ? "var(--colorBrandBackground)"
+            : "transparent";
+          el.style.color = isActive
+            ? "var(--colorNeutralForegroundOnBrand)"
+            : "var(--colorNeutralForeground2)";
+        }}
+      >
+        <FluentIcon name={icon} />
+      </NavLink>
+    </HoverTooltip>
   );
 }

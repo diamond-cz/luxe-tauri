@@ -17,7 +17,7 @@ export function IspSelectBar({ isp, tabIdx, onIspChange, onTabChange }: Props) {
   const tabs = ISP_TABS[isp];
   return (
     <div
-      className="flex shrink-0 items-stretch gap-3 px-4 pt-2"
+      className="flex shrink-0 items-stretch gap-3 px-5 pt-2"
       style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}
     >
       <div className="flex items-center">
