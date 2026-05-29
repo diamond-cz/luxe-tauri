@@ -5,7 +5,7 @@ import {
   Subtract24Regular,
   Apps24Regular,
   TextBulletList24Regular,
-  Board24Regular,
+  DataHistogram24Regular,
 } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
@@ -196,12 +196,12 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
            overflow:    "hidden",
          }}>
       {/* Header bar — kept outside the scroll area so the divider stays put. */}
-      <div className="flex shrink-0 items-center justify-between px-4 py-2"
+      <div className="flex h-11 shrink-0 items-center justify-between px-4"
            style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
         <div className="flex items-center gap-2 text-xs"
              style={{ color: "var(--colorNeutralForeground2)" }}>
-          <Board24Regular className="h-4 w-4"
-                          style={{ color: "var(--colorBrandForeground1)" }} />
+          <DataHistogram24Regular className="h-4 w-4"
+                                  style={{ color: "var(--colorBrandForeground1)" }} />
           <span>可视化卡片</span>
         </div>
         <div className="flex items-center gap-2">
@@ -344,11 +344,11 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
         minSize={28}
         onResize={(size) => patchVis({ split_ratio: size / 100 })}
       >
-        <div className="h-full w-full overflow-hidden p-2">{renderCardArea()}</div>
+        <div className="h-full w-full overflow-hidden py-2 pl-2 pr-0">{renderCardArea()}</div>
       </Panel>
       <ResizeHandle direction="horizontal" />
       <Panel minSize={28}>
-        <div className="h-full w-full p-2">
+        <div className="h-full w-full py-2 pl-0 pr-2">
           <ImagePane
             mode={(visual.preview_mode as PreviewMode) ?? "image"}
             onMode={setPreviewMode}

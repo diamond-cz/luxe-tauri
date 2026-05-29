@@ -42,7 +42,7 @@ export function AeParamCard({ title, badges, accent, children, onClick }: Props)
       }}
     >
       <div
-        className="flex h-11 items-center justify-between gap-3 pl-9 pr-3"
+        className="flex h-11 items-center justify-between gap-3 pl-8 pr-3"
         style={{
           borderBottom: children
             ? "1px solid var(--colorNeutralStroke2)"
