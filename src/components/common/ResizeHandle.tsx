@@ -8,6 +8,8 @@ interface Props {
    *  - "vertical":               panels stack top/bottom → splitter is a horizontal bar.
    */
   direction?: "horizontal" | "vertical";
+  /** Transparent grab-track size in px. */
+  size?: number;
   /** Extra className on the outer handle. */
   className?: string;
 }
@@ -18,7 +20,7 @@ interface Props {
  * can see where they can grab. Used everywhere splitters live so the look is
  * consistent across the app.
  */
-export function ResizeHandle({ direction = "horizontal", className }: Props) {
+export function ResizeHandle({ direction = "horizontal", size = 8, className }: Props) {
   const [hover,   setHover]   = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -27,7 +29,7 @@ export function ResizeHandle({ direction = "horizontal", className }: Props) {
 
   return (
     <PanelResizeHandle
-      className={(isVertBar ? "w-2" : "h-2") + (className ? ` ${className}` : "")}
+      className={className}
       style={{
         background: "transparent",
         cursor:     isVertBar ? "col-resize" : "row-resize",
@@ -35,6 +37,8 @@ export function ResizeHandle({ direction = "horizontal", className }: Props) {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
+        width:      isVertBar ? size : undefined,
+        height:     isVertBar ? undefined : size,
       }}
       onDragging={setDragging}
       onMouseEnter={() => setHover(true)}

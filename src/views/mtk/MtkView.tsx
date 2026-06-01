@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { saveStateSection } from "@/ipc/stateIo";
 import { parseCppFile } from "@/ipc/cppParser";
 import { scanImageDir, loadImageToml } from "@/ipc/imageScan";
-import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
+import { useMtkStore } from "@/stores/mtkStore";
 import { Toast, type ToastKind } from "@/components/common/Toast";
 
 import { ISP_LIST, ISP_TABS, type IspId } from "./ispTabs";
@@ -43,8 +43,6 @@ export function MtkView() {
   const imports = importsEntry ?? { filePath: null, parsed: null, status: "idle" as const, message: null };
   const setImport = useMtkStore((s) => s.setImport);
 
-  const imageEntry = useMtkStore((s) => s.imageDir[key]);
-  const imageDir   = imageEntry ?? DEFAULT_IMAGE_DIR_STATE;
   const setImageDir = useMtkStore((s) => s.setImageDir);
 
   const [toast, setToast] = useState<{ kind: ToastKind; title: string; detail?: string } | null>(null);
@@ -116,14 +114,11 @@ export function MtkView() {
         </div>
       ) : (
         <>
-          <div className="shrink-0 px-5 pt-3">
+          <div className="shrink-0 px-3 pt-3">
             <MtkPickerBar
               cppFileHint={tab.fileHint}
               cppPath={imports.filePath}
               onCppPathChange={onCppPathChange}
-              imageEnabled={isAeBasic}
-              imageDir={imageDir.dir}
-              onImageDirChange={onImageDirChange}
             />
           </div>
 
@@ -134,6 +129,7 @@ export function MtkView() {
                 tabIdx={tabIdx}
                 filePath={imports.filePath}
                 parsed={parsedReady}
+                onImageDirChange={onImageDirChange}
               />
             ) : parsedReady ? (
               <ParsedSummary parsed={imports.parsed!} />

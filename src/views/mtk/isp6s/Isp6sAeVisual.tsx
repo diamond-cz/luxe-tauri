@@ -46,6 +46,7 @@ interface Props {
   filePath:  string | null;
   /** true once the parameter file has been successfully parsed. */
   parsed:    boolean;
+  onImageDirChange: (dir: string) => void;
 }
 
 const NORMAL_SUB_ACCENTS: Record<string, string> = {
@@ -57,6 +58,7 @@ const FACE_TOUCH_ACCENTS: Record<string, string> = {
 const NORMAL_SUB_NAMES = ["MainT", "HS", "ABL", "NS"] as const;
 const FACE_SUB_NAMES   = ["Face", "Touch"] as const;
 const TOP_NAMES        = ["Normal", "Face/Touch"] as const;
+const CARD_GAP_PX      = 12;
 
 function sanitiseOrder(order: string[], canonical: readonly string[]): string[] {
   const known = new Set<string>(canonical);
@@ -67,7 +69,7 @@ function sanitiseOrder(order: string[], canonical: readonly string[]): string[] 
   return cleaned;
 }
 
-export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
+export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange }: Props) {
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
@@ -97,8 +99,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
     return () => { cancelled = true; };
   }, []);
 
-  /* Image switching is driven by TablePane row clicks; folder selection lives
-   *  in MtkPickerBar above. */
+  /* Image switching is driven by TablePane row clicks; folder selection also
+   * lives in the image-list card. */
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
     setImageDir(isp, tabIdx, { current: idx, status: "loading", message: null });
@@ -344,11 +346,11 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
         minSize={28}
         onResize={(size) => patchVis({ split_ratio: size / 100 })}
       >
-        <div className="h-full w-full overflow-hidden py-2 pl-2 pr-0">{renderCardArea()}</div>
+        <div className="h-full w-full overflow-hidden">{renderCardArea()}</div>
       </Panel>
-      <ResizeHandle direction="horizontal" />
+      <ResizeHandle direction="horizontal" size={CARD_GAP_PX} />
       <Panel minSize={28}>
-        <div className="h-full w-full py-2 pl-0 pr-2">
+        <div className="h-full w-full">
           <ImagePane
             mode={(visual.preview_mode as PreviewMode) ?? "image"}
             onMode={setPreviewMode}
@@ -365,13 +367,15 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
 
   /* ── Table panel — wraps TablePane in standard padding. ── */
   const renderTablePanel = () => (
-    <div className="h-full w-full p-2">
+    <div className="h-full w-full">
       <TablePane
         schema={schema}
         entries={imageDir.entries}
         current={imageDir.current}
+        imageDir={imageDir.dir}
         tomlData={imageDir.tomlData}
         onPickImage={onPickImage}
+        onImageDirChange={onImageDirChange}
         collapsed={visual.table_collapsed}
         onToggleCollapsed={(next) => patchVis({ table_collapsed: next })}
       />
@@ -381,9 +385,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
   /* ── Final layout ── */
   if (!hasEntries && !parsed) {
     return (
-      <div className="flex h-full w-full items-center justify-center text-sm"
-           style={{ color: "var(--colorNeutralForeground3)" }}>
-        选择参数文件，或选择图片文件夹
+      <div className={visual.table_collapsed ? "w-full" : "h-full w-full"}>
+        {renderTablePanel()}
       </div>
     );
   }
@@ -395,13 +398,20 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
 
   /* Parameter parsed but no image folder → cards + ImagePane only. */
   if (!hasEntries && parsed) {
-    return <div className="h-full w-full">{renderBottomRow()}</div>;
+    return (
+      <div className="flex h-full w-full flex-col gap-3">
+        <div className={visual.table_collapsed ? "shrink-0" : "h-[220px] shrink-0"}>
+          {renderTablePanel()}
+        </div>
+        <div className="min-h-0 flex-1">{renderBottomRow()}</div>
+      </div>
+    );
   }
 
   /* Both + table collapsed: stack with TablePane at natural height, bottom row fills the rest. */
   if (visual.table_collapsed) {
     return (
-      <div className="flex h-full w-full flex-col">
+      <div className="flex h-full w-full flex-col gap-3">
         <div className="shrink-0">{renderTablePanel()}</div>
         <div className="min-h-0 flex-1">{renderBottomRow()}</div>
       </div>
@@ -418,7 +428,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed }: Props) {
       >
         {renderTablePanel()}
       </Panel>
-      <ResizeHandle direction="vertical" />
+      <ResizeHandle direction="vertical" size={CARD_GAP_PX} />
       <Panel minSize={25}>
         {renderBottomRow()}
       </Panel>

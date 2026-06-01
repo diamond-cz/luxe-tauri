@@ -26,7 +26,17 @@ export const luxeBrand: BrandVariants = {
 };
 
 export const luxeDarkTheme:  Theme = createDarkTheme(luxeBrand);
-export const luxeLightTheme: Theme = createLightTheme(luxeBrand);
+export const luxeLightTheme: Theme = {
+  ...createLightTheme(luxeBrand),
+  // The stock Fluent light neutral backgrounds are very close to white, which
+  // makes hover masks hard to distinguish on LUXE's pale violet canvas.
+  colorNeutralBackground2: "#F0EEF8",
+  colorNeutralBackground3: "#E7E3F2",
+  colorNeutralBackground4: "#DDD7EA",
+  colorSubtleBackgroundHover: "#E7E3F2",
+  colorSubtleBackgroundPressed: "#DDD7EA",
+  colorSubtleBackgroundSelected: "#E7E3F2",
+};
 
 /** Resolve the persisted theme key ("dark" | "light" | "system") to a Theme. */
 export function pickTheme(key: string): Theme {
