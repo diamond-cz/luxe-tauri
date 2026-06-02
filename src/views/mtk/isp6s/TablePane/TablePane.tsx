@@ -1,6 +1,21 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
@@ -9,13 +24,15 @@ import {
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { loadImageToml, type ImageEntry } from "@/ipc/imageScan";
 import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
+import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
 
-type TabId = "image" | "normal" | "face" | "lce" | "all";
+type TabId = "image" | "normal" | "face" | "lce";
 
 interface Props {
   schema:    Isp6sSchemaRoot;
@@ -27,6 +44,8 @@ interface Props {
   onImageDirChange: (dir: string) => void;
   collapsed: boolean;
   onToggleCollapsed: (next: boolean) => void;
+  headerRatios: number[];
+  onHeaderRatiosChange: (next: number[]) => void;
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png"];
@@ -39,16 +58,29 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "normal", label: "Normal" },
   { id: "face",   label: "Face" },
   { id: "lce",    label: "LCE" },
-  { id: "all",    label: "All" },
 ];
+const DEFAULT_TAB_ORDER: TabId[] = TABS.map((item) => item.id);
+const DEFAULT_HEADER_RATIOS = [24, 18, 58];
 
 export function TablePane({
-  schema, entries, current, imageDir, tomlData, onPickImage, onImageDirChange,
-  collapsed, onToggleCollapsed,
+  schema,
+  entries,
+  current,
+  imageDir,
+  tomlData,
+  onPickImage,
+  onImageDirChange,
+  collapsed,
+  onToggleCollapsed,
+  headerRatios,
+  onHeaderRatiosChange,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
   const [tab, setTab] = useState<TabId>("image");
+  const [tabOrder, setTabOrder] = useState<TabId[]>(DEFAULT_TAB_ORDER);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const currentEntry = entries[current];
   const thumbUrl = useMemo(() => {
@@ -57,6 +89,20 @@ export function TablePane({
     catch { return null; }
   }, [currentEntry?.jpg_path]);
 
+  const orderedTabs = useMemo(
+    () => tabOrder
+      .map((id) => TABS.find((item) => item.id === id))
+      .filter((item): item is { id: TabId; label: string } => Boolean(item)),
+    [tabOrder],
+  );
+
+  const safeHeaderRatios = useMemo(() => {
+    if (headerRatios.length === 3 && headerRatios.every((value) => Number.isFinite(value) && value > 0)) {
+      return headerRatios;
+    }
+    return DEFAULT_HEADER_RATIOS;
+  }, [headerRatios]);
+
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     (async () => {
@@ -64,11 +110,13 @@ export function TablePane({
       unlisten = await win.onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === "enter") {
-          setDropState(hitTest(payload.position) ? classifyImageDrop(payload.paths) : null);
+          const nextState = classifyImageDrop(payload.paths);
+          lastDropStateRef.current = nextState;
+          setDropState(hitTest(payload.position) ? nextState : null);
           return;
         }
         if (payload.type === "over") {
-          setDropState((prev) => hitTest(payload.position) ? prev : null);
+          setDropState(hitTest(payload.position) ? lastDropStateRef.current : null);
           return;
         }
         if (payload.type === "leave") {
@@ -78,6 +126,7 @@ export function TablePane({
         if (payload.type === "drop") {
           const inside = hitTest(payload.position);
           setDropState(null);
+          lastDropStateRef.current = null;
           if (!inside || payload.paths.length === 0) return;
           if (classifyImageDrop(payload.paths) !== "ok") return;
           const first = payload.paths[0];
@@ -87,7 +136,10 @@ export function TablePane({
         }
       });
     })();
-    return () => { unlisten?.(); };
+    return () => {
+      lastDropStateRef.current = null;
+      unlisten?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onImageDirChange]);
 
@@ -106,6 +158,15 @@ export function TablePane({
     if (typeof picked === "string") onImageDirChange(picked);
   };
 
+  const onTabDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = tabOrder.indexOf(active.id as TabId);
+    const newIndex = tabOrder.indexOf(over.id as TabId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    setTabOrder((prev) => arrayMove(prev, oldIndex, newIndex));
+  };
+
   const borderColor =
     dropState === "ok" ? "var(--colorPaletteGreenBorder2)" :
     dropState === "bad" ? "var(--colorPaletteRedBorder2)" :
@@ -114,123 +175,176 @@ export function TablePane({
     dropState === "ok" ? "var(--colorPaletteGreenBackground1)" :
     dropState === "bad" ? "var(--colorPaletteRedBackground1)" :
                           "var(--colorNeutralBackground2)";
+
   return (
     <div ref={rootRef}
          className="flex h-full w-full flex-col transition-colors"
          style={{
            background,
-           border:      `1px solid ${borderColor}`,
+           border: `1px solid ${borderColor}`,
            borderRadius: 12,
-           overflow:    "hidden",
+           overflow: "hidden",
          }}>
-      {/* Header bar: always visible thumbnail + folder path + image selector + collapse toggle */}
       <div className="shrink-0 px-3 py-2"
-           style={!collapsed
-             ? { borderBottom: "1px solid var(--colorNeutralStroke2)" }
-             : undefined}>
-        <div className="flex flex-wrap items-center gap-3">
+           style={!collapsed ? { borderBottom: "1px solid var(--colorNeutralStroke2)" } : undefined}>
+        <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md"
                style={{
                  background: "var(--colorNeutralBackground3)",
-                 color:      "var(--colorNeutralForeground2)",
+                 color: "var(--colorNeutralForeground2)",
                }}>
             {thumbUrl ? (
-              <img src={thumbUrl}
-                   alt={currentEntry?.name ?? ""}
-                   className="h-full w-full object-cover"
-                   draggable={false} />
+              <img
+                src={thumbUrl}
+                alt={currentEntry?.name ?? ""}
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
             ) : (
               <Image24Regular />
             )}
           </div>
-          <div
-            role="button"
-            tabIndex={0}
-            className="flex h-12 min-w-[180px] flex-1 flex-col justify-center rounded-md px-2 text-left transition-colors"
-            onClick={pickImageDir}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                pickImageDir();
-              }
-            }}
-            title={imageDir ?? "选择图片文件夹"}
-            style={{
-              color: "inherit",
-              background: "transparent",
-            }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = "transparent";
-            }}
-          >
-            <div className="flex items-center gap-1 text-sm font-semibold"
-                 style={{ color: "var(--colorNeutralForeground1)" }}>
-              图片列表卡片
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={collapsed ? <ChevronDown24Regular /> : <ChevronUp24Regular />}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleCollapsed(!collapsed);
-                }}
-                aria-label={collapsed ? "展开" : "收起"}
-              />
-            </div>
-            <div className="mt-0.5 break-all text-[11px] font-medium leading-5"
-                 style={{ color: imageDir ? "var(--colorNeutralForeground3)" : "var(--colorNeutralForeground3)" }}>
-              {imageDir ?? "未选择图片文件夹 · 拖入图片文件夹或 jpg/jpeg/png 图片加载整个文件夹"}
-            </div>
+
+          <div className="min-w-0 flex-1">
+            <PanelGroup direction="horizontal" autoSaveId="isp6s-table-header">
+              <Panel
+                defaultSize={safeHeaderRatios[0]}
+                minSize={18}
+                onResize={(size) => onHeaderRatiosChange([size, safeHeaderRatios[1], safeHeaderRatios[2]])}
+              >
+                <div className="flex h-12 min-w-0 items-center">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex h-12 min-w-0 w-full flex-col justify-center rounded-md px-2 text-left transition-colors"
+                    onClick={pickImageDir}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        pickImageDir();
+                      }
+                    }}
+                    title={imageDir ?? "选择图片文件夹"}
+                    style={{
+                      color: "inherit",
+                      background: "transparent",
+                    }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <div className="flex items-center gap-1 text-sm font-semibold"
+                         style={{ color: "var(--colorNeutralForeground1)" }}>
+                      图片列表卡片
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={collapsed ? <ChevronDown24Regular /> : <ChevronUp24Regular />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onToggleCollapsed(!collapsed);
+                        }}
+                        aria-label={collapsed ? "展开" : "收起"}
+                      />
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] font-medium leading-5"
+                         style={{ color: "var(--colorNeutralForeground3)" }}>
+                      {imageDir ?? "支持拖拽或选择图片文件夹"}
+                    </div>
+                  </div>
+                </div>
+              </Panel>
+
+              <ResizeHandle direction="horizontal" size={8} />
+
+              {!collapsed ? (
+                <>
+                  <Panel
+                    defaultSize={safeHeaderRatios[1]}
+                    minSize={26}
+                    onResize={(size) => onHeaderRatiosChange([safeHeaderRatios[0], size, safeHeaderRatios[2]])}
+                  >
+                    <div className="flex h-12 min-w-0 items-center px-2">
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={onTabDragEnd}
+                      >
+                        <SortableContext
+                          items={orderedTabs.map((item) => item.id)}
+                          strategy={horizontalListSortingStrategy}
+                        >
+                          <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+                            {orderedTabs.map((item) => (
+                              <DraggableTabButton
+                                key={item.id}
+                                id={item.id}
+                                label={item.label}
+                                active={item.id === tab}
+                                onClick={() => setTab(item.id)}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                    </div>
+                  </Panel>
+
+                  <ResizeHandle direction="horizontal" size={8} />
+                  <Panel
+                    defaultSize={safeHeaderRatios[2]}
+                    minSize={40}
+                    onResize={(size) => onHeaderRatiosChange([safeHeaderRatios[0], safeHeaderRatios[1], size])}
+                  >
+                    <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
+                      <span
+                        className="shrink-0 text-sm font-semibold"
+                        style={{ color: "var(--colorNeutralForeground1)" }}
+                      >
+                        当前图
+                        <span className="ml-0.5">:</span>
+                      </span>
+                      <ImagePickerDropdown
+                        entries={entries}
+                        current={current}
+                        onPick={onPickImage}
+                      />
+                    </div>
+                  </Panel>
+                </>
+              ) : (
+                <Panel minSize={40}>
+                  <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
+                    <span
+                      className="shrink-0 text-sm font-semibold"
+                      style={{ color: "var(--colorNeutralForeground1)" }}
+                    >
+                      当前图
+                      <span className="ml-0.5">:</span>
+                    </span>
+                    <ImagePickerDropdown
+                      entries={entries}
+                      current={current}
+                      onPick={onPickImage}
+                    />
+                  </div>
+                </Panel>
+              )}
+            </PanelGroup>
           </div>
-          <ImagePickerDropdown
-            entries={entries}
-            current={current}
-            onPick={onPickImage}
-          />
-          </div>
+        </div>
       </div>
 
       {!collapsed && (
-        <>
-          {/* Tabs row */}
-          <div className="flex shrink-0 items-center gap-2 px-2 py-1.5"
-               style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-            {TABS.map((t) => {
-              const active = t.id === tab;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTab(t.id)}
-                  className="rounded-md px-3 py-1.5 text-xs transition-colors"
-                  style={{
-                    background: active ? "var(--colorBrandBackground)" : "transparent",
-                    color:      active
-                      ? "var(--colorNeutralForegroundOnBrand)"
-                      : "var(--colorNeutralForeground2)",
-                    fontWeight: active ? 600 : 500,
-                  }}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-            <div className="flex-1" />
-          </div>
-
-          {/* Content */}
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {tab === "image"  && <ImageTab    schema={schema} entries={entries} current={current}
-                                             onPick={onPickImage} />}
-            {tab === "normal" && <Placeholder label="Normal 表格，待 normal_table.toml 映射" />}
-            {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
-            {tab === "lce"    && <LceTab tomlData={tomlData} />}
-            {tab === "all"    && <AllTab tomlData={tomlData} />}
-          </div>
-        </>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {tab === "image"  && <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />}
+          {tab === "normal" && <Placeholder label="Normal 表格，待 normal_table.toml 映射" />}
+          {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
+          {tab === "lce"    && <LceTab entry={currentEntry} tomlData={tomlData} />}
+        </div>
       )}
     </div>
   );
@@ -254,9 +368,7 @@ function ImagePickerDropdown({
   const selectedIndex = current >= 0 && current < entries.length ? current : 0;
   const currentEntry = entries[selectedIndex];
   const menuColors = useMemo(() => getPortalMenuColors(), [open]);
-  const selectedLabel = currentEntry
-    ? `${selectedIndex + 1} | ${currentEntry.name}`
-    : "未选择图片";
+  const selectedLabel = currentEntry ? `${selectedIndex + 1} | ${currentEntry.name}` : "未选择图片";
   const indexColumnWidth = Math.max(24, String(entries.length).length * 8 + 10);
 
   useEffect(() => {
@@ -316,13 +428,19 @@ function ImagePickerDropdown({
         disabled={disabled}
         className="flex h-12 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
         style={{
-          width: "clamp(220px, 30vw, 360px)",
-          background: "var(--colorNeutralBackground1)",
-          borderColor: "var(--colorNeutralStroke1)",
+          width: "clamp(180px, 24vw, 300px)",
+          background: open ? "var(--colorNeutralBackground1)" : "transparent",
+          borderColor: open ? "var(--colorNeutralStroke1)" : "transparent",
           color: "var(--colorNeutralForeground1)",
         }}
         onClick={() => {
           if (!disabled) setOpen((v) => !v);
+        }}
+        onMouseEnter={(event) => {
+          if (!open) event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
+        }}
+        onMouseLeave={(event) => {
+          if (!open) event.currentTarget.style.background = "transparent";
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") setOpen(false);
@@ -331,9 +449,7 @@ function ImagePickerDropdown({
         aria-expanded={open}
         title={selectedLabel}
       >
-        <span className="min-w-0 flex-1 truncate">
-          {selectedLabel}
-        </span>
+        <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
         <ChevronDown24Regular
           className="h-4 w-4 shrink-0 transition-transform"
           style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
@@ -415,8 +531,9 @@ function ImagePickerDropdown({
               </div>
             </div>
           </div>
-        </div>
-        , document.body)}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -479,8 +596,6 @@ function Placeholder({ label }: { label: string }) {
   );
 }
 
-/* Image tab: list of images with extra columns from [Image] schema */
-
 function ImageTab({
   schema, entries, current, onPick,
 }: {
@@ -493,8 +608,6 @@ function ImageTab({
     () => Object.entries(schema.Image ?? {}),
     [schema],
   );
-  /* All toml maps loaded on demand. We cache per path so switching images
-   * doesn't re-fetch. */
   const [tomls, setTomls] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
@@ -522,8 +635,8 @@ function ImageTab({
              style={{ fontFamily: "ui-monospace, monospace" }}>
         <thead style={{
           background: "var(--colorNeutralBackground3)",
-          color:      "var(--colorNeutralForeground2)",
-          position:   "sticky", top: 0, zIndex: 1,
+          color: "var(--colorNeutralForeground2)",
+          position: "sticky", top: 0, zIndex: 1,
         }}>
           <tr>
             <Th>idx</Th>
@@ -539,8 +652,7 @@ function ImageTab({
                   onClick={() => onPick(i)}
                   style={{
                     cursor: "pointer",
-                    background: i === current
-                      ? "var(--colorBrandBackground2)" : "transparent",
+                    background: i === current ? "var(--colorBrandBackground2)" : "transparent",
                     borderBottom: "1px solid var(--colorNeutralStroke3)",
                   }}>
                 <Td>{i + 1}</Td>
@@ -564,9 +676,13 @@ function ImageTab({
   );
 }
 
-/* LCE tab */
-
-function LceTab({ tomlData }: { tomlData: Record<string, string> }) {
+function LceTab({
+  entry,
+  tomlData,
+}: {
+  entry: ImageEntry | undefined;
+  tomlData: Record<string, string>;
+}) {
   const labels = ["0", "1", "50", "250", "500", "750", "950", "999"];
   const num = (k: string) => {
     const v = tomlData[k];
@@ -575,52 +691,122 @@ function LceTab({ tomlData }: { tomlData: Record<string, string> }) {
   };
   const p = labels.map((n) => num(`SW_LCE_P${n}`));
   const o = labels.map((n) => num(`SW_LCE_O${n}`));
+
   return (
-    <div className="h-full w-full p-3">
-      <LceChart pSeries={p} oSeries={o} />
-    </div>
+    <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-split" className="h-full w-full">
+      <Panel defaultSize={38} minSize={22}>
+        <div className="h-full w-full p-3 pr-0">
+          <div
+            className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
+            style={{
+              background: "var(--colorNeutralBackground1)",
+              borderColor: "var(--colorNeutralStroke2)",
+            }}
+          >
+            <LceImagePreview entry={entry} />
+          </div>
+        </div>
+      </Panel>
+      <ResizeHandle direction="horizontal" size={10} />
+      <Panel minSize={30}>
+        <div className="h-full w-full p-3 pl-0">
+          <div
+            className="h-full w-full overflow-hidden rounded-xl border"
+            style={{
+              background: "var(--colorNeutralBackground1)",
+              borderColor: "var(--colorNeutralStroke2)",
+            }}
+          >
+            <LceChart pSeries={p} oSeries={o} />
+          </div>
+        </div>
+      </Panel>
+    </PanelGroup>
   );
 }
 
-/* All tab: flat key/value of the current image TOML */
+function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
+  const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
 
-function AllTab({ tomlData }: { tomlData: Record<string, string> }) {
-  const rows = useMemo(() => {
-    return Object.entries(tomlData)
-      .sort(([a], [b]) => a.localeCompare(b));
-  }, [tomlData]);
+  if (!entry) {
+    return (
+      <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs"
+           style={{ color: "var(--colorNeutralForeground3)" }}>
+        请先选择图片文件
+      </div>
+    );
+  }
+
+  if (!url) {
+    return (
+      <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs"
+           style={{ color: "var(--colorPaletteRedForeground1)" }}>
+        图片预览加载失败
+      </div>
+    );
+  }
 
   return (
-    <div className="h-full w-full overflow-auto">
-      <table className="w-full text-xs"
-             style={{ fontFamily: "ui-monospace, monospace" }}>
-        <thead style={{
-          background: "var(--colorNeutralBackground3)",
-          color:      "var(--colorNeutralForeground2)",
-          position:   "sticky", top: 0, zIndex: 1,
-        }}>
-          <tr>
-            <Th>key</Th>
-            <Th>value</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([k, v]) => (
-            <tr key={k}
-                style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
-              <Td>{k}</Td>
-              <Td>{v}</Td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr><td colSpan={2} className="p-4 text-center"
-                    style={{ color: "var(--colorNeutralForeground3)" }}>
-              （无数据）
-            </td></tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+    <img
+      src={url}
+      alt={entry.name}
+      className="max-h-full max-w-full object-contain"
+      style={{ display: "block" }}
+      draggable={false}
+    />
+  );
+}
+
+function DraggableTabButton({
+  id,
+  label,
+  active,
+  onClick,
+}: {
+  id: TabId;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onClick}
+      className="rounded-md px-2.5 py-1.5 text-xs transition-colors"
+      style={{
+        transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
+        transition,
+        background: active ? "var(--colorBrandBackground)" : "transparent",
+        color: active
+          ? "var(--colorNeutralForegroundOnBrand)"
+          : "var(--colorNeutralForeground2)",
+        fontWeight: active ? 600 : 500,
+        opacity: isDragging ? 0.72 : 1,
+        cursor: "grab",
+        touchAction: "none",
+        flexShrink: 0,
+      }}
+      onMouseEnter={(event) => {
+        if (!active) event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
+      }}
+      onMouseLeave={(event) => {
+        if (!active) event.currentTarget.style.background = "transparent";
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -632,6 +818,7 @@ function Th({ children }: { children: React.ReactNode }) {
     </th>
   );
 }
+
 function Td({ children }: { children: React.ReactNode }) {
   return (
     <td className="px-3 py-1.5"

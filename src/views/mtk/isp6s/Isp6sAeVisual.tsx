@@ -372,7 +372,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
       <Panel minSize={28}>
         <div className="h-full w-full">
           <ImagePane
-            mode={(visual.preview_mode as PreviewMode) ?? "image"}
+            mode={visual.preview_mode ?? "param_map"}
             onMode={setPreviewMode}
             filePath={filePath ?? ""}
             schema={schema}
@@ -398,6 +398,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
         onImageDirChange={onImageDirChange}
         collapsed={visual.table_collapsed}
         onToggleCollapsed={(next) => patchVis({ table_collapsed: next })}
+        headerRatios={visual.table_header_ratios}
+        onHeaderRatiosChange={(next) => patchVis({ table_header_ratios: next })}
       />
     </div>
   );

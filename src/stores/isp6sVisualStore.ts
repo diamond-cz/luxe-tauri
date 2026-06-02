@@ -9,7 +9,7 @@ const DEFAULT: Isp6sAeVisual = {
   image_splitter_ratio:       0.5,
   image_splitter_orientation: "V",
   image_inner_ratios:         [],
-  preview_mode:               "image",
+  preview_mode:               "param_map",
   top_card_order:             ["Normal", "Face/Touch"],
   normal_collapsed:           false,
   face_collapsed:             false,
@@ -21,6 +21,7 @@ const DEFAULT: Isp6sAeVisual = {
   face_col_ratios:            [],
   normal_sub_order:           { MainT: [], HS: [], NS: [] },
   table_collapsed:            false,
+  table_header_ratios:        [24, 18, 58],
 };
 
 interface VisualState {

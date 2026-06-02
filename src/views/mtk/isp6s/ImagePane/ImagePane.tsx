@@ -3,22 +3,20 @@ import { Button } from "@fluentui/react-components";
 import type { ImageEntry } from "@/ipc/imageScan";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
-import { ImageMode } from "./ImageMode";
 import { ImageSplitMode } from "./ImageSplitMode";
 import { ParaCheckMode } from "./ParaCheckMode";
 import { ParamMapMode } from "./ParamMapMode";
 import {
-  Image24Regular,
   ChartMultiple24Regular,
   PreviewLink24Regular,
   Code24Regular,
   CodeBlock24Regular,
 } from "@fluentui/react-icons";
 
-export type PreviewMode = "image" | "image_split" | "para_check" | "param_map";
+export type PreviewMode = "image_split" | "para_check" | "param_map";
 
 interface Props {
-  mode:        PreviewMode;
+  mode:        PreviewMode | "image";
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
   schema:      Isp6sSchemaRoot;
@@ -30,8 +28,7 @@ interface Props {
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
   { id: "param_map",   label: "源码映射", Icon: Code24Regular },
   { id: "para_check",  label: "参数对比", Icon: PreviewLink24Regular },
-  { id: "image",       label: "图片",     Icon: Image24Regular },
-  { id: "image_split", label: "三段式",   Icon: ChartMultiple24Regular },
+  { id: "image_split", label: "三段图", Icon: ChartMultiple24Regular },
 ];
 
 export function ImagePane({
@@ -40,6 +37,7 @@ export function ImagePane({
   const [internalCard] = useState<string | undefined>(undefined);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
+  const effectiveMode: PreviewMode = mode === "image" ? "param_map" : mode;
   void internalCard;
 
   useEffect(() => {
@@ -59,12 +57,11 @@ export function ImagePane({
   return (
     <div className="flex h-full w-full flex-col"
          style={{
-           background:  "var(--colorNeutralBackground2)",
-           border:      "1px solid var(--colorNeutralStroke2)",
+           background: "var(--colorNeutralBackground2)",
+           border: "1px solid var(--colorNeutralStroke2)",
            borderRadius: 12,
-           overflow:    "hidden",
+           overflow: "hidden",
          }}>
-      {/* Header + mode tabs */}
       <div ref={headerRef}
            className="flex h-11 shrink-0 items-center justify-between gap-3 px-4"
            style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
@@ -76,7 +73,7 @@ export function ImagePane({
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
           {TABS.map(({ id, label, Icon }) => {
-            const active = id === mode;
+            const active = id === effectiveMode;
             return (
               <HoverTooltip key={id} content={label} positioning="below-center" inline>
                 <Button
@@ -100,12 +97,10 @@ export function ImagePane({
         </div>
       </div>
 
-      {/* Mode content */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {mode === "image"       && <ImageMode      entry={entry} />}
-        {mode === "image_split" && <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} />}
-        {mode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
-        {mode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} />}
+        {effectiveMode === "image_split" && <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} />}
+        {effectiveMode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
+        {effectiveMode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} />}
       </div>
     </div>
   );

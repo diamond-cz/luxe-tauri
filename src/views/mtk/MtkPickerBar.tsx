@@ -18,6 +18,7 @@ type Slot = "cpp" | null;
 export function MtkPickerBar(props: Props) {
   const cppRef = useRef<HTMLDivElement | null>(null);
   const cppPrimaryRef = useRef<HTMLDivElement | null>(null);
+  const lastHoverValidRef = useRef<"ok" | "bad" | null>(null);
   const [hover, setHover] = useState<Slot>(null);
   const [hoverValid, setHoverValid] = useState<"ok" | "bad" | null>(null);
 
@@ -29,30 +30,38 @@ export function MtkPickerBar(props: Props) {
         const payload = event.payload;
         if (payload.type === "enter") {
           const slot = hitTest(payload.position);
+          const valid = slot ? classify(slot, payload.paths) : null;
           setHover(slot);
-          setHoverValid(slot ? classify(slot, payload.paths) : null);
+          setHoverValid(valid);
+          lastHoverValidRef.current = valid;
           return;
         }
         if (payload.type === "over") {
           setHover(hitTest(payload.position));
+          setHoverValid(hitTest(payload.position) ? lastHoverValidRef.current : null);
           return;
         }
         if (payload.type === "leave") {
           setHover(null);
           setHoverValid(null);
+          lastHoverValidRef.current = null;
           return;
         }
         if (payload.type === "drop") {
           const slot = hitTest(payload.position);
           setHover(null);
           setHoverValid(null);
+          lastHoverValidRef.current = null;
           if (!slot || payload.paths.length === 0) return;
           const path = payload.paths.find((p) => matchExt(p, CPP_EXTS));
           if (path) props.onCppPathChange(path);
         }
       });
     })();
-    return () => { unlisten?.(); };
+    return () => {
+      lastHoverValidRef.current = null;
+      unlisten?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.onCppPathChange]);
 

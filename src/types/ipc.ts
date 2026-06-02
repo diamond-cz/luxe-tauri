@@ -49,7 +49,7 @@ export interface Isp6sAeVisual {
   image_splitter_ratio:       number;
   image_splitter_orientation: "V" | "H";
   image_inner_ratios:         number[];
-  preview_mode:               "image" | "image_split" | "para_check" | "param_map";
+  preview_mode:               "param_map" | "image_split" | "para_check" | "image";
   top_card_order:             string[];
   normal_collapsed:           boolean;
   face_collapsed:             boolean;
@@ -61,6 +61,7 @@ export interface Isp6sAeVisual {
   face_col_ratios:            number[];
   normal_sub_order:           NormalSubOrder;
   table_collapsed:            boolean;
+  table_header_ratios:        number[];
 }
 
 export interface StateRoot {

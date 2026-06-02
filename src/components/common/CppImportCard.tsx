@@ -40,7 +40,7 @@ export function CppImportCard({
   const [s, setS] = useState<State>({
     filePath: null, parsed: null, status: "idle", message: null,
   });
-  const [dragOver, setDragOver] = useState(false);
+  const [dragState, setDragState] = useState<"ok" | "bad" | null>(null);
 
   const patch = (p: Partial<State>) => setS((cur) => ({ ...cur, ...p }));
 
@@ -75,23 +75,34 @@ export function CppImportCard({
   return (
     <div
       className="flex h-full w-full flex-col gap-4 overflow-y-auto overflow-x-hidden p-6"
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files ?? []);
+        setDragState(classifyFiles(files, extensions));
+      }}
+      onDragLeave={() => setDragState(null)}
       onDrop={(e) => {
         e.preventDefault();
-        setDragOver(false);
+        const files = Array.from(e.dataTransfer.files ?? []);
+        setDragState(null);
         const f = e.dataTransfer.files[0];
-        if (f) patch({ filePath: f.name, parsed: null, status: "idle", message: null });
+        if (f && classifyFiles(files, extensions) === "ok") {
+          patch({ filePath: f.name, parsed: null, status: "idle", message: null });
+        }
       }}
     >
       {/* File picker */}
       <div
         className="flex items-center gap-4 rounded-lg border p-4 transition-colors"
         style={{
-          background:  "var(--colorNeutralBackground2)",
-          borderColor: dragOver
-            ? "var(--colorBrandStroke1)"
-            : "var(--colorNeutralStroke2)",
+          background:
+            dragState === "ok" ? "var(--colorPaletteGreenBackground1)" :
+            dragState === "bad" ? "var(--colorPaletteRedBackground1)" :
+                                  "var(--colorNeutralBackground2)",
+          borderColor:
+            dragState === "ok" ? "var(--colorPaletteGreenBorder2)" :
+            dragState === "bad" ? "var(--colorPaletteRedBorder2)" :
+                                  "var(--colorNeutralStroke2)",
         }}
       >
         <div
@@ -169,4 +180,16 @@ export function CppImportCard({
       )}
     </div>
   );
+}
+
+function classifyFiles(files: File[], extensions: string[]): "ok" | "bad" {
+  if (files.length === 0) return "bad";
+  return files.some((file) => matchFileExt(file.name, extensions)) ? "ok" : "bad";
+}
+
+function matchFileExt(path: string, exts: string[]): boolean {
+  const lower = path.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return false;
+  return exts.includes(lower.slice(dot + 1));
 }
