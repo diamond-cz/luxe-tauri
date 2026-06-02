@@ -227,7 +227,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
           <SortableContext items={topOrder} strategy={verticalListSortingStrategy}>
             <div className="flex flex-col gap-4">
               {topOrder.map((name) => (
-                <SortableCard key={name} id={name}>
+                <SortableCard
+                  key={name}
+                  id={name}
+                  headerHeight={48}
+                  handleLeft={10}
+                  borderRadius={12}
+                >
                   {renderTopCard(name)}
                 </SortableCard>
               ))}
@@ -276,7 +282,14 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
                 ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"}>
                 {normalOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub} headerHeight={44}>
+                  <SortableCard
+                    key={sub}
+                    id={sub}
+                    headerHeight={44}
+                    fullCardHandle
+                    showHandle={false}
+                    borderRadius={8}
+                  >
                     <NormalSub name={sub} badges={normalBadges}
                                onClick={() => onCardClick(sub)} />
                   </SortableCard>
@@ -323,7 +336,14 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
                 ? "flex flex-col gap-3"
                 : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
                 {faceOrder.map((sub) => (
-                  <SortableCard key={sub} id={sub} headerHeight={44}>
+                  <SortableCard
+                    key={sub}
+                    id={sub}
+                    headerHeight={44}
+                    fullCardHandle
+                    showHandle={false}
+                    borderRadius={8}
+                  >
                     <FaceTouchSub name={sub} badges={faceBadges}
                                   onClick={() => onCardClick(sub)} />
                   </SortableCard>

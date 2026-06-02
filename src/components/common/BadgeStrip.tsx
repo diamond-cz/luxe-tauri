@@ -57,7 +57,13 @@ function BadgeItem({
   if (!item.hint) return body;
 
   return (
-    <HoverTooltip content={item.hint} positioning="below-center" inline>
+    <HoverTooltip
+      content={item.hint}
+      positioning="below-center"
+      wrap
+      maxWidth={260}
+      inline
+    >
       {body}
     </HoverTooltip>
   );

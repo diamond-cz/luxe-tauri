@@ -49,7 +49,7 @@ export function CollapsibleCard({
         type="button"
         onClick={flip}
         className={
-          "flex h-12 w-full items-center justify-between gap-3 pl-9 pr-4 transition-colors " +
+          "flex h-12 w-full items-center justify-between gap-2.5 pl-8 pr-4 transition-colors " +
           (open ? "rounded-t-xl" : "rounded-xl")
         }
         style={{ color: "var(--colorNeutralForeground1)" }}
@@ -60,9 +60,9 @@ export function CollapsibleCard({
           (e.currentTarget as HTMLButtonElement).style.background = "transparent"}
       >
         <span className="flex items-center gap-2">
-          <span className="text-sm font-semibold">{title}</span>
+          <span className="relative -top-0.5 text-sm font-semibold">{title}</span>
         </span>
-        <span className="flex items-center gap-3">
+        <span className="flex items-center gap-2">
           {badges && (
             <span className="flex items-center gap-2">{badges}</span>
           )}

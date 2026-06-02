@@ -2,6 +2,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useCallback,
   type CSSProperties,
   type ReactNode,
   type RefObject,
@@ -46,6 +47,7 @@ export function HoverTooltip({
   const [themeStyle, setThemeStyle] = useState<CSSProperties>({});
   const wrapperRef = useRef<HTMLElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const setWrapperNode = (node: HTMLElement | null) => {
     wrapperRef.current = node;
   };
@@ -94,7 +96,26 @@ export function HoverTooltip({
     });
   };
 
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback((relatedTarget: EventTarget | null) => {
+    const next = relatedTarget instanceof Node ? relatedTarget : null;
+    if (next && (wrapperRef.current?.contains(next) || tooltipRef.current?.contains(next))) return;
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      setShow(false);
+      setCoords(null);
+      closeTimerRef.current = null;
+    }, 80);
+  }, [clearCloseTimer]);
+
   const onEnter = () => {
+    clearCloseTimer();
     if (!content) return;
     if (truncatableRef) {
       const el = truncatableRef.current;
@@ -116,10 +137,6 @@ export function HoverTooltip({
     setShow(true);
     requestAnimationFrame(updatePosition);
   };
-  const onLeave = () => {
-    setShow(false);
-    setCoords(null);
-  };
 
   useLayoutEffect(() => {
     if (!show) return;
@@ -139,18 +156,22 @@ export function HoverTooltip({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, coords]);
 
+  useLayoutEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
   const tip = show && content && coords ? createPortal(
     <span
       ref={tooltipRef}
-      className="pointer-events-none fixed z-[9999] rounded-md border px-2 py-1 text-xs leading-5"
+      className="fixed z-[9999] rounded-md border px-2 py-1 text-xs leading-5"
       style={{
         ...themeStyle,
         left:        coords.left,
         top:         coords.top,
         whiteSpace:  wrap ? "normal" : "nowrap",
-        wordBreak:   wrap ? "break-all" : undefined,
+        wordBreak:   wrap ? "break-word" : undefined,
         maxWidth:    effectiveMaxWidth,
       }}
+      onMouseEnter={onEnter}
+      onMouseLeave={(event) => scheduleClose(event.relatedTarget)}
     >
       {content}
     </span>,
@@ -161,7 +182,8 @@ export function HoverTooltip({
     return (
       <span ref={setWrapperNode}
             className="inline-flex"
-            onMouseEnter={onEnter} onMouseLeave={onLeave}>
+            onMouseEnter={onEnter}
+            onMouseLeave={(event) => scheduleClose(event.relatedTarget)}>
         {children}
         {tip}
       </span>
@@ -169,7 +191,8 @@ export function HoverTooltip({
   }
   return (
     <div ref={setWrapperNode}
-         onMouseEnter={onEnter} onMouseLeave={onLeave}>
+         onMouseEnter={onEnter}
+         onMouseLeave={(event) => scheduleClose(event.relatedTarget)}>
       {children}
       {tip}
     </div>
