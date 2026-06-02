@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Panel, PanelGroup } from "react-resizable-panels";
 import type { ImageEntry } from "@/ipc/imageScan";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
+import { ResizeHandle } from "@/components/common/ResizeHandle";
 
 interface Props {
   entry:    ImageEntry | undefined;
@@ -10,14 +12,8 @@ interface Props {
 }
 
 /**
- * `image_split` mode — three-section stack:
- *   ① RGB histogram (canvas)
- *   ② image preview
- *   ③ info table from `[[preview_info.items]]`
- *
- * For M5d we ship a minimal but functional histogram (drawn directly from the
- * jpg's decoded canvas data) and the info table; sectioned splitter ratios
- * come in a later pass.
+ * `image_split` mode: three horizontal sections from left to right:
+ * histogram + image preview + preview info table.
  */
 export function ImageSplitMode({ entry, schema, tomlData }: Props) {
   const histRef = useRef<HTMLCanvasElement | null>(null);
@@ -28,7 +24,6 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
     setUrl(convertFileSrc(entry.jpg_path));
   }, [entry?.jpg_path]);
 
-  /* Draw histogram once the image loads. */
   useEffect(() => {
     if (!url || !histRef.current) return;
     const canvas = histRef.current;
@@ -37,9 +32,9 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
-      // Down-sample to ~192×192 for speed.
       const off = document.createElement("canvas");
-      off.width = 192; off.height = 192;
+      off.width = 192;
+      off.height = 192;
       const offCtx = off.getContext("2d");
       if (!offCtx) return;
       offCtx.drawImage(img, 0, 0, off.width, off.height);
@@ -48,7 +43,9 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
       const g = new Uint32Array(256);
       const b = new Uint32Array(256);
       for (let i = 0; i < data.length; i += 4) {
-        r[data[i]]++; g[data[i + 1]]++; b[data[i + 2]]++;
+        r[data[i]]++;
+        g[data[i + 1]]++;
+        b[data[i + 2]]++;
       }
       drawHist(canvas, r, g, b);
     };
@@ -58,51 +55,60 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
   const items = schema.preview_info?.items ?? [];
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {/* histogram */}
-      <div className="shrink-0 px-3 py-2"
-           style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-        <canvas ref={histRef} width={420} height={92}
-                style={{ width: "100%", maxWidth: 420, height: 92, display: "block" }} />
-      </div>
+    <PanelGroup direction="horizontal" autoSaveId="isp6s-image-split" className="h-full w-full">
+      <Panel defaultSize={24} minSize={18}>
+        <div className="flex h-full w-full items-center justify-center p-3">
+          <canvas
+            ref={histRef}
+            width={320}
+            height={220}
+            style={{ width: "100%", height: "100%", display: "block" }}
+          />
+        </div>
+      </Panel>
 
-      {/* image preview */}
-      <div className="min-h-0 flex-1 overflow-hidden flex items-center justify-center"
-           style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-        {url
-          ? <img src={url} alt={entry?.name ?? ""}
-                 className="max-h-full max-w-full object-contain" draggable={false} />
-          : <span className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>请先选择图片文件夹</span>}
-      </div>
+      <ResizeHandle direction="horizontal" size={8} />
 
-      {/* preview_info table */}
-      <div className="max-h-[200px] shrink-0 overflow-auto">
-        <table className="w-full text-xs"
-               style={{ fontFamily: "ui-monospace, monospace" }}>
-          <tbody>
-            {(items as Array<{ label: string; toml_key: string }>).map((it, i) => (
-              <tr key={`${it.label}-${i}`}
-                  style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
-                <td className="px-3 py-1.5 font-semibold"
-                    style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
-                  {it.label}
-                </td>
-                <td className="px-3 py-1.5"
-                    style={{ color: "var(--colorNeutralForeground1)" }}>
-                  {tomlData[it.toml_key] ?? "—"}
-                </td>
-              </tr>
-            ))}
-            {items.length === 0 && (
-              <tr><td className="p-3 text-center text-xs"
-                      style={{ color: "var(--colorNeutralForeground3)" }} colSpan={2}>
-                Isp6s.toml 未配置 [[preview_info.items]]
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <Panel defaultSize={38} minSize={24}>
+        <div className="flex h-full w-full items-center justify-center overflow-hidden p-3">
+          {url
+            ? <img src={url} alt={entry?.name ?? ""}
+                   className="max-h-full max-w-full object-contain" draggable={false} />
+            : <span className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>请先选择图片文件</span>}
+        </div>
+      </Panel>
+
+      <ResizeHandle direction="horizontal" size={8} />
+
+      <Panel defaultSize={38} minSize={24}>
+        <div className="h-full w-full overflow-auto p-3">
+          <table className="w-full text-xs"
+                 style={{ fontFamily: "ui-monospace, monospace" }}>
+            <tbody>
+              {(items as Array<{ label: string; toml_key: string }>).map((it, i) => (
+                <tr key={`${it.label}-${i}`}
+                    style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
+                  <td className="px-3 py-1.5 align-top font-semibold"
+                      style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
+                    {it.label}
+                  </td>
+                  <td className="px-3 py-1.5"
+                      style={{ color: "var(--colorNeutralForeground1)" }}>
+                    {tomlData[it.toml_key] ?? "—"}
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr><td className="p-3 text-center text-xs"
+                        style={{ color: "var(--colorNeutralForeground3)" }} colSpan={2}>
+                  Isp6s.toml 未配置 [[preview_info.items]]
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </PanelGroup>
   );
 }
 
@@ -124,15 +130,16 @@ function drawHist(
   ctx.globalCompositeOperation = "lighter";
   for (const [arr, color] of [
     [r, "rgba(232, 80, 80, 0.78)"],
-    [g, "rgba( 80, 200, 80, 0.78)"],
-    [b, "rgba( 80, 130, 230, 0.78)"],
+    [g, "rgba(80, 200, 80, 0.78)"],
+    [b, "rgba(80, 130, 230, 0.78)"],
   ] as const) {
     ctx.beginPath();
     for (let i = 0; i < 256; i++) {
       const x = (i / 255) * (W - 1);
       const h = (arr[i] / max) * (H - 4);
       const y = H - h;
-      if (i === 0) ctx.moveTo(x, H); else ctx.lineTo(x, y);
+      if (i === 0) ctx.moveTo(x, H);
+      else ctx.lineTo(x, y);
     }
     ctx.lineTo(W - 1, H);
     ctx.closePath();

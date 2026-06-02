@@ -20,6 +20,8 @@ import {
   ChevronDown24Regular,
   ChevronUp24Regular,
   Image24Regular,
+  TableSimple24Regular,
+  ChartMultiple24Regular,
 } from "@fluentui/react-icons";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -31,6 +33,8 @@ import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 
 type TabId = "image" | "normal" | "face" | "lce";
 
@@ -343,7 +347,7 @@ export function TablePane({
           {tab === "image"  && <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />}
           {tab === "normal" && <Placeholder label="Normal 表格，待 normal_table.toml 映射" />}
           {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
-          {tab === "lce"    && <LceTab entry={currentEntry} tomlData={tomlData} />}
+          {tab === "lce"    && <LceTab entry={currentEntry} schema={schema} tomlData={tomlData} />}
         </div>
       )}
     </div>
@@ -678,11 +682,14 @@ function ImageTab({
 
 function LceTab({
   entry,
+  schema,
   tomlData,
 }: {
   entry: ImageEntry | undefined;
+  schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
 }) {
+  const [mode, setMode] = useState<"image" | "image_table" | "image_split">("image");
   const labels = ["0", "1", "50", "250", "500", "750", "950", "999"];
   const num = (k: string) => {
     const v = tomlData[k];
@@ -697,16 +704,45 @@ function LceTab({
       <Panel defaultSize={38} minSize={22}>
         <div className="h-full w-full p-3 pr-0">
           <div
-            className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
+            className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
             style={{
               background: "var(--colorNeutralBackground1)",
               borderColor: "var(--colorNeutralStroke2)",
             }}
           >
-            <LceImagePreview entry={entry} />
+            <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md px-1 py-1"
+                 style={{ background: "rgba(0,0,0,0.18)", backdropFilter: "blur(6px)" }}>
+              <HoverTooltip content="图片" positioning="below-center" inline>
+                <Button
+                  appearance={mode === "image" ? "primary" : "subtle"}
+                  size="small"
+                  icon={<Image24Regular />}
+                  onClick={() => setMode("image")}
+                />
+              </HoverTooltip>
+                <HoverTooltip content="三段图" positioning="below-center" inline>
+                  <Button
+                    appearance={mode === "image_split" ? "primary" : "subtle"}
+                    size="small"
+                    icon={<ChartMultiple24Regular />}
+                    onClick={() => setMode("image_split")}
+                  />
+                </HoverTooltip>
+                <HoverTooltip content="二段图" positioning="below-center" inline>
+                  <Button
+                    appearance={mode === "image_table" ? "primary" : "subtle"}
+                    size="small"
+                    icon={<TableSimple24Regular />}
+                    onClick={() => setMode("image_table")}
+                  />
+                </HoverTooltip>
+              </div>
+              {mode === "image" && <LceImagePreview entry={entry} />}
+              {mode === "image_table" && <LceImageTableMode entry={entry} schema={schema} tomlData={tomlData} />}
+              {mode === "image_split" && <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} />}
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
       <ResizeHandle direction="horizontal" size={10} />
       <Panel minSize={30}>
         <div className="h-full w-full p-3 pl-0">
@@ -754,6 +790,62 @@ function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
       style={{ display: "block" }}
       draggable={false}
     />
+  );
+}
+
+function LceImageTableMode({
+  entry,
+  schema,
+  tomlData,
+}: {
+  entry: ImageEntry | undefined;
+  schema: Isp6sSchemaRoot;
+  tomlData: Record<string, string>;
+}) {
+  const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
+  const items = schema.preview_info?.items ?? [];
+
+  return (
+    <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-image-table" className="h-full w-full">
+      <Panel defaultSize={46} minSize={28}>
+        <div className="flex h-full w-full items-center justify-center overflow-hidden p-3">
+          {url
+            ? <img src={url} alt={entry?.name ?? ""} className="max-h-full max-w-full object-contain" draggable={false} />
+            : <span className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>请先选择图片文件</span>}
+        </div>
+      </Panel>
+
+      <ResizeHandle direction="horizontal" size={8} />
+
+      <Panel defaultSize={54} minSize={28}>
+        <div className="h-full w-full overflow-auto p-3">
+          <table className="w-full text-xs"
+                 style={{ fontFamily: "ui-monospace, monospace" }}>
+            <tbody>
+              {(items as Array<{ label: string; toml_key: string }>).map((it, i) => (
+                <tr key={`${it.label}-${i}`}
+                    style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
+                  <td className="px-3 py-1.5 align-top font-semibold"
+                      style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
+                    {it.label}
+                  </td>
+                  <td className="px-3 py-1.5"
+                      style={{ color: "var(--colorNeutralForeground1)" }}>
+                    {tomlData[it.toml_key] ?? "—"}
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr><td className="p-3 text-center text-xs"
+                        style={{ color: "var(--colorNeutralForeground3)" }} colSpan={2}>
+                  Isp6s.toml 未配置 [[preview_info.items]]
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </PanelGroup>
   );
 }
 

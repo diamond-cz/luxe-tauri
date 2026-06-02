@@ -3,20 +3,18 @@ import { Button } from "@fluentui/react-components";
 import type { ImageEntry } from "@/ipc/imageScan";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
-import { ImageSplitMode } from "./ImageSplitMode";
 import { ParaCheckMode } from "./ParaCheckMode";
 import { ParamMapMode } from "./ParamMapMode";
 import {
-  ChartMultiple24Regular,
   PreviewLink24Regular,
   Code24Regular,
   CodeBlock24Regular,
 } from "@fluentui/react-icons";
 
-export type PreviewMode = "image_split" | "para_check" | "param_map";
+export type PreviewMode = "para_check" | "param_map";
 
 interface Props {
-  mode:        PreviewMode | "image";
+  mode:        PreviewMode | "image" | "image_split";
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
   schema:      Isp6sSchemaRoot;
@@ -28,7 +26,6 @@ interface Props {
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
   { id: "param_map",   label: "源码映射", Icon: Code24Regular },
   { id: "para_check",  label: "参数对比", Icon: PreviewLink24Regular },
-  { id: "image_split", label: "三段图", Icon: ChartMultiple24Regular },
 ];
 
 export function ImagePane({
@@ -37,8 +34,10 @@ export function ImagePane({
   const [internalCard] = useState<string | undefined>(undefined);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
-  const effectiveMode: PreviewMode = mode === "image" ? "param_map" : mode;
+  const effectiveMode: PreviewMode =
+    mode === "image" || mode === "image_split" ? "param_map" : mode;
   void internalCard;
+  void entry;
 
   useEffect(() => {
     const header = headerRef.current;
@@ -98,7 +97,6 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {effectiveMode === "image_split" && <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} />}
         {effectiveMode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
         {effectiveMode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} />}
       </div>

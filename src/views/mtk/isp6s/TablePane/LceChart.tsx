@@ -8,9 +8,9 @@ interface Props {
 const LABELS = ["0", "1", "50", "250", "500", "750", "950", "999"] as const;
 const VIEWBOX = { width: 920, height: 500 };
 const PAD = { left: 22, right: 22, top: 18, bottom: 26 };
-const TOP_LABEL_H = 18;
+const TOP_LABEL_H = 24;
 const LEGEND_H = 0;
-const X_LABEL_H = 18;
+const X_LABEL_H = 26;
 const CHART = {
   x: PAD.left,
   y: PAD.top + TOP_LABEL_H + LEGEND_H,
@@ -65,9 +65,9 @@ export function LceChart({ pSeries, oSeries }: Props) {
           <text
             key={item.label}
             x={item.x}
-            y={PAD.top + 8}
+            y={PAD.top + 10}
             textAnchor="middle"
-            fontSize="14"
+            fontSize="18"
             fontWeight="700"
             fill={palette.topDiff}
             style={{ fontFamily: FONT_FAMILY }}
@@ -76,7 +76,7 @@ export function LceChart({ pSeries, oSeries }: Props) {
           </text>
         ))}
 
-        <g transform={`translate(${CHART.x + 12} ${CHART.y + 18})`}>
+        <g transform={`translate(${CHART.x + 12} ${CHART.y + 20})`}>
           <Legend label="SW_LCE_P" color={palette.pLine} text={palette.text} />
           <g transform="translate(0 18)">
             <Legend label="SW_LCE_O" color={palette.oLine} text={palette.text} />
@@ -174,9 +174,9 @@ export function LceChart({ pSeries, oSeries }: Props) {
           <text
             key={tick.label}
             x={tick.x}
-            y={CHART.y + CHART.height + 14}
+            y={CHART.y + CHART.height + 18}
             textAnchor="middle"
-            fontSize="11"
+            fontSize="18"
             fill={palette.subtleText}
             style={{ fontFamily: FONT_FAMILY }}
           >
@@ -184,24 +184,17 @@ export function LceChart({ pSeries, oSeries }: Props) {
           </text>
         ))}
 
-        {model.hover?.p && (
+        {model.hover?.o && model.hover?.p && (
           <TooltipTag
-            x={model.hover.p.x + 12}
-            y={model.hover.p.y - 10}
-            color={palette.pLine}
-            background={palette.tooltipBg}
-            textColor={palette.tooltipText}
-            text={`SW_LCE_P: ${Math.round(model.hover.p.value)}`}
-          />
-        )}
-        {model.hover?.o && (
-          <TooltipTag
-            x={model.hover.o.x + 12}
-            y={model.hover.o.y - 10}
+            x={Math.max(model.hover.o.x, model.hover.p.x) + 12}
+            y={Math.min(model.hover.o.y, model.hover.p.y) - 16}
             color={palette.oLine}
             background={palette.tooltipBg}
             textColor={palette.tooltipText}
-            text={`SW_LCE_O: ${Math.round(model.hover.o.value)}`}
+            lines={[
+              `LCE_O: ${Math.round(model.hover.o.value)}`,
+              `LCE_P: ${Math.round(model.hover.p.value)}`,
+            ]}
           />
         )}
       </svg>
@@ -212,12 +205,12 @@ export function LceChart({ pSeries, oSeries }: Props) {
 function Legend({ label, color, text }: { label: string; color: string; text: string }) {
   return (
     <g>
-      <line x1="0" x2="20" y1="7" y2="7" stroke={color} strokeWidth="2" />
-      <rect x="7.5" y="4.5" width="5" height="5" fill={color} />
+      <line x1="0" x2="22" y1="8" y2="8" stroke={color} strokeWidth="2" />
+      <rect x="8.5" y="5.5" width="5" height="5" fill={color} />
       <text
-        x="26"
-        y="11"
-        fontSize="12"
+        x="30"
+        y="14"
+        fontSize="18"
         fontWeight="600"
         fill={text}
         style={{ fontFamily: FONT_FAMILY }}
@@ -234,38 +227,42 @@ function TooltipTag({
   color,
   background,
   textColor,
-  text,
+  lines,
 }: {
   x: number;
   y: number;
   color: string;
   background: string;
   textColor: string;
-  text: string;
+  lines: string[];
 }) {
-  const width = Math.max(116, text.length * 7.1);
+  const width = Math.max(170, ...lines.map((line) => line.length * 10));
+  const height = 16 + lines.length * 22;
   return (
     <g>
       <rect
         x={x}
         y={y}
         width={width}
-        height="24"
+        height={height}
         rx="4"
         fill={background}
         stroke={color}
         strokeWidth="1"
       />
-      <text
-        x={x + 8}
-        y={y + 16}
-        fontSize="12"
-        fontWeight="600"
-        fill={textColor}
-        style={{ fontFamily: FONT_FAMILY }}
-      >
-        {text}
-      </text>
+      {lines.map((line, index) => (
+        <text
+          key={line}
+          x={x + 8}
+          y={y + 22 + index * 22}
+          fontSize="18"
+          fontWeight="600"
+          fill={textColor}
+          style={{ fontFamily: FONT_FAMILY }}
+        >
+          {line}
+        </text>
+      ))}
     </g>
   );
 }
