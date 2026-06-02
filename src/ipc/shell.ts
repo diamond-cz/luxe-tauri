@@ -48,6 +48,9 @@ export const getConfigDir = () =>
 export const openPath = (path: string) =>
   call<void>("open_path", { path });
 
+export const openUrl = (url: string) =>
+  call<void>("open_url", { url });
+
 export const isDir = (path: string) =>
   call<boolean>("is_dir", { path });
 

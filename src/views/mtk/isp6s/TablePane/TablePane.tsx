@@ -123,7 +123,7 @@ export function TablePane({
            borderRadius: 12,
            overflow:    "hidden",
          }}>
-      {/* Header bar 鈥?always visible: thumbnail + folder path + image selector + collapse toggle */}
+      {/* Header bar: always visible thumbnail + folder path + image selector + collapse toggle */}
       <div className="shrink-0 px-3 py-2"
            style={!collapsed
              ? { borderBottom: "1px solid var(--colorNeutralStroke2)" }
@@ -225,8 +225,8 @@ export function TablePane({
           <div className="min-h-0 flex-1 overflow-hidden">
             {tab === "image"  && <ImageTab    schema={schema} entries={entries} current={current}
                                              onPick={onPickImage} />}
-            {tab === "normal" && <Placeholder label="Normal 琛ㄦ牸 路 寰?normal_table.toml 鏄犲皠" />}
-            {tab === "face"   && <Placeholder label="Face 琛ㄦ牸 路 寰?face_table.toml 鏄犲皠" />}
+            {tab === "normal" && <Placeholder label="Normal 表格，待 normal_table.toml 映射" />}
+            {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
             {tab === "lce"    && <LceTab tomlData={tomlData} />}
             {tab === "all"    && <AllTab tomlData={tomlData} />}
           </div>
@@ -256,7 +256,7 @@ function ImagePickerDropdown({
   const menuColors = useMemo(() => getPortalMenuColors(), [open]);
   const selectedLabel = currentEntry
     ? `${selectedIndex + 1} | ${currentEntry.name}`
-    : "鏈€夋嫨鍥剧墖";
+    : "未选择图片";
   const indexColumnWidth = Math.max(24, String(entries.length).length * 8 + 10);
 
   useEffect(() => {
@@ -479,7 +479,7 @@ function Placeholder({ label }: { label: string }) {
   );
 }
 
-/* 鈹€鈹€鈹€鈹€鈹€鈹€ Image tab 鈥?list of images with extra columns from [Image] schema 鈹€鈹€鈹€鈹€鈹€鈹€ */
+/* Image tab: list of images with extra columns from [Image] schema */
 
 function ImageTab({
   schema, entries, current, onPick,
@@ -564,7 +564,7 @@ function ImageTab({
   );
 }
 
-/* 鈹€鈹€鈹€鈹€鈹€鈹€ LCE tab 鈹€鈹€鈹€鈹€鈹€鈹€ */
+/* LCE tab */
 
 function LceTab({ tomlData }: { tomlData: Record<string, string> }) {
   const labels = ["0", "1", "50", "250", "500", "750", "950", "999"];
@@ -582,7 +582,7 @@ function LceTab({ tomlData }: { tomlData: Record<string, string> }) {
   );
 }
 
-/* 鈹€鈹€鈹€鈹€鈹€鈹€ All tab 鈥?flat key/value of the current image TOML 鈹€鈹€鈹€鈹€鈹€鈹€ */
+/* All tab: flat key/value of the current image TOML */
 
 function AllTab({ tomlData }: { tomlData: Record<string, string> }) {
   const rows = useMemo(() => {
@@ -615,7 +615,8 @@ function AllTab({ tomlData }: { tomlData: Record<string, string> }) {
           {rows.length === 0 && (
             <tr><td colSpan={2} className="p-4 text-center"
                     style={{ color: "var(--colorNeutralForeground3)" }}>
-              锛堟棤鏁版嵁锛?            </td></tr>
+              （无数据）
+            </td></tr>
           )}
         </tbody>
       </table>

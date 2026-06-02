@@ -38,6 +38,29 @@ pub fn open_path(path: String) -> AppResult<()> {
     Ok(())
 }
 
+/// Open an external HTTP(S) URL in the user's default browser.
+#[tauri::command]
+pub fn open_url(url: String) -> AppResult<()> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(AppError::Invalid(format!("unsupported url: {url}")));
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&url).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(&url).spawn()?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn is_dir(path: String) -> bool {
     Path::new(&path).is_dir()
