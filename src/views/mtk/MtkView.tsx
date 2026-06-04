@@ -8,7 +8,6 @@ import { Toast, type ToastKind } from "@/components/common/Toast";
 
 import { ISP_LIST, ISP_TABS, type IspId } from "./ispTabs";
 import { IspSelectBar } from "./IspSelectBar";
-import { MtkPickerBar } from "./MtkPickerBar";
 import { Isp6sAeVisual } from "./isp6s/Isp6sAeVisual";
 
 /**
@@ -23,6 +22,7 @@ export function MtkView() {
   const mtk            = useMtkStore((s) => s.mtk);
   const setCurrentIsp  = useMtkStore((s) => s.setCurrentIsp);
   const setCurrentTab  = useMtkStore((s) => s.setCurrentTab);
+  const setInnerSplit  = useMtkStore((s) => s.setInnerSplit);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -45,7 +45,12 @@ export function MtkView() {
 
   const setImageDir = useMtkStore((s) => s.setImageDir);
 
-  const [toast, setToast] = useState<{ kind: ToastKind; title: string; detail?: string } | null>(null);
+  const [toast, setToast] = useState<{
+    kind: ToastKind;
+    title: string;
+    detail?: string;
+    duration?: number;
+  } | null>(null);
 
   const onCppPathChange = async (path: string) => {
     setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
@@ -102,8 +107,14 @@ export function MtkView() {
       <IspSelectBar
         isp={ispId}
         tabIdx={tabIdx}
+        cppFileHint={tab.fileHint}
+        cppPath={imports.filePath}
+        pickerRatios={mtk.inner_splitter}
         onIspChange={(id) => setCurrentIsp(ISP_LIST.findIndex((i) => i.id === id))}
         onTabChange={setCurrentTab}
+        onCppPathChange={onCppPathChange}
+        onPickerRatiosChange={setInnerSplit}
+        onToast={setToast}
       />
 
       {/* Placeholder tabs (ISP7S 三 channel, etc.) get a single-message body. */}
@@ -114,14 +125,6 @@ export function MtkView() {
         </div>
       ) : (
         <>
-          <div className="shrink-0 px-3 pt-3">
-            <MtkPickerBar
-              cppFileHint={tab.fileHint}
-              cppPath={imports.filePath}
-              onCppPathChange={onCppPathChange}
-            />
-          </div>
-
           <div className="min-h-0 flex-1 overflow-hidden p-3">
             {isAeBasic ? (
               <Isp6sAeVisual
@@ -145,7 +148,7 @@ export function MtkView() {
           kind={toast.kind}
           title={toast.title}
           detail={toast.detail}
-          duration={3000}
+          duration={toast.duration ?? 3000}
           onClose={() => setToast(null)}
         />
       )}

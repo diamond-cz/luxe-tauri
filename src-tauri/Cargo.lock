@@ -2057,6 +2057,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "image",
+ "indexmap 2.14.0",
  "log",
  "once_cell",
  "parking_lot",

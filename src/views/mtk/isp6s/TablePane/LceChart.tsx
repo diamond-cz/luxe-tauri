@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface Props {
   pSeries: number[];
@@ -6,17 +6,8 @@ interface Props {
 }
 
 const LABELS = ["0", "1", "50", "250", "500", "750", "950", "999"] as const;
-const VIEWBOX = { width: 920, height: 500 };
-const PAD = { left: 22, right: 22, top: 18, bottom: 26 };
-const TOP_LABEL_H = 24;
-const LEGEND_H = 0;
-const X_LABEL_H = 26;
-const CHART = {
-  x: PAD.left,
-  y: PAD.top + TOP_LABEL_H + LEGEND_H,
-  width: VIEWBOX.width - PAD.left - PAD.right,
-  height: VIEWBOX.height - PAD.top - PAD.bottom - TOP_LABEL_H - LEGEND_H - X_LABEL_H,
-};
+const MIN_WIDTH = 520;
+const MIN_HEIGHT = 320;
 
 type ThemeMode = "light" | "dark";
 
@@ -25,6 +16,22 @@ type Point = {
   y: number;
   value: number;
   label: string;
+};
+
+type Layout = {
+  width: number;
+  height: number;
+  pad: { left: number; right: number; top: number; bottom: number };
+  topLabelHeight: number;
+  xLabelHeight: number;
+  legendX: number;
+  legendY: number;
+  chart: { x: number; y: number; width: number; height: number };
+  topFontSize: number;
+  axisFontSize: number;
+  legendFontSize: number;
+  tooltipFontSize: number;
+  pointSize: number;
 };
 
 type Palette = {
@@ -41,33 +48,69 @@ type Palette = {
   tooltipText: string;
 };
 
+type Model = {
+  pPoints: Point[];
+  oPoints: Point[];
+  xTicks: { label: string; x: number }[];
+  hGrid: number[];
+  topDiffs: { label: string; x: number; text: string }[];
+  hover: {
+    label: string;
+    x: number;
+    p: Point | undefined;
+    o: Point | undefined;
+  } | null;
+};
+
 export function LceChart({ pSeries, oSeries }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: MIN_WIDTH, height: MIN_HEIGHT });
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const mode: ThemeMode = document.documentElement.classList.contains("light") ? "light" : "dark";
   const palette = getPalette(mode);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const width = Math.max(MIN_WIDTH, Math.floor(entry.contentRect.width));
+      const height = Math.max(MIN_HEIGHT, Math.floor(entry.contentRect.height));
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const layout = useMemo(() => buildLayout(size.width, size.height), [size.width, size.height]);
   const model = useMemo(
-    () => buildModel(pSeries, oSeries, hoveredLabel),
-    [pSeries, oSeries, hoveredLabel],
+    () => buildModel(pSeries, oSeries, hoveredLabel, layout),
+    [pSeries, oSeries, hoveredLabel, layout],
   );
 
   return (
-    <div className="h-full w-full p-2">
+    <div ref={rootRef} className="h-full w-full p-2">
       <svg
-        viewBox={`0 0 ${VIEWBOX.width} ${VIEWBOX.height}`}
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${layout.width} ${layout.height}`}
         className="block h-full w-full"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
         shapeRendering="geometricPrecision"
         onMouseLeave={() => setHoveredLabel(null)}
       >
-        <rect x="0" y="0" width={VIEWBOX.width} height={VIEWBOX.height} rx="14" fill={palette.surface} />
+        <rect x="0" y="0" width={layout.width} height={layout.height} rx="14" fill={palette.surface} />
 
         {model.topDiffs.map((item) => (
           <text
             key={item.label}
             x={item.x}
-            y={PAD.top + 10}
+            y={layout.pad.top + layout.topFontSize}
             textAnchor="middle"
-            fontSize="18"
+            fontSize={layout.topFontSize}
             fontWeight="700"
             fill={palette.topDiff}
             style={{ fontFamily: FONT_FAMILY }}
@@ -76,18 +119,18 @@ export function LceChart({ pSeries, oSeries }: Props) {
           </text>
         ))}
 
-        <g transform={`translate(${CHART.x + 12} ${CHART.y + 20})`}>
-          <Legend label="SW_LCE_P" color={palette.pLine} text={palette.text} />
-          <g transform="translate(0 18)">
-            <Legend label="SW_LCE_O" color={palette.oLine} text={palette.text} />
+        <g transform={`translate(${layout.legendX} ${layout.legendY})`}>
+          <Legend label="SW_LCE_P" color={palette.pLine} text={palette.text} fontSize={layout.legendFontSize} />
+          <g transform={`translate(0 ${layout.legendFontSize + 10})`}>
+            <Legend label="SW_LCE_O" color={palette.oLine} text={palette.text} fontSize={layout.legendFontSize} />
           </g>
         </g>
 
         <rect
-          x={CHART.x}
-          y={CHART.y}
-          width={CHART.width}
-          height={CHART.height}
+          x={layout.chart.x}
+          y={layout.chart.y}
+          width={layout.chart.width}
+          height={layout.chart.height}
           fill="none"
           stroke={palette.border}
           strokeWidth="1.2"
@@ -96,13 +139,14 @@ export function LceChart({ pSeries, oSeries }: Props) {
         {model.hGrid.map((line, index) => (
           <line
             key={index}
-            x1={CHART.x}
-            x2={CHART.x + CHART.width}
+            x1={layout.chart.x}
+            x2={layout.chart.x + layout.chart.width}
             y1={line}
             y2={line}
             stroke={index === model.hGrid.length - 1 ? palette.axis : palette.grid}
             strokeDasharray={index === model.hGrid.length - 1 ? undefined : "2 4"}
             strokeWidth={index === model.hGrid.length - 1 ? 1.1 : 0.8}
+            vectorEffect="non-scaling-stroke"
           />
         ))}
 
@@ -111,10 +155,10 @@ export function LceChart({ pSeries, oSeries }: Props) {
             key={`tick-${tick.label}`}
             x1={tick.x}
             x2={tick.x}
-            y1={CHART.y}
-            y2={CHART.y + CHART.height}
+            y1={layout.chart.y}
+            y2={layout.chart.y + layout.chart.height}
             stroke="transparent"
-            strokeWidth="28"
+            strokeWidth={Math.max(18, layout.pointSize * 6)}
             onMouseEnter={() => setHoveredLabel(tick.label)}
             onMouseMove={() => setHoveredLabel(tick.label)}
           />
@@ -124,11 +168,12 @@ export function LceChart({ pSeries, oSeries }: Props) {
           <line
             x1={model.hover.x}
             x2={model.hover.x}
-            y1={CHART.y}
-            y2={CHART.y + CHART.height}
+            y1={layout.chart.y}
+            y2={layout.chart.y + layout.chart.height}
             stroke={palette.axis}
             strokeDasharray="4 4"
             strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
           />
         )}
 
@@ -138,6 +183,7 @@ export function LceChart({ pSeries, oSeries }: Props) {
           strokeWidth="2.2"
           strokeLinejoin="round"
           strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
           points={polyline(model.pPoints)}
         />
         <polyline
@@ -146,26 +192,27 @@ export function LceChart({ pSeries, oSeries }: Props) {
           strokeWidth="2.2"
           strokeLinejoin="round"
           strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
           points={polyline(model.oPoints)}
         />
 
         {model.pPoints.map((point) => (
           <rect
             key={`p-${point.label}`}
-            x={point.x - 2.6}
-            y={point.y - 2.6}
-            width="5.2"
-            height="5.2"
+            x={point.x - layout.pointSize / 2}
+            y={point.y - layout.pointSize / 2}
+            width={layout.pointSize}
+            height={layout.pointSize}
             fill={palette.pLine}
           />
         ))}
         {model.oPoints.map((point) => (
           <rect
             key={`o-${point.label}`}
-            x={point.x - 2.6}
-            y={point.y - 2.6}
-            width="5.2"
-            height="5.2"
+            x={point.x - layout.pointSize / 2}
+            y={point.y - layout.pointSize / 2}
+            width={layout.pointSize}
+            height={layout.pointSize}
             fill={palette.oLine}
           />
         ))}
@@ -174,9 +221,9 @@ export function LceChart({ pSeries, oSeries }: Props) {
           <text
             key={tick.label}
             x={tick.x}
-            y={CHART.y + CHART.height + 18}
+            y={layout.chart.y + layout.chart.height + layout.axisFontSize + 6}
             textAnchor="middle"
-            fontSize="18"
+            fontSize={layout.axisFontSize}
             fill={palette.subtleText}
             style={{ fontFamily: FONT_FAMILY }}
           >
@@ -186,11 +233,12 @@ export function LceChart({ pSeries, oSeries }: Props) {
 
         {model.hover?.o && model.hover?.p && (
           <TooltipTag
-            x={Math.max(model.hover.o.x, model.hover.p.x) + 12}
-            y={Math.min(model.hover.o.y, model.hover.p.y) - 16}
+            x={Math.min(layout.width - 188, Math.max(model.hover.o.x, model.hover.p.x) + 12)}
+            y={Math.max(layout.chart.y + 8, Math.min(model.hover.o.y, model.hover.p.y) - (layout.tooltipFontSize * 3 + 18))}
             color={palette.oLine}
             background={palette.tooltipBg}
             textColor={palette.tooltipText}
+            fontSize={layout.tooltipFontSize}
             lines={[
               `LCE_O: ${Math.round(model.hover.o.value)}`,
               `LCE_P: ${Math.round(model.hover.p.value)}`,
@@ -202,15 +250,25 @@ export function LceChart({ pSeries, oSeries }: Props) {
   );
 }
 
-function Legend({ label, color, text }: { label: string; color: string; text: string }) {
+function Legend({
+  label,
+  color,
+  text,
+  fontSize,
+}: {
+  label: string;
+  color: string;
+  text: string;
+  fontSize: number;
+}) {
   return (
     <g>
-      <line x1="0" x2="22" y1="8" y2="8" stroke={color} strokeWidth="2" />
+      <line x1="0" x2="22" y1="8" y2="8" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
       <rect x="8.5" y="5.5" width="5" height="5" fill={color} />
       <text
         x="30"
-        y="14"
-        fontSize="18"
+        y={Math.round(fontSize * 0.85)}
+        fontSize={fontSize}
         fontWeight="600"
         fill={text}
         style={{ fontFamily: FONT_FAMILY }}
@@ -227,6 +285,7 @@ function TooltipTag({
   color,
   background,
   textColor,
+  fontSize,
   lines,
 }: {
   x: number;
@@ -234,10 +293,11 @@ function TooltipTag({
   color: string;
   background: string;
   textColor: string;
+  fontSize: number;
   lines: string[];
 }) {
-  const width = Math.max(170, ...lines.map((line) => line.length * 10));
-  const height = 16 + lines.length * 22;
+  const width = Math.max(150, ...lines.map((line) => line.length * (fontSize * 0.7)));
+  const height = 14 + lines.length * (fontSize + 8);
   return (
     <g>
       <rect
@@ -249,13 +309,14 @@ function TooltipTag({
         fill={background}
         stroke={color}
         strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
       />
       {lines.map((line, index) => (
         <text
           key={line}
           x={x + 8}
-          y={y + 22 + index * 22}
-          fontSize="18"
+          y={y + 18 + index * (fontSize + 8)}
+          fontSize={fontSize}
           fontWeight="600"
           fill={textColor}
           style={{ fontFamily: FONT_FAMILY }}
@@ -267,9 +328,54 @@ function TooltipTag({
   );
 }
 
-const FONT_FAMILY = `'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif`;
+const FONT_FAMILY = `'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif`;
 
-function buildModel(pSeries: number[], oSeries: number[], hoveredLabel: string | null) {
+function buildLayout(width: number, height: number): Layout {
+  const safeWidth = Math.max(MIN_WIDTH, width);
+  const safeHeight = Math.max(MIN_HEIGHT, height);
+  const topFontSize = clamp(Math.round(safeWidth / 52), 14, 18);
+  const axisFontSize = clamp(Math.round(safeWidth / 50), 14, 18);
+  const legendFontSize = clamp(Math.round(safeWidth / 52), 14, 18);
+  const tooltipFontSize = clamp(Math.round(safeWidth / 56), 14, 18);
+  const pointSize = clamp(Math.round(safeWidth / 175), 5, 7);
+  const pad = {
+    left: clamp(Math.round(safeWidth / 42), 18, 26),
+    right: clamp(Math.round(safeWidth / 42), 18, 26),
+    top: clamp(Math.round(safeHeight / 22), 16, 24),
+    bottom: clamp(Math.round(safeHeight / 18), 24, 34),
+  };
+  const topLabelHeight = topFontSize + 10;
+  const xLabelHeight = axisFontSize + 12;
+  const chart = {
+    x: pad.left,
+    y: pad.top + topLabelHeight,
+    width: safeWidth - pad.left - pad.right,
+    height: safeHeight - pad.top - pad.bottom - topLabelHeight - xLabelHeight,
+  };
+
+  return {
+    width: safeWidth,
+    height: safeHeight,
+    pad,
+    topLabelHeight,
+    xLabelHeight,
+    legendX: chart.x + 12,
+    legendY: chart.y + 18,
+    chart,
+    topFontSize,
+    axisFontSize,
+    legendFontSize,
+    tooltipFontSize,
+    pointSize,
+  };
+}
+
+function buildModel(
+  pSeries: number[],
+  oSeries: number[],
+  hoveredLabel: string | null,
+  layout: Layout,
+): Model {
   const all = [...pSeries, ...oSeries].filter(Number.isFinite);
   const max = all.length ? Math.max(...all) : 1;
   const min = all.length ? Math.min(...all) : 0;
@@ -278,9 +384,9 @@ function buildModel(pSeries: number[], oSeries: number[], hoveredLabel: string |
   const domainMin = Math.max(0, min - padding);
   const domainMax = max + padding;
 
-  const xFor = (index: number) => CHART.x + (CHART.width * index) / (LABELS.length - 1);
+  const xFor = (index: number) => layout.chart.x + (layout.chart.width * index) / (LABELS.length - 1);
   const yFor = (value: number) =>
-    CHART.y + CHART.height - ((value - domainMin) / (domainMax - domainMin || 1)) * CHART.height;
+    layout.chart.y + layout.chart.height - ((value - domainMin) / (domainMax - domainMin || 1)) * layout.chart.height;
 
   const pPoints: Point[] = LABELS
     .map((label, index) => ({ label, value: pSeries[index], x: xFor(index) }))
@@ -293,7 +399,7 @@ function buildModel(pSeries: number[], oSeries: number[], hoveredLabel: string |
     .map((point) => ({ ...point, y: yFor(point.value) }));
 
   const xTicks = LABELS.map((label, index) => ({ label, x: xFor(index) }));
-  const hGrid = Array.from({ length: 5 }, (_, index) => CHART.y + (CHART.height * index) / 4);
+  const hGrid = Array.from({ length: 5 }, (_, index) => layout.chart.y + (layout.chart.height * index) / 4);
   const topDiffs = LABELS.map((label, index) => {
     const p = pSeries[index];
     const o = oSeries[index];
@@ -347,4 +453,8 @@ function getPalette(mode: ThemeMode): Palette {
     tooltipBg: "#2C2623",
     tooltipText: "#F6F1EA",
   };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }

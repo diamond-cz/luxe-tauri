@@ -281,7 +281,10 @@ export function TablePane({
                           items={orderedTabs.map((item) => item.id)}
                           strategy={horizontalListSortingStrategy}
                         >
-                          <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+                          <div
+                            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 py-1"
+                            style={getOverlayChrome()}
+                          >
                             {orderedTabs.map((item) => (
                               <DraggableTabButton
                                 key={item.id}
@@ -304,36 +307,56 @@ export function TablePane({
                     onResize={(size) => onHeaderRatiosChange([safeHeaderRatios[0], safeHeaderRatios[1], size])}
                   >
                     <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
+                      <div
+                        className="flex h-full min-w-0 items-stretch gap-3 rounded-lg border px-2 py-1"
+                        style={getOverlayChrome()}
+                      >
                       <span
-                        className="shrink-0 text-sm font-semibold"
-                        style={{ color: "var(--colorNeutralForeground1)" }}
+                        className="flex shrink-0 items-center self-stretch rounded-md px-2 py-1 text-sm font-semibold"
+                        style={getCurrentImageLabelChrome()}
                       >
                         当前图
                         <span className="ml-0.5">:</span>
                       </span>
-                      <ImagePickerDropdown
-                        entries={entries}
-                        current={current}
-                        onPick={onPickImage}
-                      />
+                      <div
+                        className="flex min-w-0 flex-1 items-center self-stretch rounded-md px-1"
+                        style={getCurrentImageConnectorChrome()}
+                      >
+                        <ImagePickerDropdown
+                          entries={entries}
+                          current={current}
+                          onPick={onPickImage}
+                        />
+                      </div>
+                      </div>
                     </div>
                   </Panel>
                 </>
               ) : (
                 <Panel minSize={40}>
                   <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
+                    <div
+                      className="flex h-full min-w-0 items-stretch gap-3 rounded-lg border px-2 py-1"
+                      style={getOverlayChrome()}
+                    >
                     <span
-                      className="shrink-0 text-sm font-semibold"
-                      style={{ color: "var(--colorNeutralForeground1)" }}
+                      className="flex shrink-0 items-center self-stretch rounded-md px-2 py-1 text-sm font-semibold"
+                      style={getCurrentImageLabelChrome()}
                     >
                       当前图
                       <span className="ml-0.5">:</span>
                     </span>
-                    <ImagePickerDropdown
-                      entries={entries}
-                      current={current}
-                      onPick={onPickImage}
-                    />
+                    <div
+                      className="flex min-w-0 flex-1 items-center self-stretch rounded-md px-1"
+                      style={getCurrentImageConnectorChrome()}
+                    >
+                      <ImagePickerDropdown
+                        entries={entries}
+                        current={current}
+                        onPick={onPickImage}
+                      />
+                    </div>
+                    </div>
                   </div>
                 </Panel>
               )}
@@ -372,6 +395,7 @@ function ImagePickerDropdown({
   const selectedIndex = current >= 0 && current < entries.length ? current : 0;
   const currentEntry = entries[selectedIndex];
   const menuColors = useMemo(() => getPortalMenuColors(), [open]);
+  const pickerButtonChrome = useMemo(() => getCurrentImagePickerButtonChrome(open), [open]);
   const selectedLabel = currentEntry ? `${selectedIndex + 1} | ${currentEntry.name}` : "未选择图片";
   const indexColumnWidth = Math.max(24, String(entries.length).length * 8 + 10);
 
@@ -425,33 +449,37 @@ function ImagePickerDropdown({
   }, [entries, scrollTop]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative h-full min-w-0 flex-1">
       <button
         ref={buttonRef}
         type="button"
         disabled={disabled}
-        className="flex h-12 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex h-full w-full items-center gap-2 rounded-[inherit] border px-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
         style={{
-          width: "clamp(180px, 24vw, 300px)",
-          background: open ? "var(--colorNeutralBackground1)" : "transparent",
-          borderColor: open ? "var(--colorNeutralStroke1)" : "transparent",
+          background: pickerButtonChrome.background,
+          borderColor: pickerButtonChrome.borderColor,
           color: "var(--colorNeutralForeground1)",
         }}
         onClick={() => {
           if (!disabled) setOpen((v) => !v);
         }}
         onMouseEnter={(event) => {
-          if (!open) event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
+          if (!open) {
+            event.currentTarget.style.background = pickerButtonChrome.hoverBackground;
+            event.currentTarget.style.borderColor = pickerButtonChrome.hoverBorderColor;
+          }
         }}
         onMouseLeave={(event) => {
-          if (!open) event.currentTarget.style.background = "transparent";
+          if (!open) {
+            event.currentTarget.style.background = pickerButtonChrome.background;
+            event.currentTarget.style.borderColor = pickerButtonChrome.borderColor;
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") setOpen(false);
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={selectedLabel}
       >
         <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
         <ChevronDown24Regular
@@ -703,18 +731,18 @@ function LceTab({
     <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-split" className="h-full w-full">
       <Panel defaultSize={38} minSize={22}>
         <div className="h-full w-full p-3 pr-0">
-          <div
-            className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
-            style={{
-              background: "var(--colorNeutralBackground1)",
-              borderColor: "var(--colorNeutralStroke2)",
-            }}
-          >
-            <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md px-1 py-1"
-                 style={{ background: "rgba(0,0,0,0.18)", backdropFilter: "blur(6px)" }}>
-              <HoverTooltip content="图片" positioning="below-center" inline>
-                <Button
-                  appearance={mode === "image" ? "primary" : "subtle"}
+            <div
+              className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
+              style={{
+                background: "var(--colorNeutralBackground1)",
+                borderColor: "var(--colorNeutralStroke2)",
+              }}
+            >
+              <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md px-1 py-1"
+                   style={getOverlayChrome()}>
+                <HoverTooltip content="图片" positioning="below-center" inline>
+                  <Button
+                    appearance={mode === "image" ? "primary" : "subtle"}
                   size="small"
                   icon={<Image24Regular />}
                   onClick={() => setMode("image")}
@@ -874,11 +902,12 @@ function DraggableTabButton({
       ref={setNodeRef}
       type="button"
       onClick={onClick}
-      className="rounded-md px-2.5 py-1.5 text-xs transition-colors"
+      className="rounded-md border px-2.5 py-1.5 text-xs transition-colors"
       style={{
         transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
         transition,
-        background: active ? "var(--colorBrandBackground)" : "transparent",
+        background: active ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground1)",
+        borderColor: active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)",
         color: active
           ? "var(--colorNeutralForegroundOnBrand)"
           : "var(--colorNeutralForeground2)",
@@ -892,7 +921,7 @@ function DraggableTabButton({
         if (!active) event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
       }}
       onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = "transparent";
+        if (!active) event.currentTarget.style.background = "var(--colorNeutralBackground1)";
       }}
       {...attributes}
       {...listeners}
@@ -900,6 +929,49 @@ function DraggableTabButton({
       {label}
     </button>
   );
+}
+
+function getOverlayChrome(): React.CSSProperties {
+  const isLight = document.documentElement.classList.contains("light");
+  return {
+    background: isLight ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.18)",
+    borderColor: isLight ? "rgba(138,132,151,0.24)" : "rgba(255,255,255,0.08)",
+    backdropFilter: "blur(6px)",
+  };
+}
+
+function getCurrentImageLabelChrome(): React.CSSProperties {
+  const isLight = document.documentElement.classList.contains("light");
+  return {
+    background: isLight
+      ? "rgba(103, 80, 164, 0.14)"
+      : "rgba(123, 97, 255, 0.22)",
+    color: isLight ? "#5B3FA0" : "#D9CBFF",
+    border: `1px solid ${isLight ? "rgba(103, 80, 164, 0.18)" : "rgba(160, 140, 255, 0.24)"}`,
+  };
+}
+
+function getCurrentImageConnectorChrome(): React.CSSProperties {
+  const isLight = document.documentElement.classList.contains("light");
+  return {
+    border: `1px dashed ${isLight ? "rgba(103, 80, 164, 0.34)" : "rgba(160, 140, 255, 0.38)"}`,
+    background: isLight ? "rgba(103, 80, 164, 0.04)" : "rgba(123, 97, 255, 0.08)",
+  };
+}
+
+function getCurrentImagePickerButtonChrome(open: boolean) {
+  const isLight = document.documentElement.classList.contains("light");
+  const idleBackground = "transparent";
+  const idleBorder = "transparent";
+  const hoverBackground = isLight ? "rgba(103, 80, 164, 0.06)" : "rgba(123, 97, 255, 0.10)";
+  const hoverBorder = "transparent";
+
+  return {
+    background: open ? hoverBackground : idleBackground,
+    borderColor: open ? hoverBorder : idleBorder,
+    hoverBackground,
+    hoverBorderColor: hoverBorder,
+  };
 }
 
 function Th({ children }: { children: React.ReactNode }) {

@@ -62,7 +62,7 @@ export function Toast({ kind, title, detail, duration = 3000, onClose }: Props) 
       style={{
         position:  "fixed",
         top:       72,
-        right:     24,
+        left:      "50%",
         zIndex:    1000,
         minWidth:  280,
         maxWidth:  420,
@@ -72,7 +72,7 @@ export function Toast({ kind, title, detail, duration = 3000, onClose }: Props) 
         borderRadius: 8,
         boxShadow:   "0 8px 24px rgba(0,0,0,0.2)",
         color:       palette.fg,
-        transform:   open ? "translateX(0)" : "translateX(120%)",
+        transform:   open ? "translate(-50%, 0)" : "translate(-50%, -24px)",
         opacity:     open ? 1 : 0,
         transition:  "transform 200ms ease, opacity 200ms ease",
         pointerEvents: open ? "auto" : "none",

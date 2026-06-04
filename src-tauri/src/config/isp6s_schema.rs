@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::cpp_parser::card_source::CardSourceSpec;
@@ -13,7 +14,7 @@ use crate::error::AppResult;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Isp6sSchema {
     #[serde(default)] pub card:         CardSection,
-    #[serde(default, rename = "Image")] pub image:    HashMap<String, String>,
+    #[serde(default, rename = "Image")] pub image:    IndexMap<String, String>,
     #[serde(default)] pub lce:          LceSection,
     #[serde(default)] pub para_check:   ParaCheckSection,
     #[serde(default)] pub preview_info: PreviewInfoSection,
