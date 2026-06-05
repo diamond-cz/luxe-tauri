@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LUXE",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "io.luxe.tauri",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -47,8 +47,8 @@
     "publisher": "diamond-cz",
     "copyright": "© 2026 diamond-cz",
     "category": "DeveloperTool",
-    "shortDescription": "多平台 AE 算法可视化工具",
-    "longDescription": "LUXE — Camera Tuning 工程师的多平台 AE (自动曝光) 算法可视化工具。Rust + Tauri 重构版。",
+    "shortDescription": "影像效果跨平台AE算法可视化工具",
+    "longDescription": "LUXE — Camera Tuning 工程师的跨平台 AE (自动曝光) 算法可视化工具。Rust + Tauri 版本。",
     "resources": [
       "resources/translations/*.json",
       "resources/Isp6s.toml"

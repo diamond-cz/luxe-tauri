@@ -1,6 +1,6 @@
 [package]
 name = "luxe-tauri"
-version = "0.1.1"
+version = "0.1.2"
 description = "LUXE — Camera Tuning AE Visualization (Rust + Tauri)"
 authors = ["LUXE"]
 edition = "2021"
