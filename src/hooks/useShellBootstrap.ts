@@ -22,6 +22,8 @@ import { useShortcutStore } from "@/stores/shortcutStore";
 import { useMtkStore } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { usePoetryStore } from "@/stores/poetryStore";
+import { useUpdateStore } from "@/stores/updateStore";
+import { checkForUpdate } from "@/services/updateCheck";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
 import {
@@ -148,6 +150,28 @@ export function useShellBootstrap(handlers: ShellHandlers) {
 
       /* 7. Initial poetry fetch (don't block boot if it fails). */
       fetchPoetry().catch(() => {});
+
+      /* 8. Optional startup update check. Download/install is intentionally
+         not attempted until the Tauri updater signing chain is configured. */
+      if (root.settings.auto_update) {
+        const updateStore = useUpdateStore.getState();
+        updateStore.setChecking("startup");
+        checkForUpdate()
+          .then((result) => {
+            useUpdateStore.getState().setResult(result, "startup");
+            if (result.status === "available" && root.settings.update_notify) {
+              try {
+                sendNotification({
+                  title: "LUXE 有新版本",
+                  body: `v${result.latestVersion} 可用，当前 v${result.currentVersion}`,
+                });
+              } catch {/* notifications optional */}
+            }
+          })
+          .catch((err) => {
+            useUpdateStore.getState().setError(err, "startup");
+          });
+      }
     })().catch((err) => {
       console.error("[bootstrap]", err);
       getCurrentWindow().show().catch(() => {});

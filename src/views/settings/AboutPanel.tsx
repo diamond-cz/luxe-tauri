@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import logo from "@/assets/luxe-logo.png";
 import { SectionTitle } from "@/components/settings/SectionTitle";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { APP_VERSION } from "@/services/appVersion";
 
-const APP_VERSION = "0.1.0";
-const REPO_URL    = "https://github.com/diamond-cz/hiz";
+const REPO_URL    = "https://github.com/diamond-cz/LUXE";
 
 function openExternal(url: string) {
   // window.open is intercepted by Tauri webview and routes via the OS default browser.

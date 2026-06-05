@@ -21,12 +21,14 @@ import logo from "@/assets/luxe-logo.png";
 import { SortableCard } from "@/components/common/SortableCard";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 import { openUrl } from "@/ipc/shell";
+import {
+  checkForUpdate,
+  CURRENT_VERSION,
+  GITHUB_RELEASES_URL,
+  GITHUB_REPOSITORY_URL,
+} from "@/services/updateCheck";
 import { usePoetryStore } from "@/stores/poetryStore";
-import pkg from "../../package.json";
-
-const GITHUB_URL = "https://github.com/diamond-cz/LUXE";
-const LATEST_RELEASE_URL = "https://api.github.com/repos/diamond-cz/LUXE/releases/latest";
-const CURRENT_VERSION = pkg.version;
+import { useUpdateStore } from "@/stores/updateStore";
 
 interface PlatformCard {
   to: string;
@@ -60,33 +62,28 @@ const PLATFORM_CARDS: PlatformCard[] = [
   },
 ];
 
-type UpdateState =
-  | { status: "idle"; message: string }
-  | { status: "checking"; message: string }
-  | { status: "ok"; message: string }
-  | { status: "available"; message: string }
-  | { status: "error"; message: string };
-
-interface GithubRelease {
-  tag_name?: string;
-  html_url?: string;
-}
-
 export function HomeView() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const poetry = usePoetryStore((s) => s.line);
+  const updateStatus = useUpdateStore((s) => s.status);
+  const updateMessage = useUpdateStore((s) => s.message);
+  const releaseUrl = useUpdateStore((s) => s.releaseUrl);
+  const setUpdateChecking = useUpdateStore((s) => s.setChecking);
+  const setUpdateResult = useUpdateStore((s) => s.setResult);
+  const setUpdateError = useUpdateStore((s) => s.setError);
   const [platformOrder, setPlatformOrder] = useState(
     PLATFORM_CARDS.map((card) => card.to),
   );
-  const [update, setUpdate] = useState<UpdateState>({
-    status: "idle",
-    message: "可检查 GitHub 最新发布版本",
-  });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+  const primaryUpdateLabel = updateStatus === "checking"
+    ? "检查中"
+    : updateStatus === "available"
+      ? "打开新版"
+      : "检查更新";
 
   const orderedCards = platformOrder
     .map((id) => PLATFORM_CARDS.find((card) => card.to === id))
@@ -104,38 +101,22 @@ export function HomeView() {
   };
 
   const openGithub = () => {
-    openUrl(GITHUB_URL).catch((err) => {
-      setUpdate({ status: "error", message: `无法打开链接：${String(err)}` });
-    });
+    openUrl(GITHUB_REPOSITORY_URL).catch((err) => setUpdateError(err, "manual"));
+  };
+
+  const openLatestRelease = () => {
+    openUrl(releaseUrl || GITHUB_RELEASES_URL)
+      .catch((err) => setUpdateError(err, "manual"));
   };
 
   const checkUpdate = async () => {
-    setUpdate({ status: "checking", message: "正在检查更新..." });
+    if (updateStatus === "checking") return;
+    setUpdateChecking("manual");
     try {
-      const res = await fetch(LATEST_RELEASE_URL, {
-        headers: { Accept: "application/vnd.github+json" },
-      });
-      if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`);
-      const data = await res.json() as GithubRelease;
-      const latest = normaliseVersion(data.tag_name ?? "");
-      if (!latest) throw new Error("未找到最新版本号");
-
-      if (compareVersions(latest, CURRENT_VERSION) > 0) {
-        setUpdate({
-          status: "available",
-          message: `发现新版本 ${latest}，当前版本 ${CURRENT_VERSION}`,
-        });
-        return;
-      }
-      setUpdate({
-        status: "ok",
-        message: `当前已是最新版本 ${CURRENT_VERSION}`,
-      });
+      const result = await checkForUpdate();
+      setUpdateResult(result, "manual");
     } catch (err) {
-      setUpdate({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
+      setUpdateError(err, "manual");
     }
   };
 
@@ -231,13 +212,13 @@ export function HomeView() {
               </div>
               <div className="mt-2 text-xs"
                    style={{
-                     color: update.status === "error"
+                     color: updateStatus === "error"
                        ? "var(--colorPaletteRedForeground1)"
-                       : update.status === "available"
+                       : updateStatus === "available"
                          ? "var(--colorBrandForeground1)"
                          : "var(--colorNeutralForeground3)",
                    }}>
-                {update.message}
+                {updateMessage}
               </div>
             </div>
 
@@ -245,16 +226,16 @@ export function HomeView() {
               <Button appearance="secondary" icon={<Code24Regular />} onClick={openGithub}>
                 GitHub
               </Button>
-              <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={openGithub}>
+              <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={openLatestRelease}>
                 更新日志
               </Button>
               <Button
                 appearance="primary"
                 icon={<ArrowSync24Regular />}
-                disabled={update.status === "checking"}
-                onClick={checkUpdate}
+                disabled={updateStatus === "checking"}
+                onClick={updateStatus === "available" ? openLatestRelease : checkUpdate}
               >
-                {update.status === "checking" ? "检查中" : "检查更新"}
+                {primaryUpdateLabel}
               </Button>
             </div>
           </div>
@@ -262,20 +243,4 @@ export function HomeView() {
       </div>
     </div>
   );
-}
-
-function normaliseVersion(raw: string): string | null {
-  const match = raw.trim().match(/^v?(\d+(?:\.\d+){0,2})/i);
-  return match?.[1] ?? null;
-}
-
-function compareVersions(a: string, b: string): number {
-  const left = a.split(".").map((part) => Number.parseInt(part, 10));
-  const right = b.split(".").map((part) => Number.parseInt(part, 10));
-  const len = Math.max(left.length, right.length, 3);
-  for (let i = 0; i < len; i += 1) {
-    const diff = (left[i] ?? 0) - (right[i] ?? 0);
-    if (diff !== 0) return diff > 0 ? 1 : -1;
-  }
-  return 0;
 }

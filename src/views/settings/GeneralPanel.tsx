@@ -152,23 +152,23 @@ export function GeneralPanel() {
 
         <SettingRow
           icon="ic_fluent_arrow_sync_regular"
-          title={t("auto_update", { defaultValue: "后台自动更新" })}
-          desc={t("auto_update_desc", { defaultValue: "检测到新版本时，在后台静默更新；完成后提示重启" })}
+          title={t("auto_update", { defaultValue: "启动时自动检查更新" })}
+          desc={t("auto_update_desc", { defaultValue: "启动后自动检查 GitHub 最新版本；当前仅提醒并打开 Release" })}
         >
           <Select
             value={settings.auto_update ? "true" : "false"}
             onChange={(_, d) => persist({ ...settings, auto_update: d.value === "true" })}
             style={{ minWidth: SELECT_WIDTH }}
           >
-            <option value="false">{t("update_off", { defaultValue: "关闭（手动更新）" })}</option>
-            <option value="true"> {t("update_on",  { defaultValue: "开启（自动更新）" })}</option>
+            <option value="false">{t("update_off", { defaultValue: "关闭（手动检查）" })}</option>
+            <option value="true"> {t("update_on",  { defaultValue: "开启（启动时检查）" })}</option>
           </Select>
         </SettingRow>
 
         <SettingRow
           icon="ic_fluent_alert_regular"
           title={t("update_notify", { defaultValue: "更新提醒" })}
-          desc={t("update_notify_desc", { defaultValue: "检测到新版本时，提示更新并在侧边栏显示快捷入口" })}
+          desc={t("update_notify_desc", { defaultValue: "检测到新版本时发送系统通知，并在侧边栏首页入口显示提示" })}
         >
           <Switch
             checked={settings.update_notify}

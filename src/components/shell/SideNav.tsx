@@ -1,11 +1,17 @@
 import { NavLink } from "react-router-dom";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useUpdateStore } from "@/stores/updateStore";
 
 interface NavItem {
   to:    string;
   icon:  LuxeIconName;
   hint:  string;
+}
+
+interface NavButtonProps extends NavItem {
+  badge?: boolean;
 }
 
 const TOP_ITEMS: NavItem[] = [
@@ -20,6 +26,10 @@ const BOTTOM_ITEMS: NavItem[] = [
 ];
 
 export function SideNav() {
+  const updateAvailable = useUpdateStore((s) => s.status === "available");
+  const updateNotify = useSettingsStore((s) => s.settings.update_notify);
+  const showUpdateBadge = updateAvailable && updateNotify;
+
   return (
     <nav
       className="flex h-full w-12 shrink-0 flex-col items-center justify-between py-3"
@@ -29,7 +39,13 @@ export function SideNav() {
       }}
     >
       <div className="flex flex-col items-center gap-2">
-        {TOP_ITEMS.map((item) => <NavButton key={item.to} {...item} />)}
+        {TOP_ITEMS.map((item) => (
+          <NavButton
+            key={item.to}
+            {...item}
+            badge={item.to === "/home" && showUpdateBadge}
+          />
+        ))}
       </div>
       <div className="flex flex-col items-center gap-2">
         {BOTTOM_ITEMS.map((item) => <NavButton key={item.to} {...item} />)}
@@ -38,13 +54,13 @@ export function SideNav() {
   );
 }
 
-function NavButton({ to, icon, hint }: NavItem) {
+function NavButton({ to, icon, hint, badge = false }: NavButtonProps) {
   return (
     <HoverTooltip content={hint} positioning="right-center" inline>
       <NavLink
         to={to}
         aria-label={hint}
-        className="flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+        className="relative flex h-10 w-10 items-center justify-center rounded-md transition-colors"
         style={({ isActive }) => ({
           background: isActive
             ? "var(--colorBrandBackground)"
@@ -73,6 +89,13 @@ function NavButton({ to, icon, hint }: NavItem) {
         }}
       >
         <FluentIcon name={icon} />
+        {badge && (
+          <span
+            aria-hidden
+            className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full"
+            style={{ background: "var(--colorPaletteRedBackground3)" }}
+          />
+        )}
       </NavLink>
     </HoverTooltip>
   );
