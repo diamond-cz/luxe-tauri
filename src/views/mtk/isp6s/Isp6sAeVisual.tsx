@@ -387,7 +387,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
 
   /* ── Table panel — wraps TablePane in standard padding. ── */
   const renderTablePanel = () => (
-    <div className="h-full w-full">
+    <div className={visual.table_collapsed ? "w-full" : "h-full w-full"}>
       <TablePane
         schema={schema}
         entries={imageDir.entries}
@@ -415,7 +415,11 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
 
   /* Image folder loaded but parameter not yet parsed → table only. */
   if (hasEntries && !parsed) {
-    return <div className="h-full w-full">{renderTablePanel()}</div>;
+    return (
+      <div className={visual.table_collapsed ? "w-full" : "h-full w-full"}>
+        {renderTablePanel()}
+      </div>
+    );
   }
 
   /* Parameter parsed but no image folder → cards + ImagePane only. */

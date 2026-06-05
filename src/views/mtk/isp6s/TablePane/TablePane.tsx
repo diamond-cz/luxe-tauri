@@ -182,7 +182,7 @@ export function TablePane({
 
   return (
     <div ref={rootRef}
-         className="flex h-full w-full flex-col transition-colors"
+         className={`flex w-full flex-col transition-colors ${collapsed ? "" : "h-full"}`}
          style={{
            background,
            border: `1px solid ${borderColor}`,

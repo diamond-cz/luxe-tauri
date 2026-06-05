@@ -23,7 +23,7 @@ export function AboutPanel() {
       <div className="text-sm" style={{ color: "var(--colorNeutralForeground3)" }}>
         v{APP_VERSION}
         <span className="mx-2 text-pink-400">❤</span>
-        {t("app_desc", { defaultValue: "多平台 AE 算法可视化工具" })}
+        {t("app_desc", { defaultValue: "影像效果跨平台AE算法可视化" })}
       </div>
 
       {/* ────────── 开源 ────────── */}

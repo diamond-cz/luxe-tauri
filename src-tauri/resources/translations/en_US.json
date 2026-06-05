@@ -43,7 +43,7 @@
   "about_copyright_desc": "LUXE Copyright © 2026 by diamond-cz",
   "about_icon_pack": "Icon Pack",
   "about_icon_pack_desc": "This project includes Fluent UI icons, copyright Microsoft",
-  "app_desc": "Cross-platform AE Algorithm Visualization Tool",
+  "app_desc": "Cross-platform AE Algorithm Visualization for Image Effects",
   "home_subtitle": "A multi-platform AE algorithm visualization interface based on PyQt5",
   "page_mtk": "MTK Platform",
   "page_qualcomm": "Qualcomm Platform",

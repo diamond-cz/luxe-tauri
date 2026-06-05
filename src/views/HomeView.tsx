@@ -133,7 +133,7 @@ export function HomeView() {
             </h1>
             <p className="mt-1 text-sm"
                style={{ color: "var(--colorNeutralForeground3)" }}>
-              {t("app_desc", { defaultValue: "多平台 AE 算法可视化工具" })}
+              {t("app_desc", { defaultValue: "影像效果跨平台AE算法可视化" })}
               <span className="mx-2">·</span>
               <span style={{ color: "var(--colorBrandForeground1)" }}>
                 {poetry}
@@ -212,13 +212,7 @@ export function HomeView() {
                 当前版本 v{CURRENT_VERSION}
               </div>
               <div className="mt-2 text-xs"
-                   style={{
-                     color: updateStatus === "error"
-                       ? "var(--colorPaletteRedForeground1)"
-                       : updateStatus === "available" || updateStatus === "unknown"
-                         ? "var(--colorBrandForeground1)"
-                         : "var(--colorNeutralForeground3)",
-                   }}>
+                   style={{ color: "var(--colorBrandForeground1)" }}>
                 {updateMessage}
               </div>
             </div>
