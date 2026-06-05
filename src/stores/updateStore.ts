@@ -5,7 +5,7 @@ import {
   type UpdateCheckResult,
 } from "@/services/updateCheck";
 
-export type UpdateStatus = "idle" | "checking" | "ok" | "available" | "error";
+export type UpdateStatus = "idle" | "checking" | "ok" | "available" | "unknown" | "error";
 export type UpdateCheckSource = "manual" | "startup";
 
 interface UpdateState {
@@ -38,7 +38,9 @@ export const useUpdateStore = create<UpdateState>((set) => ({
     status: result.status,
     message: result.status === "available"
       ? `发现新版本 v${result.latestVersion}，当前版本 v${result.currentVersion}`
-      : `当前已是最新版本 v${result.currentVersion}`,
+      : result.status === "unknown"
+        ? (result.message ?? "无法自动判断最新版本，请打开 Releases 页面查看")
+        : `当前已是最新版本 v${result.currentVersion}`,
     currentVersion: result.currentVersion,
     latestVersion: result.latestVersion,
     releaseUrl: result.releaseUrl,

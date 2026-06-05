@@ -5,7 +5,7 @@ import { SectionTitle } from "@/components/settings/SectionTitle";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { APP_VERSION } from "@/services/appVersion";
 
-const REPO_URL    = "https://github.com/diamond-cz/LUXE";
+const REPO_URL    = "https://github.com/diamond-cz/luxe-tauri";
 
 function openExternal(url: string) {
   // window.open is intercepted by Tauri webview and routes via the OS default browser.

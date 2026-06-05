@@ -50,14 +50,14 @@ const PLATFORM_CARDS: PlatformCard[] = [
     to: "/qualcomm",
     icon: "ic_fluent_window_shield_filled",
     title: "Qualcomm 平台",
-    subtitle: "C++ 参数文件导入（待扩展）",
+    subtitle: "xml 参数文件导入(待扩展)",
     accent: "#2D7BF4",
   },
   {
     to: "/unisoc",
     icon: "ic_fluent_window_brush_filled",
     title: "Unisoc 平台",
-    subtitle: "C++ 参数文件导入（待扩展）",
+    subtitle: "xml 参数文件导入(待扩展)",
     accent: "#E94B7A",
   },
 ];
@@ -79,10 +79,11 @@ export function HomeView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+  const shouldOpenRelease = updateStatus === "available" || updateStatus === "unknown";
   const primaryUpdateLabel = updateStatus === "checking"
     ? "检查中"
-    : updateStatus === "available"
-      ? "打开新版"
+    : shouldOpenRelease
+      ? (updateStatus === "available" ? "打开新版" : "打开 Releases")
       : "检查更新";
 
   const orderedCards = platformOrder
@@ -214,7 +215,7 @@ export function HomeView() {
                    style={{
                      color: updateStatus === "error"
                        ? "var(--colorPaletteRedForeground1)"
-                       : updateStatus === "available"
+                       : updateStatus === "available" || updateStatus === "unknown"
                          ? "var(--colorBrandForeground1)"
                          : "var(--colorNeutralForeground3)",
                    }}>
@@ -233,7 +234,7 @@ export function HomeView() {
                 appearance="primary"
                 icon={<ArrowSync24Regular />}
                 disabled={updateStatus === "checking"}
-                onClick={updateStatus === "available" ? openLatestRelease : checkUpdate}
+                onClick={shouldOpenRelease ? openLatestRelease : checkUpdate}
               >
                 {primaryUpdateLabel}
               </Button>

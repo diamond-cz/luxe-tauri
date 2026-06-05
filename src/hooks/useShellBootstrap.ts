@@ -163,7 +163,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
               try {
                 sendNotification({
                   title: "LUXE 有新版本",
-                  body: `v${result.latestVersion} 可用，当前 v${result.currentVersion}`,
+                  body: `v${result.latestVersion ?? "未知版本"} 可用，当前 v${result.currentVersion}`,
                 });
               } catch {/* notifications optional */}
             }
