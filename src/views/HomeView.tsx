@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 
 import logo from "@/assets/luxe-logo.png";
 import { SortableCard } from "@/components/common/SortableCard";
+import { UpdateLogDialog } from "@/components/common/UpdateLogDialog";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 import { openUrl } from "@/ipc/shell";
 import {
@@ -75,6 +76,7 @@ export function HomeView() {
   const [platformOrder, setPlatformOrder] = useState(
     PLATFORM_CARDS.map((card) => card.to),
   );
+  const [updateLogOpen, setUpdateLogOpen] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -105,9 +107,13 @@ export function HomeView() {
     openUrl(GITHUB_REPOSITORY_URL).catch((err) => setUpdateError(err, "manual"));
   };
 
-  const openLatestRelease = () => {
-    openUrl(releaseUrl || GITHUB_RELEASES_URL)
+  const openReleaseUrl = (url: string) => {
+    openUrl(url)
       .catch((err) => setUpdateError(err, "manual"));
+  };
+
+  const openLatestRelease = () => {
+    openReleaseUrl(releaseUrl || GITHUB_RELEASES_URL);
   };
 
   const checkUpdate = async () => {
@@ -221,7 +227,7 @@ export function HomeView() {
               <Button appearance="secondary" icon={<Code24Regular />} onClick={openGithub}>
                 GitHub
               </Button>
-              <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={openLatestRelease}>
+              <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={() => setUpdateLogOpen(true)}>
                 更新日志
               </Button>
               <Button
@@ -236,6 +242,12 @@ export function HomeView() {
           </div>
         </section>
       </div>
+
+      <UpdateLogDialog
+        open={updateLogOpen}
+        onClose={() => setUpdateLogOpen(false)}
+        onOpenRelease={openReleaseUrl}
+      />
     </div>
   );
 }

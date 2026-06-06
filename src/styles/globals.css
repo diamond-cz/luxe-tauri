@@ -61,3 +61,36 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover { background: var(--luxe-scroll-h); }
 *::-webkit-scrollbar-corner { background: transparent; }
+
+.luxe-update-log-backdrop {
+  background: rgba(28, 34, 45, 0.62) !important;
+  backdrop-filter: blur(8px);
+}
+html.light .luxe-update-log-backdrop {
+  background: rgba(67, 76, 92, 0.54) !important;
+}
+
+.luxe-update-log-surface {
+  animation: luxe-dialog-in 160ms ease-out;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.34) !important;
+}
+
+@media (max-width: 640px) {
+  .luxe-update-log-surface {
+    width: calc(100vw - 24px) !important;
+    height: calc(100dvh - 32px) !important;
+    max-height: calc(100dvh - 32px) !important;
+    border-radius: 14px !important;
+  }
+}
+
+@keyframes luxe-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
