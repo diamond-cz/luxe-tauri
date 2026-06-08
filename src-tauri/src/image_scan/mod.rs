@@ -92,11 +92,13 @@ fn insert_with_aliases(out: &mut HashMap<String, String>, full_path: &str, value
         return;
     }
     out.insert(full_path.to_string(), value.clone());
+    out.entry(full_path.to_ascii_lowercase()).or_insert(value.clone());
     // Also store the bare leaf name so `AE_TAG_*` lookups work regardless of
     // the section it lives under.
     if let Some(leaf) = full_path.rsplit('.').next() {
         if leaf != full_path {
-            out.entry(leaf.to_string()).or_insert(value);
+            out.entry(leaf.to_string()).or_insert(value.clone());
+            out.entry(leaf.to_ascii_lowercase()).or_insert(value);
         }
     }
 }

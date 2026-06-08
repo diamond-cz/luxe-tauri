@@ -1,0 +1,238 @@
+# Normal Tab 表格定义（图片 normal表格.png 还原）
+#
+# 渲染规则
+# ─────────────────────────────────────────────────────────────────────────
+# 自顶向下按 [[block]] 出现顺序渲染：
+#
+#   type = "kv"     单列 "label : value" 表（用于 CWR / 汇总公式 等）
+#   type = "note"   整行说明文字（黄色背景，跨所有列）
+#                   text 中可嵌入 [AE_TAG_xxx] / [SW_xxx]，渲染时会替换为
+#                   图片同名 TOML 中对应关键字的实时值（未找到显示
+#                   [AE_TAG_xxx=?]，鼠标悬停可看原始模板）
+#   type = "grid"   行×列网格表
+#                   - title       橙色标题行（块名 + 列名）
+#                   - title_style 可选 "orange"(默认) / "yellow"
+#                                 "yellow" 时块名格颜色与 CWR 金黄一致，
+#                                 列名格仍保持橙色（区分主次）
+#                   - columns     列名列表
+#                   - rows[].label  行标签（首列灰色）
+#                   - rows[].cells  各列单元格内容（与 columns 等长）
+#
+# 单元格内容支持三种写法
+# ─────────────────────────────────────────────────────────────────────────
+#   1) "AE_TAG_xxx" / "SW_xxx"  → 图片同名 TOML 中按关键字取值
+#   2) "=表达式"                 → Python 风格表达式，自动评估
+#                                  - 支持 + - * / ( ) ** 与函数：
+#                                      MAX(a, b, ...)         取最大
+#                                      MIN(a, b, ...)         取最小
+#                                      CLAMP(x, lo, hi)       把 x 截到 [lo, hi]
+#                                      PIECEWISE(x, t1, v1, t2, v2, vd)
+#                                                             分段：x<t1→v1, x<t2→v2, else vd
+#                                  - 可引用同块单元格名（"<col>_<row_label>"）
+#                                  - 可引用 KV 块的 label（去空格 / 仅取首段）
+#                                  - 可直接写 AE_TAG_* 字面名
+#                                  - 评估失败显示 "-"
+#   3) "-" / "0" / 其它字符串    → 字面显示
+#
+# 块内引用约定
+# ─────────────────────────────────────────────────────────────────────────
+# 在 grid 块的某行 cells 中，引用本块其它格时按 "<列名>_<行标签>" 拼接，
+# 例：MainT+HS 块的 Cal 行可写 "=AE_TAG_HSV6_MAINT_THD/AE_TAG_HSV6_MAINT_Y * AE_TAG_CWV"
+# 也可写 "=BT_Cal*BT_Wt + MT_Cal*MT_Wt"，由渲染器先解析 AE_TAG_*、再解析单元格名。
+#
+# 鼠标悬停 tooltip（程序根据 cell 内容自动生成，无需额外配置）
+# ─────────────────────────────────────────────────────────────────────────
+#   AE_TAG_xxx / SW_xxx  → "数据源: <key>\n当前值: <值>"
+#   =表达式               → "公式: <表达式>\n→ 结果: <值>"
+#   字面值                → "字面值: <raw>"
+#   note 含占位符         → "原始模板: <未替换的 text>"
+#   空 / "-"              → 无 tooltip
+#
+# 维护工作流（用户在本文件中即可完成所有调整，无需改 Python 代码）
+# ─────────────────────────────────────────────────────────────────────────
+# - 添加新分块             : 追加新的 [[block]]（按顺序自顶向下渲染）
+# - 改某 cell 的数据源     : 修改对应 cells[i] 的 "AE_TAG_xxx" 字符串
+# - 改某 cell 的计算公式   : 修改对应 cells[i] 的 "=表达式" 字符串
+# - 添加自由文本说明行     : 在两个块之间插入 [[block]] type = "note"
+# - note 嵌入实时数值      : 直接在 text 里写 [AE_TAG_xxx]
+# - 切换块名格颜色         : 在 grid 块加 title_style = "yellow" / "orange"
+# - 改列名 / 行标签        : 修改对应 columns / rows[].label
+#   注意：公式中用到的「单元格引用名」会随你改 columns / rows[].label 改变
+#         （命名规则：`<列名>_<行标签>`，特殊字符替换为 _）
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 0. 顶部 KV 段（CWR、Normal Final Target、Target_ABL_MT_HS 等汇总公式）
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "kv"
+items = [
+    { label = "CWR(目标亮度)",  value = "AE_TAG_CWV_FINAL_TARGET" },
+    { label = "Final_Target",  value = "= Target_ABL_MT_HS * (1024 - NS_Wt) / 1024 + NS_Tar * NS_Wt / 1024" },
+    { label = "Target_ABL_MT_HS",  value = "= (MainT_Tar*MainT_Wt + HS_Tar*HS_Wt) / (MainT_Wt + HS_Wt)" },
+]
+
+[[block]]
+type = "note"
+text = "极值限制 Normal Final Target ∈ [[AE_TAG_MIN_CWV_RECMD], [AE_TAG_MAX_CWV_RECMD]]"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 1. MainT + HS 网格块（Wt / Tar / Cal × MainT/HS/BT/MT/DT/ABL）
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "grid"
+title = "MainT+HS"
+title_style = "yellow"
+columns = ["MainT", "HS", "BT", "MT", "DT"]
+rows = [
+    { label = "Wt",  cells = [
+        "AE_TAG_HSV6_MAINT_WET",
+        "AE_TAG_HSV6_HS_WET",
+        "AE_TAG_HSV6_BT_WET",
+        "AE_TAG_HSV6_MT_WET",
+        "AE_TAG_HSV6_DT_WET",
+    ] },
+    { label = "Tar", cells = [
+        "AE_TAG_MTV6_MAINT_TARGET",
+        "AE_TAG_HSV6_HS_TARGET",
+        "AE_TAG_HSV6_BT_TARGET",
+        "AE_TAG_HSV6_MT_TARGET",
+        "AE_TAG_HSV6_DT_TARGET",
+    ] },
+    { label = "Cal", cells = [
+        "= AE_TAG_MTV6_MAINT_THD / AE_TAG_MTV6_MAINT_Y * AE_TAG_CWV",
+        "= (BT_Cal*BT_Wt + MT_Cal*MT_Wt + DT_Cal*DT_Wt) / (BT_Wt + MT_Wt + DT_Wt)",
+        "= AE_TAG_HSV6_BT_THD / AE_TAG_HSV6_BT_Final_Y * AE_TAG_CWV",
+        "= AE_TAG_HSV6_MT_THD / AE_TAG_HSV6_MT_Final_Y * AE_TAG_CWV",
+        "= AE_TAG_HSV6_DT_THD / AE_TAG_HSV6_DT_FINAL_Y * AE_TAG_CWV",
+    ] },
+]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 2. NS + ABL 网格块（Prob / Tar / Cal × NS/NorT/BT/MT/DT/DT_Limit）
+# 不存在的 cell 用 "-" 占位
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "grid"
+title = "NS+ABL"
+title_style = "yellow"
+columns = ["NS", "NorT", "BT", "DT", "DT_Limit", "ABL"]
+rows = [
+    { label = "Prob", cells = [
+        "AE_TAG_NS_PROB",
+        "-",
+        "-",
+        "-",
+        "AE_TAG_NS_DT_THD",
+        "0",
+    ] },
+    { label = "Tar", cells = [
+        "AE_TAG_NS_FINAL_TARGET",
+        "= AE_TAG_NS_NORMAL_FINAL_THD / AE_TAG_NS_NORMAL_Y * AE_TAG_CWV",
+        "AE_TAG_NS_BT_TARGET",
+        "AE_TAG_NS_DT_TARGET",
+        "AE_TAG_NS_DT_LIMIT",
+        "0",
+    ] },
+    { label = "Cal", cells = [
+        "= MAX(NorT_Cal, BT_Cal, DT_Cal)",
+        "= AE_TAG_NS_NORMAL_FINAL_THD / AE_TAG_NS_NORMAL_Y * AE_TAG_CWV",
+        "= AE_TAG_NS_BT_FINAL_THD / AE_TAG_NS_BT_Y * AE_TAG_CWV",
+        "= CLAMP(AE_TAG_NS_DT_THD / AE_TAG_NS_DT_Y * AE_TAG_CWV, AE_TAG_NS_DT_THD, AE_TAG_NS_DT_LIMIT)",
+        "-",
+        "0",
+    ] },
+]
+
+# [[block]]
+# type = "note"
+# text = "DT_Cal 已自动截断到 [[AE_TAG_NS_DT_THD], [AE_TAG_NS_DT_LIMIT]]，超出区间时取边界值"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 3. MainT 多列详情（THD / MTWV / CWV / DR_Midratio / EXP / BASE / THD_MAX / THD_Cal）
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "grid"
+title = "MainT"
+title_style = "yellow"
+columns = ["THD", "MTWV", "CWV", "DR_Midratio", "EXP", "BASE"]
+rows = [
+    { label = "Value", cells = [
+        "AE_TAG_MTV6_MAINT_THD",
+        "AE_TAG_MTV6_MAINT_Y",
+        "AE_TAG_CWV",  
+        "AE_TAG_MTV6_MAINT_MID_INTRATIO",      
+        "AE_TAG_MTV6_MAINT_INTP_EXP",
+        "AE_TAG_MTV6_MAINT_INTP_BASE",
+    ] },
+    { label = "Cal", cells = [
+        "= BASE_Value * (2 ** (EXP_Value / 1000 * DR_Midratio_Value / 1024))",
+        "-",
+        "-",
+        "-",
+        "-",
+        "= BASE_Value * (2 ** (EXP_Value / 1000))",
+    ] },
+]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 4. HS 详情（BT/MT/DT 的 THD 与 Final_Y）
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "grid"
+title = "HS"
+title_style = "yellow"
+columns = ["BT_THD", "BT_Y", "MT_THD", "MT_Y", "DT_THD", "DT_Y"]
+rows = [
+    { label = "Value", cells = [
+        "AE_TAG_HSV6_BT_THD",
+        "AE_TAG_HSV6_BT_Final_Y",
+        "AE_TAG_HSV6_MT_THD",
+        "AE_TAG_HSV6_MT_Final_Y",
+        "AE_TAG_HSV6_DT_THD",
+        "AE_TAG_HSV6_DT_Final_Y",
+    ] },
+]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 5. NS 详情（NorT/BT/DT 的 THD / Y + BV/CDF/Prob 综合概率）
+# ════════════════════════════════════════════════════════════════════════
+
+[[block]]
+type = "grid"
+title = "NS"
+title_style = "yellow"
+columns = ["NorT_THD", "NorT_Y", "BT_THD", "BT_Y", "DT_THD", "DT_Y"]
+rows = [
+    { label = "Value", cells = [
+        "AE_TAG_NS_NORMAL_FINAL_THD",
+        "AE_TAG_NS_NORMAL_Y",
+        "AE_TAG_NS_BT_FINAL_THD",
+        "AE_TAG_NS_BT_Y",
+        "AE_TAG_NS_DT_THD",
+        "AE_TAG_NS_DT_Y",
+    ] },
+]
+
+[[block]]
+type = "grid"
+title = "NS_Prob"
+title_style = "yellow"
+columns = ["BV Prob", "CDF Prob", "Prob"]
+rows = [
+    { label = "Value", cells = [
+        "AE_TAG_NS_STS_BVPROB",
+        "AE_TAG_NS_STS_CDFPROB",
+        "= AE_TAG_NS_STS_BVPROB * AE_TAG_NS_STS_CDFPROB / 1024",
+    ] },
+]

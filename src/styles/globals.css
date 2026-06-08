@@ -15,6 +15,30 @@ html.dark {
   --luxe-fg:        #e6e6eb;
   --luxe-scroll:    rgba(140, 100, 200, 0.5);
   --luxe-scroll-h:  rgba(170, 130, 230, 0.7);
+  --normal-sheet-bg:             #12161b;
+  --normal-sheet-grid:           rgba(214, 224, 236, 0.10);
+  --normal-sheet-text:           #e9edf2;
+  --normal-sheet-line:           rgba(213, 224, 238, 0.28);
+  --normal-sheet-divider:        rgba(225, 190, 122, 0.24);
+  --normal-sheet-divider-shadow: rgba(0, 0, 0, 0.48);
+  --normal-sheet-divider-fill:   rgba(225, 190, 122, 0.07);
+  --normal-sheet-button-bg:      rgba(255, 244, 214, 0.10);
+  --normal-sheet-peach-bg:       #6d4b2d;
+  --normal-sheet-peach-fg:       #f7ddbd;
+  --normal-sheet-orange-bg:      #9a5709;
+  --normal-sheet-orange-fg:      #fff0d7;
+  --normal-sheet-yellow-bg:      #8a6f17;
+  --normal-sheet-yellow-fg:      #f6e9b2;
+  --normal-sheet-cream-bg:       #2b2a22;
+  --normal-sheet-cream-fg:       #eee4c8;
+  --normal-sheet-grey-bg:        #26313d;
+  --normal-sheet-grey-fg:        #e8eef5;
+  --normal-sheet-green-bg:       #536f1b;
+  --normal-sheet-green-fg:       #eaf8bd;
+  --normal-sheet-palegreen-bg:   #223b2c;
+  --normal-sheet-palegreen-fg:   #d8f0d1;
+  --normal-sheet-softgreen-bg:   #1e3728;
+  --normal-sheet-softgreen-fg:   #d4ecd7;
 }
 html.light {
   color-scheme: light;
@@ -23,6 +47,30 @@ html.light {
   --luxe-fg:        #1f1f23;
   --luxe-scroll:    rgba(120,  90, 200, 0.3);
   --luxe-scroll-h:  rgba(120,  90, 200, 0.55);
+  --normal-sheet-bg:             #ffffff;
+  --normal-sheet-grid:           #d9dce1;
+  --normal-sheet-text:           #202020;
+  --normal-sheet-line:           #303030;
+  --normal-sheet-divider:        rgba(120, 94, 40, 0.22);
+  --normal-sheet-divider-shadow: rgba(255, 255, 255, 0.70);
+  --normal-sheet-divider-fill:   rgba(120, 94, 40, 0.06);
+  --normal-sheet-button-bg:      rgba(255, 255, 255, 0.35);
+  --normal-sheet-peach-bg:       #f7cda0;
+  --normal-sheet-peach-fg:       #111111;
+  --normal-sheet-orange-bg:      #ff8a00;
+  --normal-sheet-orange-fg:      #111111;
+  --normal-sheet-yellow-bg:      #ffd95a;
+  --normal-sheet-yellow-fg:      #222222;
+  --normal-sheet-cream-bg:       #fbf2d3;
+  --normal-sheet-cream-fg:       #242424;
+  --normal-sheet-grey-bg:        #d8dde2;
+  --normal-sheet-grey-fg:        #222222;
+  --normal-sheet-green-bg:       #bee32b;
+  --normal-sheet-green-fg:       #202020;
+  --normal-sheet-palegreen-bg:   #eef5cd;
+  --normal-sheet-palegreen-fg:   #202020;
+  --normal-sheet-softgreen-bg:   #ddf2d8;
+  --normal-sheet-softgreen-fg:   #202020;
 }
 /* Default to dark until App.tsx attaches the class. */
 html:not(.light):not(.dark) {
@@ -32,6 +80,30 @@ html:not(.light):not(.dark) {
   --luxe-fg:        #e6e6eb;
   --luxe-scroll:    rgba(140, 100, 200, 0.5);
   --luxe-scroll-h:  rgba(170, 130, 230, 0.7);
+  --normal-sheet-bg:             #12161b;
+  --normal-sheet-grid:           rgba(214, 224, 236, 0.10);
+  --normal-sheet-text:           #e9edf2;
+  --normal-sheet-line:           rgba(213, 224, 238, 0.28);
+  --normal-sheet-divider:        rgba(225, 190, 122, 0.24);
+  --normal-sheet-divider-shadow: rgba(0, 0, 0, 0.48);
+  --normal-sheet-divider-fill:   rgba(225, 190, 122, 0.07);
+  --normal-sheet-button-bg:      rgba(255, 244, 214, 0.10);
+  --normal-sheet-peach-bg:       #6d4b2d;
+  --normal-sheet-peach-fg:       #f7ddbd;
+  --normal-sheet-orange-bg:      #9a5709;
+  --normal-sheet-orange-fg:      #fff0d7;
+  --normal-sheet-yellow-bg:      #8a6f17;
+  --normal-sheet-yellow-fg:      #f6e9b2;
+  --normal-sheet-cream-bg:       #2b2a22;
+  --normal-sheet-cream-fg:       #eee4c8;
+  --normal-sheet-grey-bg:        #26313d;
+  --normal-sheet-grey-fg:        #e8eef5;
+  --normal-sheet-green-bg:       #536f1b;
+  --normal-sheet-green-fg:       #eaf8bd;
+  --normal-sheet-palegreen-bg:   #223b2c;
+  --normal-sheet-palegreen-fg:   #d8f0d1;
+  --normal-sheet-softgreen-bg:   #1e3728;
+  --normal-sheet-softgreen-fg:   #d4ecd7;
 }
 
 html, body, #root {

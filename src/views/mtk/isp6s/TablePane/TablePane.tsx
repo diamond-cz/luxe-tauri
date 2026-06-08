@@ -33,6 +33,7 @@ import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
+import { NormalTable } from "./NormalTable";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 
@@ -368,7 +369,7 @@ export function TablePane({
       {!collapsed && (
         <div className="min-h-0 flex-1 overflow-hidden">
           {tab === "image"  && <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />}
-          {tab === "normal" && <Placeholder label="Normal 表格，待 normal_table.toml 映射" />}
+          {tab === "normal" && <NormalTable tomlData={tomlData} />}
           {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
           {tab === "lce"    && <LceTab entry={currentEntry} schema={schema} tomlData={tomlData} />}
         </div>

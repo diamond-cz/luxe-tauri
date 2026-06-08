@@ -161,14 +161,15 @@ export function HoverTooltip({
   const tip = show && content && coords ? createPortal(
     <span
       ref={tooltipRef}
-      className="fixed z-[9999] rounded-md border px-2 py-1 text-xs leading-5"
+      className="fixed z-[9999] rounded-md border px-2 py-1 text-[11px] leading-4"
       style={{
         ...themeStyle,
         left:        coords.left,
         top:         coords.top,
-        whiteSpace:  wrap ? "normal" : "nowrap",
+        whiteSpace:  wrap ? "pre-wrap" : "nowrap",
         wordBreak:   wrap ? "break-word" : undefined,
         maxWidth:    effectiveMaxWidth,
+        backdropFilter: "blur(10px)",
       }}
       onMouseEnter={onEnter}
       onMouseLeave={(event) => scheduleClose(event.relatedTarget)}

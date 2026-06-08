@@ -51,7 +51,8 @@
     "longDescription": "LUXE — Camera Tuning 工程师的跨平台 AE (自动曝光) 算法可视化工具。Rust + Tauri 版本。",
     "resources": [
       "resources/translations/*.json",
-      "resources/Isp6s.toml"
+      "resources/Isp6s.toml",
+      "resources/normal_table.toml"
     ],
     "windows": {
       "wix": {
