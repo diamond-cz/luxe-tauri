@@ -1,0 +1,85 @@
+# Face Tab 表格定义（参照 FACE.png 还原，由 isp6s_ae.py::_populate_face_table 渲染）
+#
+# 用到的函数说明：
+#   函数 limit(value, low, high)的含义是将 Value 夹钳到 [low, high]
+#   函数 lineara(x, [x1, x2, ...], [y1, y2, ...]) 的含义是分段线性插值，
+#                                                 越界夹钳到首/尾
+# ─────────────────────────────────────────────────────────────────────────
+# 值约定（与 normal_table.toml 一致）：
+#   "AE_TAG_xxx" / "SW_xxx"  → 图片同名 TOML 中按关键字取值（数据源）
+#   "= 表达式"                → 计算公式；可引用本段/全局符号
+#                                可用函数：MAX / MIN / CLAMP / limit / PIECEWISE
+#                                （limit 是 CLAMP 的别名，与文档描述对齐）
+#   纯字符串                 → 字面值显示
+#
+# 顶部 KV 块（Face_LINK / Link_AE_CWR / Normal_CWR / 极值限制 + Cal_*）
+# ─────────────────────────────────────────────────────────────────────────
+
+Face_LINK = "AE_TAG_LINK_FACE_CWR_STABLE"
+Link_AE_CWR = "AE_TAG_LINK_AE_CWR_STABLE"
+Normal_CWR = "AE_TAG_PURE_AE_CWR_STABLE"
+# 极值限制 = AE_Target * [fd_cwr_lowbnd, fd_cwr_higbnd] / 1024
+#   AE_Target       = AE_TAG_AE_TARGET（来自图片 3A 信息）
+#   fd_cwr_lowbnd   = AE_TAG_FACE_LOW_BOUND
+#   fd_cwr_higbnd   = AE_TAG_FACE_HIGH_BOUND
+"极值限制_low"  = "= AE_TAG_AE_TARGET * AE_TAG_FACE_LOW_BOUND  / 1024"
+"极值限制_high" = "= AE_TAG_AE_TARGET * AE_TAG_FACE_HIGH_BOUND / 1024"
+
+# 中间 KV 列（FLT_THD / FBT_THD 转载段内 FDTH；lowbnd / highbnd 直接取 AE_TAG）
+FLT_THD = "= FLT.FDTH"
+FBT_THD = "= FBT.FDTH"
+lowbnd = "AE_TAG_FACE_LOW_BOUND"
+highbnd = "AE_TAG_FACE_HIGH_BOUND"
+
+Cal_FLT = "= FLT.FLTCwrTarget"
+Cal_BackTar = "= FBT.BackTarget"
+Cal_FBT = "= FBT.FBTCwrTarget"
+Cal_Gain = "= FLT.FLTCwrTarget / FBT.BackTarget"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# FBT 段（11 项：4 输入 + 2 中间 + 4 输入 + 1 输出）
+# ════════════════════════════════════════════════════════════════════════
+[FBT]
+FDTH = "AE_TAG_FBT_FDTH"
+OETH = "AE_TAG_FBT_OETH"
+OE_SYS = "AE_TAG_FBT_OE_SYS"
+FaceOE_TAR = "= (FDTH * OETH) / OE_SYS"
+
+FDMINTH = "AE_TAG_FBT_FDMINTH"
+PURE_TAR = "= limit(FaceOE_TAR, FDMINTH, FDTH)"
+
+FDDR_RA = "AE_TAG_FBT_FDDR_RA"
+Target = "= PURE_TAR * FDDR_RA / 1024"
+
+FDY = "AE_TAG_FBT_FDY"
+CWV = "AE_TAG_FACE_20_CWV"
+FBTCwrTarget = "= CWV * (Target / FDY)"
+
+Face_Prob = "AE_TAG_FACE_PROB"
+NormalTarget = "AE_TAG_FACE_20_NORMAL_TARGET"
+BackTarget = "= FBTCwrTarget * Face_Prob / 1024 + NormalTarget * (1 - Face_Prob / 1024)"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# FLT 段（14 项：4 输入 + 2 中间 + 5 输入 + 2 中间 + 1 输出）
+# ════════════════════════════════════════════════════════════════════════
+[FLT]
+FDTH = "AE_TAG_FLT_FDTH"
+OETH = "AE_TAG_FLT_OETH"
+OE_SYS = "AE_TAG_FLT_OE_SYS"
+FaceOE_TAR = "= (FDTH * OETH) / OE_SYS"
+
+FDMINTH = "AE_TAG_FLT_FDMINTH"
+PURE_TAR = "= limit(FaceOE_TAR, FDMINTH, FDTH)"
+
+FDDR_RA = "AE_TAG_FBT_FDDR_RA"
+Target = "= PURE_TAR * FDDR_RA / 1024"
+
+FDSZ_RA = "AE_TAG_FLT_FDSZ_RA"
+NormalTarget = "AE_TAG_FACE_20_NORMAL_TARGET"
+FDY = "AE_TAG_FLT_FDY"
+CWV = "AE_TAG_FACE_20_CWV"
+FLTCwrTarget = "= CWV * (Target / FDY)"
+
+Link_FACE_CWR = "= FLTCwrTarget * FDSZ_RA / 1024 + NormalTarget * (1 - FDSZ_RA / 1024)"

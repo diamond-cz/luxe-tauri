@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::config::{Isp6sSchema, NormalTableSchema};
+use crate::config::{FaceTableSchema, Isp6sSchema, NormalTableSchema};
 use crate::cpp_parser::{
     card_source::{resolve, CardSourceHit, CardSourceSpec},
     path_query::{self, ValuesAtPath},
@@ -169,6 +169,12 @@ pub fn get_normal_table_schema(app: AppHandle) -> AppResult<NormalTableSchema> {
 }
 
 #[tauri::command]
+pub fn get_face_table_schema(app: AppHandle) -> AppResult<FaceTableSchema> {
+    let p = resolve_face_table_path(&app)?;
+    FaceTableSchema::load(&p)
+}
+
+#[tauri::command]
 pub async fn cpp_resolve_card_source(
     state: State<'_, AppState>,
     path:  String,
@@ -217,4 +223,18 @@ fn resolve_normal_table_path(app: &AppHandle) -> AppResult<PathBuf> {
         .join("normal_table.toml");
     if dev.is_file() { return Ok(dev); }
     Err(AppError::NotFound("normal_table.toml".into()))
+}
+
+fn resolve_face_table_path(app: &AppHandle) -> AppResult<PathBuf> {
+    if let Ok(base) = app.path().resource_dir() {
+        let p = base.join("resources").join("face_table.toml");
+        if p.is_file() { return Ok(p); }
+        let p = base.join("face_table.toml");
+        if p.is_file() { return Ok(p); }
+    }
+    let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("face_table.toml");
+    if dev.is_file() { return Ok(dev); }
+    Err(AppError::NotFound("face_table.toml".into()))
 }

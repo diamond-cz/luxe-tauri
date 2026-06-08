@@ -52,7 +52,8 @@
     "resources": [
       "resources/translations/*.json",
       "resources/Isp6s.toml",
-      "resources/normal_table.toml"
+      "resources/normal_table.toml",
+      "resources/face_table.toml"
     ],
     "windows": {
       "wix": {

@@ -39,6 +39,11 @@ html.dark {
   --normal-sheet-palegreen-fg:   #d8f0d1;
   --normal-sheet-softgreen-bg:   #1e3728;
   --normal-sheet-softgreen-fg:   #d4ecd7;
+  --face-sheet-data-bg:          #202a34;
+  --face-sheet-data-fg:          #e8eef5;
+  --face-sheet-formula-bg:       rgba(58, 112, 176, 0.28);
+  --face-sheet-formula-fg:       #9dccff;
+  --face-sheet-blank-bg:         #12161b;
 }
 html.light {
   color-scheme: light;
@@ -71,6 +76,11 @@ html.light {
   --normal-sheet-palegreen-fg:   #202020;
   --normal-sheet-softgreen-bg:   #ddf2d8;
   --normal-sheet-softgreen-fg:   #202020;
+  --face-sheet-data-bg:          #fbf2d3;
+  --face-sheet-data-fg:          #242424;
+  --face-sheet-formula-bg:       #e8f1ff;
+  --face-sheet-formula-fg:       #235fa5;
+  --face-sheet-blank-bg:         #ffffff;
 }
 /* Default to dark until App.tsx attaches the class. */
 html:not(.light):not(.dark) {
@@ -104,6 +114,11 @@ html:not(.light):not(.dark) {
   --normal-sheet-palegreen-fg:   #d8f0d1;
   --normal-sheet-softgreen-bg:   #1e3728;
   --normal-sheet-softgreen-fg:   #d4ecd7;
+  --face-sheet-data-bg:          #202a34;
+  --face-sheet-data-fg:          #e8eef5;
+  --face-sheet-formula-bg:       rgba(58, 112, 176, 0.28);
+  --face-sheet-formula-fg:       #9dccff;
+  --face-sheet-blank-bg:         #12161b;
 }
 
 html, body, #root {

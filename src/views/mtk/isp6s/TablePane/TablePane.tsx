@@ -34,6 +34,7 @@ import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
 import { NormalTable } from "./NormalTable";
+import { FaceTable } from "./FaceTable";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 
@@ -370,7 +371,7 @@ export function TablePane({
         <div className="min-h-0 flex-1 overflow-hidden">
           {tab === "image"  && <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />}
           {tab === "normal" && <NormalTable tomlData={tomlData} />}
-          {tab === "face"   && <Placeholder label="Face 表格，待 face_table.toml 映射" />}
+          {tab === "face"   && <FaceTable tomlData={tomlData} />}
           {tab === "lce"    && <LceTab entry={currentEntry} schema={schema} tomlData={tomlData} />}
         </div>
       )}
@@ -617,15 +618,6 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
         <Image24Regular className="h-4 w-4" />
       )}
     </span>
-  );
-}
-
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div className="flex h-full w-full items-center justify-center text-xs"
-         style={{ color: "var(--colorNeutralForeground3)" }}>
-      {label}
-    </div>
   );
 }
 

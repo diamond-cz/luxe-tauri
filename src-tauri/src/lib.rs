@@ -124,6 +124,7 @@ pub fn run() {
             commands::cpp_cmds::cpp_resolve_card_source,
             commands::cpp_cmds::get_isp6s_schema,
             commands::cpp_cmds::get_normal_table_schema,
+            commands::cpp_cmds::get_face_table_schema,
             commands::image_cmds::scan_image_dir,
             commands::image_cmds::load_image_toml,
             commands::text_cmds::read_text_file,
