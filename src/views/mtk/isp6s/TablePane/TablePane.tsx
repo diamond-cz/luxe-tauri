@@ -61,11 +61,17 @@ const IMAGE_OPTION_OVERSCAN = 6;
 const IMAGE_DROPDOWN_THUMBNAIL_SIZE = 48;
 const IMAGE_DROPDOWN_THUMBNAIL_BATCH = 3;
 const IMAGE_DROPDOWN_THUMBNAIL_FALLBACK_CONCURRENCY = 2;
+const IMAGE_DROPDOWN_THUMBNAIL_CACHE_LIMIT = 160;
 const IMAGE_HEADER_THUMBNAIL_SIZE = 80;
 const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 34;
 const IMAGE_TABLE_ROW_HEIGHT = 32;
 const IMAGE_TABLE_OVERSCAN = 12;
+const IMAGE_TABLE_LOAD_DEBOUNCE_MS = 8;
+const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
+const IMAGE_TABLE_PREFETCH_DELAY_MS = 90;
+const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
+const IMAGE_TABLE_PREFETCH_PAGES = 3;
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "image",  label: "Image" },
@@ -388,6 +394,7 @@ function ImagePickerDropdown({
   const failedFullThumbPathsRef = useRef<Set<string>>(new Set());
   const entryPathSetRef = useRef<Set<string>>(new Set());
   const thumbUrlsRef = useRef<Record<string, string>>({});
+  const thumbAccessOrderRef = useRef<string[]>([]);
   const [open, setOpen] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -407,6 +414,7 @@ function ImagePickerDropdown({
     loadingThumbPathsRef.current.clear();
     loadingFullThumbPathsRef.current.clear();
     failedFullThumbPathsRef.current.clear();
+    thumbAccessOrderRef.current = thumbAccessOrderRef.current.filter((path) => nextPaths.has(path));
     setThumbUrls((prev) => {
       let changed = false;
       const next: Record<string, string> = {};
@@ -427,10 +435,22 @@ function ImagePickerDropdown({
     setThumbUrls((prev) => {
       let changed = false;
       const next = { ...prev };
+      const order = thumbAccessOrderRef.current;
       for (const [path, url] of Object.entries(updates)) {
         if (!entryPathSetRef.current.has(path)) continue;
+        const existingOrderIndex = order.indexOf(path);
+        if (existingOrderIndex >= 0) {
+          order.splice(existingOrderIndex, 1);
+        }
+        order.push(path);
         if (next[path] === url) continue;
         next[path] = url;
+        changed = true;
+      }
+      while (order.length > IMAGE_DROPDOWN_THUMBNAIL_CACHE_LIMIT) {
+        const stalePath = order.shift();
+        if (!stalePath || !(stalePath in next)) continue;
+        delete next[stalePath];
         changed = true;
       }
       const result = changed ? next : prev;
@@ -797,10 +817,15 @@ function ImageTab({
   onPick:   (idx: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const mountedRef = useRef(true);
-  const loadingPathsRef = useRef<Set<string>>(new Set());
-  const entryPathsRef = useRef<Set<string>>(new Set());
-  const tomlKeySignatureRef = useRef("");
+  const tableWindowRequestRef = useRef(0);
+  const tableWindowPathsRef = useRef<string[]>([]);
+  const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
+  const tableFieldAccessOrderRef = useRef<string[]>([]);
+  const tableTomlPathSetRef = useRef<Set<string>>(new Set());
+  const loadingTableFieldPathsRef = useRef<Set<string>>(new Set());
+  const tableFieldKeySignatureRef = useRef("");
+  const scrollTopRef = useRef(0);
+  const scrollDirectionRef = useRef<1 | -1>(1);
   const extraCols = useMemo(
     () => Object.entries(schema.Image ?? {}),
     [schema],
@@ -818,13 +843,6 @@ function ImageTab({
   const [viewportHeight, setViewportHeight] = useState(0);
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
@@ -835,30 +853,6 @@ function ImageTab({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    const nextPaths = new Set(entries.map((entry) => entry.toml_path));
-    entryPathsRef.current = nextPaths;
-    loadingPathsRef.current.clear();
-    setTomls((prev) => {
-      let changed = false;
-      const next: Record<string, Record<string, string>> = {};
-      for (const [path, data] of Object.entries(prev)) {
-        if (nextPaths.has(path)) {
-          next[path] = data;
-        } else {
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [entries]);
-
-  useEffect(() => {
-    tomlKeySignatureRef.current = imageTomlKeySignature;
-    setTomls({});
-    loadingPathsRef.current.clear();
-  }, [imageTomlKeySignature]);
 
   const visible = useMemo(() => {
     const bodyScrollTop = Math.max(0, scrollTop - IMAGE_TABLE_HEADER_HEIGHT);
@@ -873,55 +867,177 @@ function ImageTab({
     return { start, end, rows };
   }, [entries, scrollTop, viewportHeight]);
 
-  useEffect(() => {
-    if (imageTomlKeys.length === 0 || entries.length === 0) return;
+  const tableWindowPaths = useMemo(() => {
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    const add = (path: string | undefined) => {
+      if (!path || seen.has(path)) return;
+      seen.add(path);
+      paths.push(path);
+    };
 
-    const paths = new Set<string>();
     for (const { e } of visible.rows) {
-      paths.add(e.toml_path);
+      add(e.toml_path);
     }
     const currentEntry = current >= 0 && current < entries.length ? entries[current] : undefined;
-    if (currentEntry) {
-      paths.add(currentEntry.toml_path);
+    add(currentEntry?.toml_path);
+    return paths;
+  }, [current, entries, visible.rows]);
+
+  const tableWindowSignature = useMemo(
+    () => `${imageTomlKeySignature}\u001e${tableWindowPaths.join("\u001f")}`,
+    [imageTomlKeySignature, tableWindowPaths],
+  );
+
+  const tablePrefetchPaths = useMemo(() => {
+    if (entries.length === 0 || visible.rows.length === 0) return [];
+    const rowBudget = Math.max(
+      IMAGE_TABLE_PREFETCH_MIN_ROWS,
+      visible.rows.length * IMAGE_TABLE_PREFETCH_PAGES,
+    );
+    const direction = scrollDirectionRef.current;
+    const start = direction >= 0
+      ? visible.end
+      : Math.max(0, visible.start - rowBudget);
+    const end = direction >= 0
+      ? Math.min(entries.length, visible.end + rowBudget)
+      : visible.start;
+    if (end <= start) return [];
+    return entries.slice(start, end).map((entry) => entry.toml_path);
+  }, [entries, visible.end, visible.rows.length, visible.start]);
+
+  const tablePrefetchSignature = useMemo(
+    () => `${imageTomlKeySignature}\u001e${tablePrefetchPaths.join("\u001f")}`,
+    [imageTomlKeySignature, tablePrefetchPaths],
+  );
+
+  useEffect(() => {
+    tableWindowPathsRef.current = tableWindowPaths;
+  }, [tableWindowPaths, tableWindowSignature]);
+
+  useEffect(() => {
+    tableFieldKeySignatureRef.current = imageTomlKeySignature;
+    tableTomlPathSetRef.current = new Set(entries.map((entry) => entry.toml_path));
+    tableFieldCacheRef.current = {};
+    tableFieldAccessOrderRef.current = [];
+    loadingTableFieldPathsRef.current.clear();
+    setTomls({});
+  }, [entries, imageTomlKeySignature]);
+
+  function rememberTableFieldRows(batch: Record<string, Record<string, string>>) {
+    const cache = tableFieldCacheRef.current;
+    const order = tableFieldAccessOrderRef.current;
+    const allowedPaths = tableTomlPathSetRef.current;
+    for (const [path, data] of Object.entries(batch)) {
+      if (!allowedPaths.has(path)) continue;
+      const existingOrderIndex = order.indexOf(path);
+      if (existingOrderIndex >= 0) {
+        order.splice(existingOrderIndex, 1);
+      }
+      order.push(path);
+      cache[path] = data;
     }
 
-    const missing = Array.from(paths).filter(
-      (path) => !(path in tomls) && !loadingPathsRef.current.has(path),
-    );
+    while (order.length > IMAGE_TABLE_FIELD_CACHE_LIMIT) {
+      const stalePath = order.shift();
+      if (stalePath) delete cache[stalePath];
+    }
+  }
+
+  function readCachedTableRows(paths: string[]) {
+    const cache = tableFieldCacheRef.current;
+    const rows: Record<string, Record<string, string>> = {};
+    for (const path of paths) {
+      rows[path] = cache[path] ?? {};
+    }
+    return rows;
+  }
+
+  function pendingTableFieldPaths(paths: string[]) {
+    const cache = tableFieldCacheRef.current;
+    const loading = loadingTableFieldPathsRef.current;
+    return paths.filter((path) => !(path in cache) && !loading.has(path));
+  }
+
+  useEffect(() => {
+    const requestId = tableWindowRequestRef.current + 1;
+    tableWindowRequestRef.current = requestId;
+
+    if (imageTomlKeys.length === 0 || tableWindowPaths.length === 0) {
+      setTomls({});
+      return;
+    }
+
+    setTomls(readCachedTableRows(tableWindowPaths));
+    const missing = pendingTableFieldPaths(tableWindowPaths);
     if (missing.length === 0) return;
 
-    missing.forEach((path) => loadingPathsRef.current.add(path));
     const requestKeySignature = imageTomlKeySignature;
+    const timer = window.setTimeout(() => {
+      missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
+      loadImageTomlFieldsBatch(missing, imageTomlKeys)
+        .then((batch) => {
+          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          rememberTableFieldRows(batch);
+          if (tableWindowRequestRef.current !== requestId) return;
+          setTomls(readCachedTableRows(tableWindowPaths));
+        })
+        .catch(() => {
+          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          const emptyRows: Record<string, Record<string, string>> = {};
+          for (const path of missing) {
+            emptyRows[path] = {};
+          }
+          rememberTableFieldRows(emptyRows);
+          if (tableWindowRequestRef.current !== requestId) return;
+          setTomls(readCachedTableRows(tableWindowPaths));
+        })
+        .finally(() => {
+          missing.forEach((path) => loadingTableFieldPathsRef.current.delete(path));
+        });
+    }, IMAGE_TABLE_LOAD_DEBOUNCE_MS);
 
-    loadImageTomlFieldsBatch(missing, imageTomlKeys)
-      .then((batch) => {
-        if (!mountedRef.current || tomlKeySignatureRef.current !== requestKeySignature) return;
-        setTomls((prev) => {
-          const next = { ...prev };
-          const allowedPaths = entryPathsRef.current;
-          for (const path of missing) {
-            if (!allowedPaths.has(path)) continue;
-            next[path] = batch[path] ?? {};
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [imageTomlKeySignature, imageTomlKeys, tableWindowPaths, tableWindowSignature]);
+
+  useEffect(() => {
+    if (imageTomlKeys.length === 0 || tablePrefetchPaths.length === 0) return;
+
+    const missing = pendingTableFieldPaths(tablePrefetchPaths);
+    if (missing.length === 0) return;
+
+    const requestKeySignature = imageTomlKeySignature;
+    const timer = window.setTimeout(() => {
+      missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
+      loadImageTomlFieldsBatch(missing, imageTomlKeys)
+        .then((batch) => {
+          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          rememberTableFieldRows(batch);
+          const currentPaths = tableWindowPathsRef.current;
+          if (currentPaths.some((path) => path in batch)) {
+            setTomls(readCachedTableRows(currentPaths));
           }
-          return next;
-        });
-      })
-      .catch(() => {
-        if (!mountedRef.current || tomlKeySignatureRef.current !== requestKeySignature) return;
-        setTomls((prev) => {
-          const next = { ...prev };
-          const allowedPaths = entryPathsRef.current;
+        })
+        .catch(() => {
+          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          const emptyRows: Record<string, Record<string, string>> = {};
           for (const path of missing) {
-            if (!allowedPaths.has(path)) continue;
-            next[path] = {};
+            emptyRows[path] = {};
           }
-          return next;
+          rememberTableFieldRows(emptyRows);
+        })
+        .finally(() => {
+          missing.forEach((path) => loadingTableFieldPathsRef.current.delete(path));
         });
-      })
-      .finally(() => {
-        missing.forEach((path) => loadingPathsRef.current.delete(path));
-      });
-  }, [current, entries, imageTomlKeySignature, imageTomlKeys, tomls, visible.rows]);
+    }, IMAGE_TABLE_PREFETCH_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [imageTomlKeySignature, imageTomlKeys, tablePrefetchPaths, tablePrefetchSignature]);
+
 
   const colSpan = 2 + extraCols.length;
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
@@ -959,7 +1075,12 @@ function ImageTab({
     <div
       ref={scrollRef}
       className="h-full w-full overflow-auto"
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => {
+        const nextScrollTop = event.currentTarget.scrollTop;
+        scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
+        scrollTopRef.current = nextScrollTop;
+        setScrollTop(nextScrollTop);
+      }}
     >
       <table className="w-full border-collapse text-xs"
              style={{

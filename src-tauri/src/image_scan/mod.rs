@@ -5,22 +5,29 @@
 //! The TOML carries flat or shallowly-nested `AE_TAG_*` keys that feed every
 //! per-image badge / table value in `Isp6sAeVisual`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
 use dashmap::DashMap;
 use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageEncoder};
 use once_cell::sync::Lazy;
-use serde::Serialize;
+use parking_lot::Mutex;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-#[derive(Debug, Clone, Serialize)]
+const TOML_CACHE_LIMIT: usize = 96;
+const TOML_FIELD_CACHE_LIMIT: usize = 512;
+const THUMBNAIL_CACHE_LIMIT: usize = 256;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageEntry {
     /// Stem (no extension).
     pub name:      String,
@@ -34,24 +41,40 @@ struct TomlSignature {
     modified: Option<SystemTime>,
 }
 
-#[derive(Debug, Clone)]
 struct CachedToml {
     signature: TomlSignature,
     data:      HashMap<String, String>,
+    last_used: AtomicU64,
 }
 
-#[derive(Debug, Clone)]
+struct CachedTomlFields {
+    signature: TomlSignature,
+    data:      HashMap<String, String>,
+    last_used: AtomicU64,
+}
+
 struct CachedThumbnail {
     signature: TomlSignature,
-    data_url:  String,
+    path:      String,
+    last_used: AtomicU64,
+}
+
+struct EncodedThumbnail {
+    bytes:     Vec<u8>,
+    extension: &'static str,
 }
 
 static TOML_CACHE: Lazy<DashMap<String, Arc<CachedToml>>> = Lazy::new(DashMap::new);
+static TOML_FIELD_CACHE: Lazy<DashMap<String, Arc<CachedTomlFields>>> = Lazy::new(DashMap::new);
 static THUMBNAIL_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
+static CACHE_TICK: AtomicU64 = AtomicU64::new(1);
+static ACTIVE_IMAGE_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
 /// Scan `dir` for image files (`.jpg`, `.jpeg`, `.png`) that have a sibling
 /// `.toml` with the same stem. Sorted alphabetically.
 pub fn scan_directory(dir: &Path) -> AppResult<Vec<ImageEntry>> {
+    clear_runtime_caches_if_dir_changed(dir);
+
     let mut images: Vec<(String, PathBuf)> = Vec::new();
     let mut tomls: HashMap<String, PathBuf> = HashMap::new();
 
@@ -86,6 +109,48 @@ pub fn scan_directory(dir: &Path) -> AppResult<Vec<ImageEntry>> {
     Ok(entries)
 }
 
+fn clear_runtime_caches_if_dir_changed(dir: &Path) {
+    let next_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let mut active = ACTIVE_IMAGE_DIR.lock();
+    if active.as_ref() == Some(&next_dir) {
+        return;
+    }
+
+    TOML_CACHE.clear();
+    TOML_FIELD_CACHE.clear();
+    THUMBNAIL_CACHE.clear();
+    let _ = fs::remove_dir_all(thumbnail_cache_dir());
+    *active = Some(next_dir);
+}
+
+fn next_cache_tick() -> u64 {
+    CACHE_TICK.fetch_add(1, Ordering::Relaxed)
+}
+
+fn prune_cache<T>(
+    cache: &DashMap<String, Arc<T>>,
+    limit: usize,
+    last_used: impl Fn(&T) -> u64,
+) {
+    if cache.len() <= limit {
+        return;
+    }
+
+    let mut entries: Vec<(String, u64)> = cache
+        .iter()
+        .map(|entry| (entry.key().clone(), last_used(entry.value().as_ref())))
+        .collect();
+    if entries.len() <= limit {
+        return;
+    }
+
+    entries.sort_by_key(|(_, used)| *used);
+    let remove_count = entries.len().saturating_sub(limit);
+    for (key, _) in entries.into_iter().take(remove_count) {
+        cache.remove(&key);
+    }
+}
+
 /// Load a single image TOML and flatten it into a key → value map.
 ///
 /// Flattening rules (mirrors hiz `_flatten_toml_items`):
@@ -101,6 +166,7 @@ pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
 
     if let Some(cached) = TOML_CACHE.get(&cache_key) {
         if cached.signature == signature {
+            cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
             return Ok(cached.data.clone());
         }
     }
@@ -111,8 +177,12 @@ pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
         Arc::new(CachedToml {
             signature,
             data: data.clone(),
+            last_used: AtomicU64::new(next_cache_tick()),
         }),
     );
+    prune_cache(&TOML_CACHE, TOML_CACHE_LIMIT, |entry| {
+        entry.last_used.load(Ordering::Relaxed)
+    });
     Ok(data)
 }
 
@@ -142,39 +212,79 @@ pub fn load_image_toml_fields_batch(
     paths: Vec<String>,
     keys: Vec<String>,
 ) -> AppResult<HashMap<String, HashMap<String, String>>> {
-    let key_aliases: Vec<(String, String)> = keys
+    let request_keys: Vec<String> = keys
         .into_iter()
         .filter(|key| !key.is_empty())
-        .map(|key| {
-            let lower = key.to_ascii_lowercase();
-            (key, lower)
-        })
         .collect();
-    let mut out = HashMap::with_capacity(paths.len());
-
+    let key_lookup = selected_key_lookup(&request_keys);
+    let key_signature = request_keys.join("\u{1f}");
+    let mut seen = HashSet::with_capacity(paths.len());
+    let mut unique_paths = Vec::with_capacity(paths.len());
     for path in paths {
-        if out.contains_key(&path) {
-            continue;
-        }
-
-        match load_image_toml(Path::new(&path)) {
-            Ok(data) => {
-                let mut selected = HashMap::with_capacity(key_aliases.len());
-                for (key, lower) in &key_aliases {
-                    if let Some(value) = data.get(key).or_else(|| data.get(lower)) {
-                        selected.insert(key.clone(), value.clone());
-                    }
-                }
-                out.insert(path, selected);
-            }
-            Err(err) => {
-                tracing::warn!(%path, %err, "image TOML field batch item failed");
-                out.insert(path, HashMap::new());
-            }
+        if seen.insert(path.clone()) {
+            unique_paths.push(path);
         }
     }
 
+    let out = unique_paths
+        .par_iter()
+        .map(|path| {
+            (
+                path.clone(),
+                load_image_toml_fields_for_batch(path, &key_lookup, &key_signature),
+            )
+        })
+        .collect();
     Ok(out)
+}
+
+fn load_image_toml_fields_for_batch(
+    path: &str,
+    key_lookup: &HashMap<String, String>,
+    key_signature: &str,
+) -> HashMap<String, String> {
+    match load_image_toml_fields(Path::new(path), key_lookup, key_signature) {
+        Ok(data) => data,
+        Err(err) => {
+            tracing::warn!(%path, %err, "image TOML field batch item failed");
+            HashMap::new()
+        }
+    }
+}
+
+fn load_image_toml_fields(
+    path: &Path,
+    key_lookup: &HashMap<String, String>,
+    key_signature: &str,
+) -> AppResult<HashMap<String, String>> {
+    if key_lookup.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let path_key = path.to_string_lossy().into_owned();
+    let cache_key = format!("{path_key}\0{key_signature}");
+    let signature = toml_signature(path)?;
+
+    if let Some(cached) = TOML_FIELD_CACHE.get(&cache_key) {
+        if cached.signature == signature {
+            cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+            return Ok(cached.data.clone());
+        }
+    }
+
+    let data = parse_image_toml_fields(path, key_lookup)?;
+    TOML_FIELD_CACHE.insert(
+        cache_key,
+        Arc::new(CachedTomlFields {
+            signature,
+            data: data.clone(),
+            last_used: AtomicU64::new(next_cache_tick()),
+        }),
+    );
+    prune_cache(&TOML_FIELD_CACHE, TOML_FIELD_CACHE_LIMIT, |entry| {
+        entry.last_used.load(Ordering::Relaxed)
+    });
+    Ok(data)
 }
 
 pub fn load_image_thumbnail_batch(
@@ -223,36 +333,93 @@ fn load_image_thumbnail(path: &Path, size: u32, fast_only: bool) -> AppResult<St
 
     if fast_only {
         if let Some(cached) = THUMBNAIL_CACHE.get(&full_cache_key) {
-            if cached.signature == signature {
-                return Ok(cached.data_url.clone());
+            if cached.signature == signature && (cached.path.is_empty() || Path::new(&cached.path).exists()) {
+                cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+                return Ok(cached.path.clone());
             }
         }
     }
 
     if let Some(cached) = THUMBNAIL_CACHE.get(&cache_key) {
-        if cached.signature == signature {
-            return Ok(cached.data_url.clone());
+        if cached.signature == signature && (cached.path.is_empty() || Path::new(&cached.path).exists()) {
+            cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+            return Ok(cached.path.clone());
         }
     }
 
-    let data_url = if fast_only {
+    let Some(encoded) = (if fast_only {
         embedded_thumbnail_data_url_from_jpeg_file(path, size)
             .or_else(|| platform_thumbnail_data_url(path, size))
-            .unwrap_or_default()
     } else {
-        generate_image_thumbnail(path, size)?
+        Some(generate_image_thumbnail(path, size)?)
+    }) else {
+        THUMBNAIL_CACHE.insert(
+            cache_key,
+            Arc::new(CachedThumbnail {
+                signature,
+                path: String::new(),
+                last_used: AtomicU64::new(next_cache_tick()),
+            }),
+        );
+        prune_cache(&THUMBNAIL_CACHE, THUMBNAIL_CACHE_LIMIT, |entry| {
+            entry.last_used.load(Ordering::Relaxed)
+        });
+        return Ok(String::new());
     };
+
+    let thumb_path = write_thumbnail_cache_file(path, size, fast_only, &signature, encoded)?;
     THUMBNAIL_CACHE.insert(
         cache_key,
         Arc::new(CachedThumbnail {
             signature,
-            data_url: data_url.clone(),
+            path: thumb_path.clone(),
+            last_used: AtomicU64::new(next_cache_tick()),
         }),
     );
-    Ok(data_url)
+    prune_cache(&THUMBNAIL_CACHE, THUMBNAIL_CACHE_LIMIT, |entry| {
+        entry.last_used.load(Ordering::Relaxed)
+    });
+    Ok(thumb_path)
 }
 
-fn generate_image_thumbnail(path: &Path, size: u32) -> AppResult<String> {
+fn write_thumbnail_cache_file(
+    path: &Path,
+    size: u32,
+    fast_only: bool,
+    signature: &TomlSignature,
+    encoded: EncodedThumbnail,
+) -> AppResult<String> {
+    let dir = thumbnail_cache_dir();
+    fs::create_dir_all(&dir)?;
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.to_string_lossy().hash(&mut hasher);
+    size.hash(&mut hasher);
+    fast_only.hash(&mut hasher);
+    signature.len.hash(&mut hasher);
+    signature_modified_key(signature).hash(&mut hasher);
+    encoded.extension.hash(&mut hasher);
+
+    let file_path = dir.join(format!("{:016x}.{}", hasher.finish(), encoded.extension));
+    if !file_path.exists() {
+        fs::write(&file_path, encoded.bytes)?;
+    }
+    Ok(file_path.to_string_lossy().into_owned())
+}
+
+fn thumbnail_cache_dir() -> PathBuf {
+    std::env::temp_dir().join("luxe-tauri").join("image-thumbnails")
+}
+
+fn signature_modified_key(signature: &TomlSignature) -> u128 {
+    signature
+        .modified
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
+}
+
+fn generate_image_thumbnail(path: &Path, size: u32) -> AppResult<EncodedThumbnail> {
     if let Some(data_url) = embedded_thumbnail_data_url_from_jpeg_file(path, size) {
         return Ok(data_url);
     }
@@ -283,7 +450,7 @@ fn generate_image_thumbnail(path: &Path, size: u32) -> AppResult<String> {
     encode_png_thumbnail_data_url(img, size)
 }
 
-fn embedded_thumbnail_data_url_from_jpeg_file(path: &Path, size: u32) -> Option<String> {
+fn embedded_thumbnail_data_url_from_jpeg_file(path: &Path, size: u32) -> Option<EncodedThumbnail> {
     let mut file = fs::File::open(path).ok()?;
     let mut soi = [0; 2];
     file.read_exact(&mut soi).ok()?;
@@ -354,11 +521,17 @@ fn exif_orientation(exif: &[u8]) -> Orientation {
     Orientation::from_exif_chunk(tiff).unwrap_or(Orientation::NoTransforms)
 }
 
-fn embedded_thumbnail_data_url(exif: &[u8], orientation: Orientation, size: u32) -> Option<String> {
+fn embedded_thumbnail_data_url(
+    exif: &[u8],
+    orientation: Orientation,
+    size: u32,
+) -> Option<EncodedThumbnail> {
     let jpeg = extract_exif_jpeg_thumbnail(exif)?;
     if orientation == Orientation::NoTransforms {
-        let encoded = base64::engine::general_purpose::STANDARD.encode(jpeg);
-        return Some(format!("data:image/jpeg;base64,{encoded}"));
+        return Some(EncodedThumbnail {
+            bytes: jpeg.to_vec(),
+            extension: "jpg",
+        });
     }
 
     let mut img = image::load_from_memory(jpeg).ok()?;
@@ -366,7 +539,7 @@ fn embedded_thumbnail_data_url(exif: &[u8], orientation: Orientation, size: u32)
     encode_png_thumbnail_data_url(img, size).ok()
 }
 
-fn encode_png_thumbnail_data_url(img: DynamicImage, size: u32) -> AppResult<String> {
+fn encode_png_thumbnail_data_url(img: DynamicImage, size: u32) -> AppResult<EncodedThumbnail> {
     let thumb = img.thumbnail(size, size).to_rgba8();
     let mut bytes = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
@@ -378,12 +551,14 @@ fn encode_png_thumbnail_data_url(img: DynamicImage, size: u32) -> AppResult<Stri
             image::ExtendedColorType::Rgba8,
         )
         .map_err(|err| AppError::Other(format!("thumbnail encode error: {err}")))?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:image/png;base64,{encoded}"))
+    Ok(EncodedThumbnail {
+        bytes,
+        extension: "png",
+    })
 }
 
 #[cfg(target_os = "windows")]
-fn platform_thumbnail_data_url(path: &Path, size: u32) -> Option<String> {
+fn platform_thumbnail_data_url(path: &Path, size: u32) -> Option<EncodedThumbnail> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
 
@@ -453,7 +628,7 @@ fn platform_thumbnail_data_url(path: &Path, size: u32) -> Option<String> {
 unsafe fn hbitmap_to_png_data_url(
     hbitmap: windows::Win32::Graphics::Gdi::HBITMAP,
     size: u32,
-) -> Option<String> {
+) -> Option<EncodedThumbnail> {
     use std::mem::size_of;
 
     use windows::Win32::Graphics::Gdi::{
@@ -514,7 +689,7 @@ unsafe fn hbitmap_to_png_data_url(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn platform_thumbnail_data_url(_path: &Path, _size: u32) -> Option<String> {
+fn platform_thumbnail_data_url(_path: &Path, _size: u32) -> Option<EncodedThumbnail> {
     None
 }
 
@@ -605,6 +780,380 @@ fn parse_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
     let mut out: HashMap<String, String> = HashMap::new();
     walk(&root, "", &mut out);
     Ok(out)
+}
+
+fn selected_key_lookup(keys: &[String]) -> HashMap<String, String> {
+    let mut lookup = HashMap::with_capacity(keys.len() * 2);
+    for key in keys {
+        lookup.entry(key.to_ascii_lowercase()).or_insert_with(|| key.clone());
+    }
+    lookup
+}
+
+fn parse_image_toml_fields(
+    path: &Path,
+    key_lookup: &HashMap<String, String>,
+) -> AppResult<HashMap<String, String>> {
+    let text = fs::read_to_string(path)?;
+    if let Some(out) = fast_parse_image_toml_fields(&text, key_lookup) {
+        return Ok(out);
+    }
+
+    let root: toml::Value = toml::from_str(&text)?;
+    let mut out: HashMap<String, String> = HashMap::with_capacity(key_lookup.len());
+    walk_selected(&root, "", key_lookup, &mut out);
+    Ok(out)
+}
+
+fn fast_parse_image_toml_fields(
+    text: &str,
+    key_lookup: &HashMap<String, String>,
+) -> Option<HashMap<String, String>> {
+    let mut out = HashMap::with_capacity(key_lookup.len());
+    let mut section: Vec<String> = Vec::new();
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with("[[") {
+            return None;
+        }
+
+        if line.starts_with('[') {
+            let closing = find_unquoted_char(line, ']')?;
+            let trailing = strip_inline_comment(line.get(closing + 1..).unwrap_or(""))?;
+            if !trailing.trim().is_empty() {
+                return None;
+            }
+            section = parse_toml_key_path(line.get(1..closing)?.trim())?;
+            continue;
+        }
+
+        let Some(eq_pos) = find_unquoted_char(line, '=') else {
+            continue;
+        };
+        let key_path = parse_toml_key_path(line.get(..eq_pos)?.trim())?;
+        let raw_value = strip_inline_comment(line.get(eq_pos + 1..).unwrap_or(""))?;
+        let full_path = compose_toml_path(&section, &key_path);
+        if !is_selected_toml_path(&full_path, key_lookup) {
+            if value_needs_full_toml_context(raw_value.trim()) {
+                return None;
+            }
+            continue;
+        }
+
+        let value = parse_simple_toml_value(raw_value.trim())?;
+        insert_selected_value(&full_path, value, key_lookup, &mut out);
+    }
+
+    Some(out)
+}
+
+fn compose_toml_path(section: &[String], key_path: &[String]) -> String {
+    if section.is_empty() {
+        return key_path.join(".");
+    }
+
+    let mut parts = Vec::with_capacity(section.len() + key_path.len());
+    parts.extend(section.iter().cloned());
+    parts.extend(key_path.iter().cloned());
+    parts.join(".")
+}
+
+fn is_selected_toml_path(full_path: &str, key_lookup: &HashMap<String, String>) -> bool {
+    if key_lookup.contains_key(&full_path.to_ascii_lowercase()) {
+        return true;
+    }
+    full_path
+        .rsplit('.')
+        .next()
+        .map(|leaf| key_lookup.contains_key(&leaf.to_ascii_lowercase()))
+        .unwrap_or(false)
+}
+
+fn value_needs_full_toml_context(raw: &str) -> bool {
+    let raw = raw.trim();
+    raw.starts_with("\"\"\"")
+        || raw.starts_with("'''")
+        || (raw.starts_with('[') && !raw.ends_with(']'))
+        || (raw.starts_with('{') && !raw.ends_with('}'))
+}
+
+fn find_unquoted_char(text: &str, needle: char) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for (index, ch) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {}
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == needle => return Some(index),
+            None => {}
+        }
+    }
+
+    None
+}
+
+fn strip_inline_comment(text: &str) -> Option<&str> {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for (index, ch) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {}
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == '#' => return text.get(..index),
+            None => {}
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    Some(text)
+}
+
+fn parse_toml_key_path(raw: &str) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut part_start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for (index, ch) in raw.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {}
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == '.' => {
+                parts.push(parse_toml_key_part(raw.get(part_start..index)?.trim())?);
+                part_start = index + ch.len_utf8();
+            }
+            None => {}
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    parts.push(parse_toml_key_part(raw.get(part_start..)?.trim())?);
+    Some(parts)
+}
+
+fn parse_toml_key_part(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    if (raw.starts_with('"') && raw.ends_with('"')) || (raw.starts_with('\'') && raw.ends_with('\'')) {
+        return Some(raw.get(1..raw.len().checked_sub(1)?)?.to_string());
+    }
+
+    Some(raw.to_string())
+}
+
+fn parse_simple_toml_value(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with("\"\"\"") || raw.starts_with("'''") {
+        return None;
+    }
+
+    if raw.starts_with('"') {
+        return parse_basic_toml_string(raw);
+    }
+    if raw.starts_with('\'') {
+        return parse_literal_toml_string(raw);
+    }
+    if raw.starts_with('[') {
+        return parse_simple_toml_array(raw);
+    }
+    if raw.starts_with('{') {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("true") {
+        return Some("true".to_string());
+    }
+    if raw.eq_ignore_ascii_case("false") {
+        return Some("false".to_string());
+    }
+
+    Some(normalise_toml_number_or_raw(raw))
+}
+
+fn parse_basic_toml_string(raw: &str) -> Option<String> {
+    if !raw.ends_with('"') || raw.len() < 2 {
+        return None;
+    }
+
+    let inner = raw.get(1..raw.len().checked_sub(1)?)?;
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+
+        let escaped = chars.next()?;
+        match escaped {
+            'b' => out.push('\u{0008}'),
+            't' => out.push('\t'),
+            'n' => out.push('\n'),
+            'f' => out.push('\u{000C}'),
+            'r' => out.push('\r'),
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            'u' | 'U' => return None,
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+fn parse_literal_toml_string(raw: &str) -> Option<String> {
+    if !raw.ends_with('\'') || raw.len() < 2 {
+        return None;
+    }
+    Some(raw.get(1..raw.len().checked_sub(1)?)?.to_string())
+}
+
+fn parse_simple_toml_array(raw: &str) -> Option<String> {
+    if !raw.ends_with(']') {
+        return None;
+    }
+
+    let inner = raw.get(1..raw.len().checked_sub(1)?)?;
+    if inner.trim().is_empty() {
+        return Some(String::new());
+    }
+
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, ch) in inner.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {}
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == '[' || ch == '{' => return None,
+            None if ch == ',' => {
+                items.push(parse_simple_toml_value(inner.get(start..index)?.trim())?);
+                start = index + ch.len_utf8();
+            }
+            None => {}
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    items.push(parse_simple_toml_value(inner.get(start..)?.trim())?);
+    Some(items.join(", "))
+}
+
+fn normalise_toml_number_or_raw(raw: &str) -> String {
+    let compact = raw.replace('_', "");
+    if let Ok(value) = compact.parse::<i64>() {
+        return value.to_string();
+    }
+    if let Ok(value) = compact.parse::<f64>() {
+        if value.is_finite() && value.fract() == 0.0 {
+            return format!("{value:.0}");
+        }
+        if value.is_finite() {
+            return format!("{value}");
+        }
+        return compact;
+    }
+    raw.to_string()
+}
+
+fn walk_selected(
+    v: &toml::Value,
+    prefix: &str,
+    key_lookup: &HashMap<String, String>,
+    out: &mut HashMap<String, String>,
+) {
+    match v {
+        toml::Value::Table(t) => {
+            for (k, child) in t.iter() {
+                let full = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                walk_selected(child, &full, key_lookup, out);
+            }
+        }
+        toml::Value::Array(a) => {
+            let joined: Vec<String> = a.iter().map(stringify).collect();
+            insert_selected_value(prefix, joined.join(", "), key_lookup, out);
+        }
+        _ => {
+            insert_selected_value(prefix, stringify(v), key_lookup, out);
+        }
+    }
+}
+
+fn insert_selected_value(
+    full_path: &str,
+    value: String,
+    key_lookup: &HashMap<String, String>,
+    out: &mut HashMap<String, String>,
+) {
+    if full_path.is_empty() {
+        return;
+    }
+
+    if let Some(key) = key_lookup.get(&full_path.to_ascii_lowercase()) {
+        out.entry(key.clone()).or_insert_with(|| value.clone());
+    }
+    if let Some(leaf) = full_path.rsplit('.').next() {
+        if let Some(key) = key_lookup.get(&leaf.to_ascii_lowercase()) {
+            out.entry(key.clone()).or_insert(value);
+        }
+    }
 }
 
 fn walk(v: &toml::Value, prefix: &str, out: &mut HashMap<String, String>) {

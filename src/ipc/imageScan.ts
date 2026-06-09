@@ -1,4 +1,5 @@
 import { call } from "./client";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export interface ImageEntry {
   name:      string;
@@ -19,5 +20,17 @@ export const loadImageTomlBatch = (paths: string[]) =>
 export const loadImageTomlFieldsBatch = (paths: string[], keys: string[]) =>
   call<Record<string, Record<string, string>>>("load_image_toml_fields_batch", { paths, keys });
 
-export const loadImageThumbnailBatch = (paths: string[], size: number, embeddedOnly = false) =>
-  call<Record<string, string>>("load_image_thumbnail_batch", { paths, size, embeddedOnly });
+export const loadImageThumbnailBatch = async (paths: string[], size: number, embeddedOnly = false) => {
+  const batch = await call<Record<string, string>>("load_image_thumbnail_batch", { paths, size, embeddedOnly });
+  const out: Record<string, string> = {};
+  for (const [path, thumbPath] of Object.entries(batch)) {
+    if (!thumbPath) {
+      out[path] = "";
+    } else if (thumbPath.startsWith("data:")) {
+      out[path] = thumbPath;
+    } else {
+      out[path] = convertFileSrc(thumbPath);
+    }
+  }
+  return out;
+};
