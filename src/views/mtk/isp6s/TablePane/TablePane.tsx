@@ -39,6 +39,13 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 
 type TabId = "image" | "normal" | "face" | "lce";
+type ImageSortDirection = "asc" | "desc";
+type ImageSortState = {
+  column: string;
+  key: string;
+  direction: ImageSortDirection;
+};
+type LcePreviewMode = "image" | "image_table" | "image_split";
 
 interface Props {
   schema:    Isp6sSchemaRoot;
@@ -72,6 +79,9 @@ const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
 const IMAGE_TABLE_PREFETCH_DELAY_MS = 90;
 const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
 const IMAGE_TABLE_PREFETCH_PAGES = 3;
+const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
+const IMAGE_LIST_TAB_STORAGE_KEY = "luxe:isp6s:image-list-tab";
+const LCE_PREVIEW_MODE_STORAGE_KEY = "luxe:isp6s:lce-preview-mode";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "image",  label: "Image" },
@@ -97,7 +107,7 @@ export function TablePane({
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
-  const [tab, setTab] = useState<TabId>("image");
+  const [tab, setTab] = useState<TabId>(readImageListTab);
   const [tabOrder, setTabOrder] = useState<TabId[]>(DEFAULT_TAB_ORDER);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -117,6 +127,10 @@ export function TablePane({
     }
     return DEFAULT_HEADER_RATIOS;
   }, [headerRatios]);
+
+  useEffect(() => {
+    writeImageListTab(tab);
+  }, [tab]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -817,7 +831,6 @@ function ImageTab({
   onPick:   (idx: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const tableWindowRequestRef = useRef(0);
   const tableWindowPathsRef = useRef<string[]>([]);
   const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
   const tableFieldAccessOrderRef = useRef<string[]>([]);
@@ -826,6 +839,10 @@ function ImageTab({
   const tableFieldKeySignatureRef = useRef("");
   const scrollTopRef = useRef(0);
   const scrollDirectionRef = useRef<1 | -1>(1);
+  const lastViewportHeightRef = useRef(0);
+  const tableViewportFrameRef = useRef<number | null>(null);
+  const pendingViewportReloadRef = useRef(false);
+  const sortRequestRef = useRef(0);
   const extraCols = useMemo(
     () => Object.entries(schema.Image ?? {}),
     [schema],
@@ -841,12 +858,41 @@ function ImageTab({
   const [tomls, setTomls] = useState<Record<string, Record<string, string>>>({});
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [tableReloadVersion, setTableReloadVersion] = useState(0);
+  const [sortState, setSortState] = useState<ImageSortState | null>(null);
+  const [sortValues, setSortValues] = useState<Record<string, string>>({});
+  const [sortLoading, setSortLoading] = useState(false);
+  const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
+
+  const sortedRows = useMemo(() => {
+    const rows = entries.map((entry, index) => ({ e: entry, i: index }));
+    if (!sortControlsEnabled || !sortState) return rows;
+
+    return rows.slice().sort((a, b) => {
+      const av = parseImageSortNumber(sortValues[a.e.toml_path]);
+      const bv = parseImageSortNumber(sortValues[b.e.toml_path]);
+      const direction = sortState.direction === "asc" ? 1 : -1;
+      if (av === null && bv === null) return a.i - b.i;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av === bv) return a.i - b.i;
+      return av < bv ? -direction : direction;
+    });
+  }, [entries, sortControlsEnabled, sortState, sortValues]);
+
+  const currentDisplayIndex = useMemo(
+    () => sortedRows.findIndex((row) => row.i === current),
+    [current, sortedRows],
+  );
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
-    const update = () => setViewportHeight(el.clientHeight);
+    const update = () => {
+      const shouldReload = lastViewportHeightRef.current <= 0 && el.clientHeight > 0;
+      refreshImageTableViewport(shouldReload);
+    };
     update();
 
     const observer = new ResizeObserver(update);
@@ -854,18 +900,45 @@ function ImageTab({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    scheduleImageTableViewportRefresh(true);
+  }, [current, entries, imageTomlKeySignature]);
+
+  useEffect(() => {
+    const refreshVisibleTable = () => scheduleImageTableViewportRefresh(true);
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshVisibleTable();
+      }
+    };
+
+    window.addEventListener("focus", refreshVisibleTable);
+    window.addEventListener("pageshow", refreshVisibleTable);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refreshVisibleTable);
+      window.removeEventListener("pageshow", refreshVisibleTable);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (tableViewportFrameRef.current !== null) {
+        window.cancelAnimationFrame(tableViewportFrameRef.current);
+        tableViewportFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    writeImageTableSortControlsEnabled(sortControlsEnabled);
+  }, [sortControlsEnabled]);
+
   const visible = useMemo(() => {
     const bodyScrollTop = Math.max(0, scrollTop - IMAGE_TABLE_HEADER_HEIGHT);
     const effectiveHeight = Math.max(viewportHeight, IMAGE_TABLE_ROW_HEIGHT * 8);
     const start = Math.max(0, Math.floor(bodyScrollTop / IMAGE_TABLE_ROW_HEIGHT) - IMAGE_TABLE_OVERSCAN);
     const count = Math.ceil(effectiveHeight / IMAGE_TABLE_ROW_HEIGHT) + IMAGE_TABLE_OVERSCAN * 2;
-    const end = Math.min(entries.length, start + count);
-    const rows = entries.slice(start, end).map((entry, offset) => ({
-      e: entry,
-      i: start + offset,
-    }));
+    const end = Math.min(sortedRows.length, start + count);
+    const rows = sortedRows.slice(start, end);
     return { start, end, rows };
-  }, [entries, scrollTop, viewportHeight]);
+  }, [scrollTop, sortedRows, viewportHeight]);
 
   const tableWindowPaths = useMemo(() => {
     const paths: string[] = [];
@@ -890,7 +963,7 @@ function ImageTab({
   );
 
   const tablePrefetchPaths = useMemo(() => {
-    if (entries.length === 0 || visible.rows.length === 0) return [];
+    if (sortedRows.length === 0 || visible.rows.length === 0) return [];
     const rowBudget = Math.max(
       IMAGE_TABLE_PREFETCH_MIN_ROWS,
       visible.rows.length * IMAGE_TABLE_PREFETCH_PAGES,
@@ -900,11 +973,11 @@ function ImageTab({
       ? visible.end
       : Math.max(0, visible.start - rowBudget);
     const end = direction >= 0
-      ? Math.min(entries.length, visible.end + rowBudget)
+      ? Math.min(sortedRows.length, visible.end + rowBudget)
       : visible.start;
     if (end <= start) return [];
-    return entries.slice(start, end).map((entry) => entry.toml_path);
-  }, [entries, visible.end, visible.rows.length, visible.start]);
+    return sortedRows.slice(start, end).map((row) => row.e.toml_path);
+  }, [sortedRows, visible.end, visible.rows.length, visible.start]);
 
   const tablePrefetchSignature = useMemo(
     () => `${imageTomlKeySignature}\u001e${tablePrefetchPaths.join("\u001f")}`,
@@ -923,6 +996,49 @@ function ImageTab({
     loadingTableFieldPathsRef.current.clear();
     setTomls({});
   }, [entries, imageTomlKeySignature]);
+
+  useEffect(() => {
+    if (!sortControlsEnabled || !sortState) return;
+    const stillSortable = extraCols.some(([col, key]) =>
+      col === sortState.column && key === sortState.key,
+    );
+    if (!stillSortable) {
+      setSortState(null);
+    }
+  }, [extraCols, sortControlsEnabled, sortState]);
+
+  useEffect(() => {
+    const requestId = sortRequestRef.current + 1;
+    sortRequestRef.current = requestId;
+
+    if (!sortControlsEnabled || !sortState || entries.length === 0) {
+      setSortValues({});
+      setSortLoading(false);
+      return;
+    }
+
+    setSortLoading(true);
+    const paths = entries.map((entry) => entry.toml_path);
+    const sortKey = sortState.key;
+    loadImageTomlFieldsBatch(paths, [sortKey])
+      .then((batch) => {
+        if (sortRequestRef.current !== requestId) return;
+        const nextValues: Record<string, string> = {};
+        for (const entry of entries) {
+          nextValues[entry.toml_path] = batch[entry.toml_path]?.[sortKey] ?? "";
+        }
+        setSortValues(nextValues);
+      })
+      .catch(() => {
+        if (sortRequestRef.current !== requestId) return;
+        setSortValues({});
+      })
+      .finally(() => {
+        if (sortRequestRef.current === requestId) {
+          setSortLoading(false);
+        }
+      });
+  }, [entries, sortControlsEnabled, sortState]);
 
   function rememberTableFieldRows(batch: Record<string, Record<string, string>>) {
     const cache = tableFieldCacheRef.current;
@@ -959,10 +1075,119 @@ function ImageTab({
     return paths.filter((path) => !(path in cache) && !loading.has(path));
   }
 
-  useEffect(() => {
-    const requestId = tableWindowRequestRef.current + 1;
-    tableWindowRequestRef.current = requestId;
+  function refreshImageTableViewport(forceReload = false) {
+    const el = scrollRef.current;
+    if (!el) return;
 
+    const nextViewportHeight = el.clientHeight;
+    const maxScrollTop = Math.max(0, el.scrollHeight - nextViewportHeight);
+    const nextScrollTop = Math.max(0, Math.min(el.scrollTop, maxScrollTop));
+    lastViewportHeightRef.current = nextViewportHeight;
+
+    if (el.scrollTop !== nextScrollTop) {
+      el.scrollTop = nextScrollTop;
+    }
+    scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
+    scrollTopRef.current = nextScrollTop;
+
+    setViewportHeight((prev) => (prev === nextViewportHeight ? prev : nextViewportHeight));
+    setScrollTop((prev) => (prev === nextScrollTop ? prev : nextScrollTop));
+    if (forceReload && nextViewportHeight > 0) {
+      setTableReloadVersion((version) => version + 1);
+    }
+  }
+
+  function scheduleImageTableViewportRefresh(forceReload = false) {
+    pendingViewportReloadRef.current = pendingViewportReloadRef.current || forceReload;
+    if (tableViewportFrameRef.current !== null) return;
+
+    tableViewportFrameRef.current = window.requestAnimationFrame(() => {
+      tableViewportFrameRef.current = null;
+      const shouldReload = pendingViewportReloadRef.current;
+      pendingViewportReloadRef.current = false;
+      refreshImageTableViewport(shouldReload);
+    });
+  }
+
+  function setImageTableScrollTop(nextScrollTop: number) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const clamped = Math.max(0, Math.min(nextScrollTop, el.scrollHeight - el.clientHeight));
+    scrollDirectionRef.current = clamped >= scrollTopRef.current ? 1 : -1;
+    scrollTopRef.current = clamped;
+    el.scrollTop = clamped;
+    setScrollTop(clamped);
+  }
+
+  function ensureImageTableRowVisible(displayIndex: number) {
+    const el = scrollRef.current;
+    if (!el || displayIndex < 0) return;
+    const rowTop = IMAGE_TABLE_HEADER_HEIGHT + displayIndex * IMAGE_TABLE_ROW_HEIGHT;
+    const rowBottom = rowTop + IMAGE_TABLE_ROW_HEIGHT;
+    const viewTop = el.scrollTop;
+    const viewBottom = viewTop + el.clientHeight;
+    if (rowTop < viewTop) {
+      setImageTableScrollTop(Math.max(0, rowTop - IMAGE_TABLE_ROW_HEIGHT));
+    } else if (rowBottom > viewBottom) {
+      setImageTableScrollTop(rowBottom - el.clientHeight + IMAGE_TABLE_ROW_HEIGHT);
+    }
+  }
+
+  function pickDisplayRow(displayIndex: number) {
+    const nextRow = sortedRows[displayIndex];
+    if (!nextRow) return;
+    ensureImageTableRowVisible(displayIndex);
+    onPick(nextRow.i);
+  }
+
+  function handleImageTableKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    if (sortedRows.length === 0) return;
+    event.preventDefault();
+
+    const fallbackIndex = Math.max(0, Math.min(current, sortedRows.length - 1));
+    const activeIndex = currentDisplayIndex >= 0 ? currentDisplayIndex : fallbackIndex;
+    const nextIndex = event.key === "ArrowUp"
+      ? Math.max(0, activeIndex - 1)
+      : Math.min(sortedRows.length - 1, activeIndex + 1);
+    if (nextIndex !== activeIndex) {
+      pickDisplayRow(nextIndex);
+    }
+  }
+
+  function toggleImageSort(column: string, key: string) {
+    if (!sortControlsEnabled) return;
+    setSortState((prev) => {
+      if (prev?.key === key) {
+        return {
+          column,
+          key,
+          direction: prev.direction === "asc" ? "desc" : "asc",
+        };
+      }
+      return { column, key, direction: "asc" };
+    });
+  }
+
+  function toggleImageSortControls() {
+    setSortControlsEnabled((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSortState(null);
+        setSortValues({});
+        setSortLoading(false);
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (currentDisplayIndex >= 0) {
+      ensureImageTableRowVisible(currentDisplayIndex);
+    }
+  }, [currentDisplayIndex]);
+
+  useEffect(() => {
     if (imageTomlKeys.length === 0 || tableWindowPaths.length === 0) {
       setTomls({});
       return;
@@ -979,8 +1204,10 @@ function ImageTab({
         .then((batch) => {
           if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
           rememberTableFieldRows(batch);
-          if (tableWindowRequestRef.current !== requestId) return;
-          setTomls(readCachedTableRows(tableWindowPaths));
+          const currentPaths = tableWindowPathsRef.current;
+          if (currentPaths.some((path) => path in batch)) {
+            setTomls(readCachedTableRows(currentPaths));
+          }
         })
         .catch(() => {
           if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
@@ -989,8 +1216,10 @@ function ImageTab({
             emptyRows[path] = {};
           }
           rememberTableFieldRows(emptyRows);
-          if (tableWindowRequestRef.current !== requestId) return;
-          setTomls(readCachedTableRows(tableWindowPaths));
+          const currentPaths = tableWindowPathsRef.current;
+          if (currentPaths.some((path) => path in emptyRows)) {
+            setTomls(readCachedTableRows(currentPaths));
+          }
         })
         .finally(() => {
           missing.forEach((path) => loadingTableFieldPathsRef.current.delete(path));
@@ -1000,7 +1229,7 @@ function ImageTab({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [imageTomlKeySignature, imageTomlKeys, tableWindowPaths, tableWindowSignature]);
+  }, [imageTomlKeySignature, imageTomlKeys, tableReloadVersion, tableWindowPaths, tableWindowSignature]);
 
   useEffect(() => {
     if (imageTomlKeys.length === 0 || tablePrefetchPaths.length === 0) return;
@@ -1041,7 +1270,7 @@ function ImageTab({
 
   const colSpan = 2 + extraCols.length;
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
-  const bottomPadding = Math.max(0, (entries.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
+  const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
   const columnWidths = useMemo(() => {
     const idxWidth = clampImageColumnWidth(
       estimateImageColumnTextWidth(String(Math.max(entries.length, 1))),
@@ -1074,7 +1303,10 @@ function ImageTab({
   return (
     <div
       ref={scrollRef}
-      className="h-full w-full overflow-auto"
+      className="h-full w-full overflow-auto outline-none"
+      tabIndex={0}
+      aria-label="Image table"
+      onKeyDown={handleImageTableKeyDown}
       onScroll={(event) => {
         const nextScrollTop = event.currentTarget.scrollTop;
         scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
@@ -1100,15 +1332,40 @@ function ImageTab({
           position: "sticky", top: 0, zIndex: 1,
           }}>
           <tr>
-            <Th align="center">idx</Th>
-            <Th align="center">name</Th>
-            {extraCols.map(([col], index) => (
-              <Th key={col} align={index < 2 ? "center" : "left"}>{col}</Th>
-            ))}
+            <Th align="center">
+              <HoverTooltip content="IDX 原始顺序" positioning="below-center" inline>
+                <span>idx</span>
+              </HoverTooltip>
+            </Th>
+            <Th align="center">
+              <ImageSortToggleHeader
+                enabled={sortControlsEnabled}
+                onToggle={toggleImageSortControls}
+                label="name"
+              />
+            </Th>
+            {extraCols.map(([col, key], index) => {
+              const active = sortState?.key === key;
+              return (
+                <Th key={col} align={index < 2 ? "center" : "left"}>
+                  {sortControlsEnabled ? (
+                    <ImageSortHeader
+                      label={col}
+                      align={index < 2 ? "center" : "left"}
+                      active={active}
+                      direction={active ? sortState.direction : "asc"}
+                      loading={active && sortLoading}
+                      onClick={() => toggleImageSort(col, key)}
+                      onReset={() => setSortState(null)}
+                    />
+                  ) : col}
+                </Th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {entries.length > 0 && topPadding > 0 && (
+          {sortedRows.length > 0 && topPadding > 0 && (
             <tr aria-hidden="true" style={{ height: topPadding }}>
               <td colSpan={colSpan} style={{ height: topPadding, padding: 0, border: 0 }} />
             </tr>
@@ -1117,24 +1374,27 @@ function ImageTab({
             const data = tomls[e.toml_path] ?? {};
             return (
               <tr key={e.jpg_path}
-                  onClick={() => onPick(i)}
+                  onClick={() => {
+                    scrollRef.current?.focus({ preventScroll: true });
+                    onPick(i);
+                  }}
                   style={{
                     cursor: "pointer",
                     height: IMAGE_TABLE_ROW_HEIGHT,
                     background: i === current ? "var(--colorBrandBackground2)" : "transparent",
                     borderBottom: "1px solid var(--colorNeutralStroke3)",
                   }}>
-                <Td title={String(i + 1)} align="center">{i + 1}</Td>
-                <Td title={e.name} align="center">{e.name}</Td>
+                <Td align="center">{i + 1}</Td>
+                <Td align="center">{e.name}</Td>
                 {extraCols.map(([col, key], index) => (
-                  <Td key={col} title={data[key] ?? "-"} align={index < 2 ? "center" : "left"}>
+                  <Td key={col} align={index < 2 ? "center" : "left"}>
                     {data[key] ?? "-"}
                   </Td>
                 ))}
               </tr>
             );
           })}
-          {entries.length > 0 && bottomPadding > 0 && (
+          {sortedRows.length > 0 && bottomPadding > 0 && (
             <tr aria-hidden="true" style={{ height: bottomPadding }}>
               <td colSpan={colSpan} style={{ height: bottomPadding, padding: 0, border: 0 }} />
             </tr>
@@ -1161,7 +1421,7 @@ function LceTab({
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
 }) {
-  const [mode, setMode] = useState<"image" | "image_table" | "image_split">("image");
+  const [mode, setMode] = useState<LcePreviewMode>(readLcePreviewMode);
   const labels = ["0", "1", "50", "250", "500", "750", "950", "999"];
   const num = (k: string) => {
     const v = tomlData[k];
@@ -1171,15 +1431,23 @@ function LceTab({
   const p = labels.map((n) => num(`SW_LCE_P${n}`));
   const o = labels.map((n) => num(`SW_LCE_O${n}`));
 
+  useEffect(() => {
+    writeLcePreviewMode(mode);
+  }, [mode]);
+
   return (
     <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-split" className="h-full w-full">
       <Panel defaultSize={38} minSize={22}>
-        <div className="h-full w-full p-3 pr-0">
+        <div className="h-full w-full">
             <div
-              className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl border"
+              className="relative flex h-full w-full items-center justify-center overflow-hidden border"
               style={{
                 background: "var(--colorNeutralBackground1)",
                 borderColor: "var(--colorNeutralStroke2)",
+                borderLeft: 0,
+                borderTop: 0,
+                borderBottom: 0,
+                borderRadius: "0 0 0 12px",
               }}
             >
               <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md px-1 py-1"
@@ -1217,12 +1485,16 @@ function LceTab({
         </Panel>
       <ResizeHandle direction="horizontal" size={10} />
       <Panel minSize={30}>
-        <div className="h-full w-full p-3 pl-0">
+        <div className="h-full w-full">
           <div
-            className="h-full w-full overflow-hidden rounded-xl border"
+            className="h-full w-full overflow-hidden border"
             style={{
               background: "var(--colorNeutralBackground1)",
               borderColor: "var(--colorNeutralStroke2)",
+              borderRight: 0,
+              borderTop: 0,
+              borderBottom: 0,
+              borderRadius: "0 0 12px 0",
             }}
           >
             <LceChart pSeries={p} oSeries={o} />
@@ -1431,6 +1703,172 @@ function clampImageColumnWidth(value: number, min: number, max: number): number 
   return Math.min(max, Math.max(min, Math.ceil(value)));
 }
 
+function readImageTableSortControlsEnabled(): boolean {
+  try {
+    const stored = window.localStorage.getItem(IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY);
+    return stored === null ? true : stored === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeImageTableSortControlsEnabled(enabled: boolean) {
+  try {
+    window.localStorage.setItem(IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY, enabled ? "1" : "0");
+  } catch {
+    // Ignore storage failures; the in-memory state still works for this mount.
+  }
+}
+
+function readImageListTab(): TabId {
+  try {
+    const stored = window.localStorage.getItem(IMAGE_LIST_TAB_STORAGE_KEY);
+    return isImageListTab(stored) ? stored : "image";
+  } catch {
+    return "image";
+  }
+}
+
+function writeImageListTab(tab: TabId) {
+  try {
+    window.localStorage.setItem(IMAGE_LIST_TAB_STORAGE_KEY, tab);
+  } catch {
+    // Ignore storage failures; the in-memory state still works for this mount.
+  }
+}
+
+function isImageListTab(value: string | null): value is TabId {
+  return value === "image" || value === "normal" || value === "face" || value === "lce";
+}
+
+function readLcePreviewMode(): LcePreviewMode {
+  try {
+    const stored = window.localStorage.getItem(LCE_PREVIEW_MODE_STORAGE_KEY);
+    return isLcePreviewMode(stored) ? stored : "image";
+  } catch {
+    return "image";
+  }
+}
+
+function writeLcePreviewMode(mode: LcePreviewMode) {
+  try {
+    window.localStorage.setItem(LCE_PREVIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage failures; the in-memory state still works for this mount.
+  }
+}
+
+function isLcePreviewMode(value: string | null): value is LcePreviewMode {
+  return value === "image" || value === "image_table" || value === "image_split";
+}
+
+function parseImageSortNumber(value: string | undefined): number | null {
+  const text = (value ?? "").trim();
+  if (!text || text === "-") return null;
+  const normalised = text.replace(/[,_\s]/g, "");
+  const direct = Number(normalised);
+  if (Number.isFinite(direct)) return direct;
+  const matched = text.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
+  if (!matched) return null;
+  const parsed = Number(matched);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ImageSortToggleHeader({
+  enabled,
+  label,
+  onToggle,
+}: {
+  enabled: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  const tooltip = enabled ? "关闭其它列排序按钮" : "开启其它列排序按钮";
+  return (
+    <HoverTooltip content={tooltip} positioning="below-center" inline>
+      <button
+        type="button"
+        className="flex w-full items-center justify-center gap-1 rounded px-0.5 py-0 text-xs font-semibold uppercase transition-colors"
+        style={{
+          background: "transparent",
+          border: 0,
+          cursor: "pointer",
+          color: enabled ? "var(--colorBrandForeground1)" : "inherit",
+          opacity: enabled ? 1 : 0.62,
+        }}
+        aria-label={tooltip}
+        onClick={onToggle}
+      >
+        <span>{label}</span>
+        <span className="flex shrink-0 flex-col leading-none" aria-hidden="true">
+          <ChevronUp24Regular
+            className="h-2.5 w-2.5"
+            style={{ opacity: enabled ? 0.9 : 0.28 }}
+          />
+          <ChevronDown24Regular
+            className="h-2.5 w-2.5"
+            style={{ marginTop: -3, opacity: enabled ? 0.9 : 0.28 }}
+          />
+        </span>
+      </button>
+    </HoverTooltip>
+  );
+}
+
+function ImageSortHeader({
+  label,
+  align,
+  active,
+  direction,
+  loading,
+  onClick,
+  onReset,
+}: {
+  label: string;
+  align: "left" | "center";
+  active: boolean;
+  direction: ImageSortDirection;
+  loading: boolean;
+  onClick: () => void;
+  onReset: () => void;
+}) {
+  const tooltip = `${label} 数值${active && direction === "desc" ? "逆序" : "正序"}排序，右键恢复 IDX 顺序`;
+  return (
+    <HoverTooltip content={tooltip} positioning="below-center" inline>
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 rounded px-0.5 py-0 text-xs font-semibold uppercase transition-colors"
+        style={{
+          background: "transparent",
+          border: 0,
+          cursor: "pointer",
+          justifyContent: align === "center" ? "center" : "flex-start",
+          color: active ? "var(--colorBrandForeground1)" : "inherit",
+          opacity: loading ? 0.68 : 1,
+        }}
+        aria-label={tooltip}
+        onClick={onClick}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onReset();
+        }}
+      >
+        <span className="min-w-0 truncate">{label}</span>
+        <span className="flex shrink-0 flex-col leading-none" aria-hidden="true">
+          <ChevronUp24Regular
+            className="h-2.5 w-2.5"
+            style={{ opacity: active && direction === "asc" ? 1 : 0.32 }}
+          />
+          <ChevronDown24Regular
+            className="h-2.5 w-2.5"
+            style={{ marginTop: -3, opacity: active && direction === "desc" ? 1 : 0.32 }}
+          />
+        </span>
+      </button>
+    </HoverTooltip>
+  );
+}
+
 function Th({
   children,
   align = "left",
@@ -1448,22 +1886,19 @@ function Th({
 
 function Td({
   children,
-  title,
   align = "left",
 }: {
   children: React.ReactNode;
-  title?: string;
   align?: "left" | "center";
 }) {
   return (
-    <td className="truncate px-2 py-1.5"
-        title={title}
+    <td className="px-2 py-1.5"
         style={{
           color: "var(--colorNeutralForeground2)",
           textAlign: align,
           whiteSpace: "nowrap",
         }}>
-      {children}
+      <span className="block min-w-0 truncate">{children}</span>
     </td>
   );
 }

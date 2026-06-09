@@ -92,7 +92,7 @@ export function LceChart({ pSeries, oSeries }: Props) {
   );
 
   return (
-    <div ref={rootRef} className="h-full w-full p-2">
+    <div ref={rootRef} className="h-full w-full">
       <svg
         width="100%"
         height="100%"
@@ -102,7 +102,7 @@ export function LceChart({ pSeries, oSeries }: Props) {
         shapeRendering="geometricPrecision"
         onMouseLeave={() => setHoveredLabel(null)}
       >
-        <rect x="0" y="0" width={layout.width} height={layout.height} rx="14" fill={palette.surface} />
+        <rect x="0" y="0" width={layout.width} height={layout.height} fill={palette.surface} />
 
         {model.topDiffs.map((item) => (
           <text

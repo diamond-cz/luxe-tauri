@@ -192,14 +192,17 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
   const renderCardArea = () => (
     <div className="flex h-full w-full flex-col"
          style={{
-           background:  "var(--colorNeutralBackground2)",
+           background:  "var(--colorNeutralBackground1)",
            border:      "1px solid var(--colorNeutralStroke2)",
            borderRadius: 12,
            overflow:    "hidden",
          }}>
       {/* Header bar — kept outside the scroll area so the divider stays put. */}
       <div className="flex h-11 shrink-0 items-center justify-between px-4"
-           style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+           style={{
+             background: "var(--colorNeutralBackground2)",
+             borderBottom: "1px solid var(--colorNeutralStroke2)",
+           }}>
         <div className="flex items-center gap-2 text-xs"
              style={{ color: "var(--colorNeutralForeground2)" }}>
           <DataHistogram24Regular className="h-4 w-4"
@@ -218,20 +221,21 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
       </div>
 
       {/* Scrollable body */}
-      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+      <div className="flex flex-1 flex-col gap-3 overflow-auto p-3"
+           style={{ background: "var(--colorNeutralBackground1)" }}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragEnd={dragEndHandler(topOrder, (next) => patchVis({ top_card_order: next }))}
         >
           <SortableContext items={topOrder} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {topOrder.map((name) => (
                 <SortableCard
                   key={name}
                   id={name}
-                  headerHeight={48}
-                  handleLeft={10}
+                  headerHeight={44}
+                  handleLeft={9}
                   borderRadius={12}
                 >
                   {renderTopCard(name)}
@@ -251,6 +255,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
           title="Normal"
           collapsed={visual.normal_collapsed}
           onToggle={(c) => patchVis({ normal_collapsed: c })}
+          surface="panel"
           badges={
             <BadgeStrip
               items={[
@@ -279,13 +284,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
               strategy={visual.normal_wf_row_mode ? verticalListSortingStrategy : rectSortingStrategy}
             >
               <div className={visual.normal_wf_row_mode
-                ? "flex flex-col gap-3"
-                : "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"}>
+                ? "flex flex-col gap-2.5"
+                : "grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4"}>
                 {normalOrder.map((sub) => (
                   <SortableCard
                     key={sub}
                     id={sub}
-                    headerHeight={44}
+                    headerHeight={40}
                     fullCardHandle
                     showHandle={false}
                     borderRadius={8}
@@ -306,6 +311,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
           title="Face / Touch"
           collapsed={visual.face_collapsed}
           onToggle={(c) => patchVis({ face_collapsed: c })}
+          surface="panel"
           badges={
             <BadgeStrip
               items={[
@@ -333,13 +339,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
               strategy={visual.face_wf_row_mode ? verticalListSortingStrategy : rectSortingStrategy}
             >
               <div className={visual.face_wf_row_mode
-                ? "flex flex-col gap-3"
-                : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
+                ? "flex flex-col gap-2.5"
+                : "grid grid-cols-1 gap-2.5 md:grid-cols-2"}>
                 {faceOrder.map((sub) => (
                   <SortableCard
                     key={sub}
                     id={sub}
-                    headerHeight={44}
+                    headerHeight={40}
                     fullCardHandle
                     showHandle={false}
                     borderRadius={8}

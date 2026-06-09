@@ -27,7 +27,7 @@ export function AeParamCard({ title, badges, accent, children, onClick }: Props)
     <div
       className="flex flex-col rounded-lg border transition-colors"
       style={{
-        background:  "var(--colorNeutralBackground3)",
+        background:  "var(--colorNeutralBackground2)",
         borderColor: "var(--colorNeutralStroke2)",
         cursor:      clickable ? "pointer" : "default",
       }}
@@ -42,14 +42,14 @@ export function AeParamCard({ title, badges, accent, children, onClick }: Props)
       }}
     >
       <div
-        className="flex h-11 items-center justify-between gap-3 pl-3 pr-3"
+        className="flex h-10 items-center justify-between gap-2 px-2.5"
         style={{
           borderBottom: children
             ? "1px solid var(--colorNeutralStroke2)"
             : "none",
         }}
       >
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5">
           {accent && (
             <span
               aria-hidden
@@ -64,7 +64,7 @@ export function AeParamCard({ title, badges, accent, children, onClick }: Props)
         </span>
         <BadgeStrip items={badges} />
       </div>
-      {children && <div className="p-3">{children}</div>}
+      {children && <div className="p-2.5">{children}</div>}
     </div>
   );
 }

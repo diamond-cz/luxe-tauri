@@ -15,6 +15,7 @@ interface Props {
   onToggle?:  (collapsed: boolean) => void;
   children:   ReactNode;
   className?: string;
+  surface?: "default" | "panel";
 }
 
 /**
@@ -26,11 +27,20 @@ interface Props {
  */
 export function CollapsibleCard({
   title, badges, headerExtra, defaultCollapsed = false,
-  collapsed, onToggle, children, className,
+  collapsed, onToggle, children, className, surface = "default",
 }: Props) {
   const [internal, setInternal] = useState(defaultCollapsed);
   const isControlled = collapsed !== undefined;
   const open  = isControlled ? !collapsed : !internal;
+  const cardBackground = surface === "panel"
+    ? "var(--colorNeutralBackground1)"
+    : "var(--colorNeutralBackground2)";
+  const headerBackground = surface === "panel"
+    ? "var(--colorNeutralBackground2)"
+    : "transparent";
+  const hoverBackground = surface === "panel"
+    ? "var(--colorNeutralBackground3)"
+    : "var(--colorNeutralBackground3)";
 
   const flip = () => {
     if (isControlled) onToggle?.(!collapsed);
@@ -41,7 +51,7 @@ export function CollapsibleCard({
     <div
       className={"flex flex-col rounded-xl border " + (className ?? "")}
       style={{
-        background:  "var(--colorNeutralBackground2)",
+        background:  cardBackground,
         borderColor: "var(--colorNeutralStroke2)",
       }}
     >
@@ -49,25 +59,28 @@ export function CollapsibleCard({
         type="button"
         onClick={flip}
         className={
-          "flex h-12 w-full items-center justify-between gap-2.5 pl-8 pr-4 transition-colors " +
+          "flex h-11 w-full items-center justify-between gap-2 pl-7 pr-3 transition-colors " +
           (open ? "rounded-t-xl" : "rounded-xl")
         }
-        style={{ color: "var(--colorNeutralForeground1)" }}
+        style={{
+          color: "var(--colorNeutralForeground1)",
+          background: headerBackground,
+        }}
         onMouseEnter={(e) =>
           (e.currentTarget as HTMLButtonElement).style.background =
-            "var(--colorNeutralBackground3)"}
+            hoverBackground}
         onMouseLeave={(e) =>
-          (e.currentTarget as HTMLButtonElement).style.background = "transparent"}
+          (e.currentTarget as HTMLButtonElement).style.background = headerBackground}
       >
         <span className="flex items-center gap-2">
           <span className="relative -top-0.5 text-sm font-semibold">{title}</span>
         </span>
         <span className="flex items-center gap-2">
           {badges && (
-            <span className="flex items-center gap-2">{badges}</span>
+            <span className="flex items-center gap-1.5">{badges}</span>
           )}
           {headerExtra && (
-            <span className="flex items-center gap-2"
+            <span className="flex items-center gap-1.5"
                   onClick={(e) => e.stopPropagation()}>
               {headerExtra}
             </span>
@@ -83,7 +96,7 @@ export function CollapsibleCard({
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
       >
         <div className="overflow-hidden">
-          <div className="px-4 pb-4 pt-1">{children}</div>
+          <div className="px-3 pb-3 pt-1.5">{children}</div>
         </div>
       </div>
     </div>
