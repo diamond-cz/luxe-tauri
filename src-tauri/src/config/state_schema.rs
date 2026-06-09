@@ -109,7 +109,7 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub normal_col_ratios:          Vec<f32>,
     #[serde(default)] pub face_col_ratios:            Vec<f32>,
     #[serde(default)] pub normal_sub_order:           NormalSubOrder,
-    #[serde(default)] pub table_collapsed:            bool,
+    #[serde(default = "default_true")] pub table_collapsed: bool,
     #[serde(default = "default_table_header_ratios")]
     pub table_header_ratios:                          Vec<f32>,
 }
@@ -140,7 +140,7 @@ impl Default for Isp6sAeVisual {
             normal_col_ratios: vec![],
             face_col_ratios: vec![],
             normal_sub_order: NormalSubOrder::default(),
-            table_collapsed: false,
+            table_collapsed: true,
             table_header_ratios: default_table_header_ratios(),
         }
     }

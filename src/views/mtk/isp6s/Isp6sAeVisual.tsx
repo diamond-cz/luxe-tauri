@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import {
   Add24Regular,
@@ -74,6 +74,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
   const [activeCard, setActiveCard] = useState<string | undefined>(undefined);
+  const initialEmptyTableCollapseAppliedRef = useRef(false);
 
   const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${tabIdx}`]);
   const imageDir      = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
@@ -81,6 +82,18 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
 
   const visual   = useIsp6sVisualStore((s) => s.visual);
   const patchVis = useIsp6sVisualStore((s) => s.patch);
+
+  useEffect(() => {
+    if (initialEmptyTableCollapseAppliedRef.current) return;
+    if (imageDir.status !== "idle" || imageDir.entries.length > 0) {
+      initialEmptyTableCollapseAppliedRef.current = true;
+      return;
+    }
+    initialEmptyTableCollapseAppliedRef.current = true;
+    if (!visual.table_collapsed) {
+      patchVis({ table_collapsed: true });
+    }
+  }, [imageDir.entries.length, imageDir.status, patchVis, visual.table_collapsed]);
 
   /* Debounced visual-state persistence. */
   useEffect(() => {

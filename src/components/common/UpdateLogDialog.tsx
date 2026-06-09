@@ -39,6 +39,59 @@ interface Props {
 
 const UPDATE_LOGS: UpdateLogEntry[] = [
   {
+    version: "0.1.3",
+    date: "2026-06-09",
+    sections: [
+      {
+        title: "新增",
+        items: [
+          {
+            title: "图片列表状态记忆",
+            desc: "记忆 Image、Normal、Face、LCE 当前选中项，以及 LCE 图片/三段图/二段图预览模式。",
+          },
+          {
+            title: "Image 表格排序交互",
+            desc: "支持键盘上下键切换选中行，并为 FACEST、1SST、BV 等数值列提供正序、逆序和右键恢复 IDX 顺序。",
+          },
+        ],
+      },
+      {
+        title: "优化",
+        items: [
+          {
+            title: "大批量图片加载",
+            desc: "优化 Image 表格 TOML 字段窗口化加载、缓存和缩略图显示，降低千张以上图片场景的内存占用与滚动等待。",
+          },
+          {
+            title: "Normal / Face / LCE 表格",
+            desc: "完善三类表格的布局、列宽、展开折叠、深浅色配色和持久化状态，提升大表格阅读体验。",
+          },
+          {
+            title: "LCE 可视化",
+            desc: "优化 LCE 预览区域、折线图贴边布局和 RGB 直方图显示，使统计结果更接近标准看图软件。",
+          },
+          {
+            title: "可视化卡片",
+            desc: "调整可视化卡片展开背景、内部层级和间距，并适配深色与浅色主题。",
+          },
+        ],
+      },
+      {
+        title: "修复",
+        items: [
+          {
+            title: "Image 表格恢复刷新",
+            desc: "修复切换到主页或其他平台页面后返回 Image 表格不自动更新，需要手动点击或滚动才加载的问题。",
+          },
+          {
+            title: "首次空状态",
+            desc: "首次启动且未加载图片时，图片列表卡片默认收起，减少空内容占用。",
+          },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.2",
     date: "2026-06-05",
     sections: [
