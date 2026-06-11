@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { cppResolveCardSource } from "@/ipc/cppParser";
-import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
+import type { CardSourceSpec, Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { SourceCodeView } from "../SourceCodeView";
 
 interface Props {
@@ -9,6 +9,12 @@ interface Props {
   schema:   Isp6sSchemaRoot;
   /** Card name that the user clicked (e.g. "MainT"). Drives the jump. */
   activeCard?: string;
+  sourceOverride?: SourceOverride;
+}
+
+export interface SourceOverride {
+  label: string;
+  spec:  CardSourceSpec;
 }
 
 /**
@@ -16,17 +22,18 @@ interface Props {
  * of card → ranges/line goes through Rust `cpp_resolve_card_source` so the
  * `re:` regex / context = "block" / etc. semantics stay identical to hiz.
  */
-export function ParamMapMode({ filePath, schema, activeCard }: Props) {
+export function ParamMapMode({ filePath, schema, activeCard, sourceOverride }: Props) {
   const [ranges,   setRanges]   = useState<Array<[number, number]>>([]);
   const [jumpLine, setJumpLine] = useState<number>(1);
   const [err,      setErr]      = useState<string | null>(null);
 
   useEffect(() => {
-    if (!activeCard) { setRanges([]); setJumpLine(1); setErr(null); return; }
-    const spec = schema.card_source?.[activeCard];
+    const label = sourceOverride?.label ?? activeCard;
+    if (!label) { setRanges([]); setJumpLine(1); setErr(null); return; }
+    const spec = sourceOverride?.spec ?? schema.card_source?.[label];
     if (!spec) {
       setRanges([]); setJumpLine(1);
-      setErr(`[card_source.${activeCard}] 未配置`);
+      setErr(`[card_source.${label}] 未配置`);
       return;
     }
     let cancelled = false;
@@ -39,7 +46,7 @@ export function ParamMapMode({ filePath, schema, activeCard }: Props) {
       })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
-  }, [filePath, activeCard, schema]);
+  }, [filePath, activeCard, schema, sourceOverride]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -50,8 +57,8 @@ export function ParamMapMode({ filePath, schema, activeCard }: Props) {
              borderBottom: "1px solid var(--colorNeutralStroke2)",
            }}>
         <span>
-          {activeCard
-            ? `卡片：${activeCard}`
+          {sourceOverride?.label ?? activeCard
+            ? `卡片：${sourceOverride?.label ?? activeCard}`
             : "点击左侧任一子卡片在源码中定位"}
         </span>
         {err && (

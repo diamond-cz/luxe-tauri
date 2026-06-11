@@ -49,7 +49,7 @@ export interface Isp6sAeVisual {
   image_splitter_ratio:       number;
   image_splitter_orientation: "V" | "H";
   image_inner_ratios:         number[];
-  preview_mode:               "param_map" | "image_split" | "para_check" | "image";
+  preview_mode:               "param_map" | "chart_map" | "image_split" | "para_check" | "image";
   top_card_order:             string[];
   normal_collapsed:           boolean;
   face_collapsed:             boolean;

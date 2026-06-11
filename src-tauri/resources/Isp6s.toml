@@ -318,6 +318,11 @@ toml_key = "AE_TAG_FLT_DR"
 [card_source.MainT]
 paths = ["[0][3][1][20]"]
 
+[card_source.Main_Target_Threshold]
+paths = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"]
+jump_to = "first"
+highlight = "ranges"
+
 [card_source.MTWV]
 paths = ["[0][3][1][20]"]
 

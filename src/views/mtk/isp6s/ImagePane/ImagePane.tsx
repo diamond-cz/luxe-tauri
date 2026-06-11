@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import type { ImageEntry } from "@/ipc/imageScan";
-import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
+import type { CardSourceSpec, Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { ChartMapMode } from "./ChartMapMode";
 import { ParaCheckMode } from "./ParaCheckMode";
-import { ParamMapMode } from "./ParamMapMode";
+import { ParamMapMode, type SourceOverride } from "./ParamMapMode";
 import {
   PreviewLink24Regular,
+  ChartMultiple24Regular,
   Code24Regular,
   CodeBlock24Regular,
 } from "@fluentui/react-icons";
 
-export type PreviewMode = "para_check" | "param_map";
+export type PreviewMode = "para_check" | "param_map" | "chart_map";
 
 interface Props {
   mode:        PreviewMode | "image" | "image_split";
@@ -25,6 +27,7 @@ interface Props {
 
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
   { id: "param_map",   label: "源码映射", Icon: Code24Regular },
+  { id: "chart_map",   label: "图表映射", Icon: ChartMultiple24Regular },
   { id: "para_check",  label: "参数对比", Icon: PreviewLink24Regular },
 ];
 
@@ -32,6 +35,7 @@ export function ImagePane({
   mode, onMode, filePath, schema, entry, tomlData, activeCard,
 }: Props) {
   const [internalCard] = useState<string | undefined>(undefined);
+  const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: PreviewMode =
@@ -52,6 +56,22 @@ export function ImagePane({
     observer.observe(header);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    setSourceOverride(undefined);
+  }, [activeCard]);
+
+  const handleMode = (nextMode: PreviewMode) => {
+    if (nextMode === "param_map") {
+      setSourceOverride(undefined);
+    }
+    onMode(nextMode);
+  };
+
+  const handleSourceJump = (label: string, spec: CardSourceSpec) => {
+    setSourceOverride({ label, spec });
+    onMode("param_map");
+  };
 
   return (
     <div className="flex h-full w-full flex-col"
@@ -79,7 +99,7 @@ export function ImagePane({
                   size="small"
                   appearance={active ? "primary" : "subtle"}
                   icon={<Icon />}
-                  onClick={() => onMode(id)}
+                  onClick={() => handleMode(id)}
                   className="h-8"
                   style={{
                     minWidth: showModeLabels ? undefined : 32,
@@ -98,7 +118,8 @@ export function ImagePane({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {effectiveMode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
-        {effectiveMode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} />}
+        {effectiveMode === "chart_map"   && <ChartMapMode   filePath={filePath} schema={schema} tomlData={tomlData} activeCard={activeCard} onSourceJump={handleSourceJump} />}
+        {effectiveMode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} sourceOverride={sourceOverride} />}
       </div>
     </div>
   );

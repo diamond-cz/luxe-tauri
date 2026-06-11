@@ -98,7 +98,7 @@ pub struct Isp6sAeVisual {
     pub image_splitter_orientation:                   String,           // "V" | "H"
     #[serde(default)] pub image_inner_ratios:         Vec<f32>,
     #[serde(default = "default_preview_mode")]
-    pub preview_mode:                                 String,           // image / image_split / para_check / param_map
+    pub preview_mode:                                 String,           // image / image_split / para_check / param_map / chart_map
     #[serde(default)] pub top_card_order:             Vec<String>,
     #[serde(default)] pub normal_collapsed:           bool,
     #[serde(default)] pub face_collapsed:             bool,

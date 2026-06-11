@@ -4,12 +4,13 @@ import logo from "@/assets/luxe-logo.png";
 import { SectionTitle } from "@/components/settings/SectionTitle";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { APP_VERSION } from "@/services/appVersion";
+import { openUrl } from "@/ipc/shell";
 
-const REPO_URL    = "https://github.com/diamond-cz/luxe-tauri";
+const AUTHOR_URL = "https://github.com/diamond-cz";
+const REPO_URL = "https://github.com/diamond-cz/luxe-tauri";
 
 function openExternal(url: string) {
-  // window.open is intercepted by Tauri webview and routes via the OS default browser.
-  window.open(url, "_blank");
+  openUrl(url).catch((err) => console.warn("open external url failed", err));
 }
 
 export function AboutPanel() {
@@ -38,8 +39,9 @@ export function AboutPanel() {
             <Button
               appearance="subtle"
               icon={<OpenGlyph />}
-              onClick={() => openExternal(`${REPO_URL}/graphs/contributors`)}
-              aria-label="open author"
+              onClick={() => openExternal(AUTHOR_URL)}
+              aria-label="打开主作者主页"
+              title="打开主作者主页"
             />
           </SettingRow>
           <SettingRow
@@ -51,7 +53,8 @@ export function AboutPanel() {
               appearance="subtle"
               icon={<OpenGlyph />}
               onClick={() => openExternal(REPO_URL)}
-              aria-label="open repo"
+              aria-label="打开开源仓库"
+              title="打开开源仓库"
             />
           </SettingRow>
         </div>
@@ -71,7 +74,7 @@ export function AboutPanel() {
           <SettingRow
             icon="ic_fluent_diversity_regular"
             title={t("about_icon_pack",      { defaultValue: "图标库" })}
-            desc ={t("about_icon_pack_desc", { defaultValue: "本项目内置了 Fluent UI 图标库, Microsoft 公司保有版权" })}
+            desc ={t("about_icon_pack_desc", { defaultValue: "Fluent UI Icons（React）" })}
           >
             <span />
           </SettingRow>

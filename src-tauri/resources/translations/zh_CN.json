@@ -42,7 +42,7 @@
   "about_copyright": "版权声明",
   "about_copyright_desc": "LUXE 版权所有 © 2026 by diamond-cz",
   "about_icon_pack": "图标库",
-  "about_icon_pack_desc": "本项目内置了 Fluent UI 图标库, Microsoft 公司保有版权",
+  "about_icon_pack_desc": "Fluent UI Icons（React）",
   "app_desc": "影像效果跨平台AE算法可视化",
   "home_subtitle": "基于 PyQt5 的多平台 AE 算法可视化界面",
   "page_mtk": "MTK 平台",
