@@ -1,19 +1,21 @@
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { FluentProvider } from "@fluentui/react-components";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { pickTheme } from "@/theme/fluent-tokens";
 import { SideNav } from "@/components/shell/SideNav";
 import { TitleBar } from "@/components/shell/TitleBar";
 import { CloseBehaviorDialog } from "@/components/shell/CloseBehaviorDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
-import { HomeView } from "@/views/HomeView";
-import { MtkView } from "@/views/mtk/MtkView";
-import { QualcommView } from "@/views/QualcommView";
-import { UnisocView } from "@/views/UnisocView";
-import { SettingsView } from "@/views/settings/SettingsView";
+import { GlobalTitleTooltip } from "@/components/common/HoverTooltip";
 import { useShellBootstrap } from "@/hooks/useShellBootstrap";
 import { useSettingsStore } from "@/stores/settingsStore";
+
+const HomeView = lazy(() => import("@/views/HomeView").then(({ HomeView }) => ({ default: HomeView })));
+const MtkView = lazy(() => import("@/views/mtk/MtkView").then(({ MtkView }) => ({ default: MtkView })));
+const QualcommView = lazy(() => import("@/views/QualcommView").then(({ QualcommView }) => ({ default: QualcommView })));
+const UnisocView = lazy(() => import("@/views/UnisocView").then(({ UnisocView }) => ({ default: UnisocView })));
+const SettingsView = lazy(() => import("@/views/settings/SettingsView").then(({ SettingsView }) => ({ default: SettingsView })));
 
 export default function App() {
   const themeKey = useSettingsStore((s) => s.settings.theme);
@@ -24,6 +26,7 @@ export default function App() {
       <ErrorBoundary>
         <MemoryRouter initialEntries={["/home"]}>
           <ShellRoot />
+          <GlobalTitleTooltip />
         </MemoryRouter>
       </ErrorBoundary>
     </FluentProvider>
@@ -64,18 +67,29 @@ function ShellRoot() {
           {/* Auto-reset on route change so a crash in one view doesn't
               persist after the user navigates away. */}
           <ErrorBoundary key={location.pathname}>
-            <Routes>
-              <Route path="/"         element={<Navigate to="/home" replace />} />
-              <Route path="/home"     element={<HomeView />} />
-              <Route path="/mtk/*"    element={<MtkView />} />
-              <Route path="/qualcomm" element={<QualcommView />} />
-              <Route path="/unisoc"   element={<UnisocView />} />
-              <Route path="/settings" element={<SettingsView />} />
-            </Routes>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
+                <Route path="/"         element={<Navigate to="/home" replace />} />
+                <Route path="/home"     element={<HomeView />} />
+                <Route path="/mtk/*"    element={<MtkView />} />
+                <Route path="/qualcomm" element={<QualcommView />} />
+                <Route path="/unisoc"   element={<UnisocView />} />
+                <Route path="/settings" element={<SettingsView />} />
+              </Routes>
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>
       <CloseBehaviorDialog open={askClose} onClose={() => setAskClose(false)} />
+    </div>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center text-xs"
+         style={{ color: "var(--colorNeutralForeground3)" }}>
+      加载中...
     </div>
   );
 }

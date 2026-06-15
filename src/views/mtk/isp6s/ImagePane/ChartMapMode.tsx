@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { Code24Regular } from "@fluentui/react-icons";
+import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, TableLink24Regular } from "@fluentui/react-icons";
 
 import {
   cppGetFieldsAtPath,
@@ -8,17 +8,30 @@ import {
   type CardSourceSpec,
   type Isp6sSchemaRoot,
 } from "@/ipc/cppParser";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 import type { FieldEntry } from "@/types/cpp_parser";
 
-type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT";
+type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT" | "Touch";
 type StepperDirection = "up" | "down";
+type MidChartMode = "thd" | "corr_mid" | "b2d_ori" | "b2d_corr";
+type MidChartSource = "mid" | "mid_value" | "corr_dr_midratio" | "dr_midratio_ori" | "b2d";
+type BindingPanelKind = "bv" | "mid";
 
 interface Props {
   filePath: string;
   schema:   Isp6sSchemaRoot;
   tomlData: Record<string, string>;
   activeCard?: string;
+  focusTarget?: ChartFocusTarget | null;
+  sourceRevision?: number;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}
+
+interface ChartFocusTarget {
+  label: string;
+  key:   number;
 }
 
 interface ChartSection {
@@ -39,6 +52,7 @@ interface MainTargetThresholdRow {
   label:  "BV" | "Base" | "Exp";
   path:   string;
   values: string[];
+  fields: FieldEntry[];
 }
 
 interface MidCurveSource {
@@ -48,7 +62,28 @@ interface MidCurveSource {
   y2: string[];
 }
 
-const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT"];
+interface B2dCurveSource {
+  x: string[];
+  y: string[];
+}
+
+interface B2dCorrCurveSource {
+  value: string[];
+  x1: string[];
+  y1: string[];
+  x2: string[];
+  y2: string[];
+}
+
+interface BindingEntry {
+  id: string;
+  label: string;
+  path: string;
+  values: string[];
+}
+
+const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT", "Touch"];
+const SOURCE_NUMBER_RE = /[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 const MAIN_TARGET_THRESHOLD_PATHS = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"] as const;
 const MID_CURVE_PATHS = {
   x1: "[0][3][1].65",
@@ -57,8 +92,37 @@ const MID_CURVE_PATHS = {
   y2: "[0][3][1].68",
 } as const;
 const MID_CURVE_SOURCE_PATHS = [MID_CURVE_PATHS.x1, MID_CURVE_PATHS.y1, MID_CURVE_PATHS.x2, MID_CURVE_PATHS.y2] as const;
+const B2D_CURVE_PATHS = {
+  x: "[0][3][1][45]",
+  y: "[0][3][1][46]",
+} as const;
+const B2D_CURVE_SOURCE_PATHS = [B2D_CURVE_PATHS.x, B2D_CURVE_PATHS.y] as const;
+const B2D_CORR_CURVE_PATHS = {
+  value: "[0][3][1].73",
+  x1: "[0][3][1].74",
+  y1: "[0][3][1].75",
+  x2: "[0][3][1].76",
+  y2: "[0][3][1].77",
+} as const;
+const B2D_CORR_CURVE_SOURCE_PATHS = [
+  B2D_CORR_CURVE_PATHS.value,
+  B2D_CORR_CURVE_PATHS.x1,
+  B2D_CORR_CURVE_PATHS.y1,
+  B2D_CORR_CURVE_PATHS.x2,
+  B2D_CORR_CURVE_PATHS.y2,
+] as const;
+const MID_CONTROL_SOURCE_PATHS = [
+  ...MID_CURVE_SOURCE_PATHS,
+  ...B2D_CORR_CURVE_SOURCE_PATHS,
+  ...B2D_CURVE_SOURCE_PATHS,
+] as const;
 const MAIN_TARGET_THRESHOLD_SOURCE_SPEC: CardSourceSpec = {
   paths: [...MAIN_TARGET_THRESHOLD_PATHS],
+  jump_to: "first",
+  highlight: "ranges",
+};
+const MID_CONTROL_SOURCE_SPEC: CardSourceSpec = {
+  paths: [...MID_CONTROL_SOURCE_PATHS],
   jump_to: "first",
   highlight: "ranges",
 };
@@ -68,11 +132,23 @@ const MAIN_TARGET_THRESHOLD_ROWS: Array<{ label: MainTargetThresholdRow["label"]
   { label: "Exp",  path: MAIN_TARGET_THRESHOLD_PATHS[2] },
 ];
 
-export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJump }: Props) {
+export function ChartMapMode({
+  filePath,
+  schema,
+  tomlData,
+  activeCard,
+  focusTarget,
+  sourceRevision,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+}: Props) {
   const [tab, setTab] = useState<ChartTabId>(() => coerceTab(activeCard) ?? "MainT");
   const [sections, setSections] = useState<ChartSection[]>([]);
   const [mainTargetThreshold, setMainTargetThreshold] = useState<MainTargetThresholdRow[] | null>(null);
   const [mainTargetMidCurve, setMainTargetMidCurve] = useState<MidCurveSource | null>(null);
+  const [mainTargetB2dCurve, setMainTargetB2dCurve] = useState<B2dCurveSource | null>(null);
+  const [mainTargetB2dCorrCurve, setMainTargetB2dCorrCurve] = useState<B2dCorrCurveSource | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -80,6 +156,12 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
     const next = coerceTab(activeCard);
     if (next) setTab(next);
   }, [activeCard]);
+
+  useEffect(() => {
+    if (focusTarget?.label.startsWith("Main_Target_Threshold")) {
+      setTab("MainT");
+    }
+  }, [focusTarget]);
 
   const sourceKey = useMemo(() => tab, [tab]);
   const imageBvValue = useMemo(
@@ -102,6 +184,10 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
     () => readTomlValue(tomlData, "AE_TAG_DRV6_MIDRATIO"),
     [tomlData],
   );
+  const b2dValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_DRV6_B2D"),
+    [tomlData],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +196,8 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
       setSections([]);
       setMainTargetThreshold(null);
       setMainTargetMidCurve(null);
+      setMainTargetB2dCurve(null);
+      setMainTargetB2dCorrCurve(null);
       setMessage("请先导入 AE.cpp 参数文件");
       return;
     }
@@ -117,6 +205,8 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
       setSections([]);
       setMainTargetThreshold(null);
       setMainTargetMidCurve(null);
+      setMainTargetB2dCurve(null);
+      setMainTargetB2dCorrCurve(null);
       setMessage(`[card_source.${sourceKey}] 未配置`);
       return;
     }
@@ -126,10 +216,14 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
     (async () => {
       let threshold: MainTargetThresholdRow[] | null = null;
       let midCurve: MidCurveSource | null = null;
+      let b2dCurve: B2dCurveSource | null = null;
+      let b2dCorrCurve: B2dCorrCurveSource | null = null;
       if (tab === "MainT") {
-        [threshold, midCurve] = await Promise.all([
+        [threshold, midCurve, b2dCurve, b2dCorrCurve] = await Promise.all([
           loadMainTargetThreshold(filePath),
           loadMainTargetMidCurve(filePath),
+          loadMainTargetB2dCurve(filePath),
+          loadMainTargetB2dCorrCurve(filePath),
         ]);
       }
       const hit = await cppResolveCardSource(filePath, spec);
@@ -144,6 +238,8 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
         setSections(nextSections);
         setMainTargetThreshold(threshold);
         setMainTargetMidCurve(midCurve);
+        setMainTargetB2dCurve(b2dCurve);
+        setMainTargetB2dCorrCurve(b2dCorrCurve);
         setMessage(nextSections.length === 0 && !threshold ? "当前源码范围内没有可展示字段" : null);
         setLoading(false);
       }
@@ -152,6 +248,8 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
         setSections([]);
         setMainTargetThreshold(null);
         setMainTargetMidCurve(null);
+        setMainTargetB2dCurve(null);
+        setMainTargetB2dCorrCurve(null);
         setMessage(err instanceof Error ? err.message : String(err));
         setLoading(false);
       }
@@ -160,10 +258,13 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
     return () => {
       cancelled = true;
     };
-  }, [filePath, schema, sourceKey, tab]);
+  }, [filePath, schema, sourceKey, sourceRevision, tab]);
 
   return (
     <div className="flex h-full w-full flex-col" style={canvasStyle}>
+      <style>
+        {".chart-map-scrollbar-hidden::-webkit-scrollbar{display:none;}"}
+      </style>
       <div className="shrink-0 overflow-x-auto px-3 pt-3" style={tabStripWrapStyle}>
         <div className="flex min-w-max items-end gap-0.5">
           {CHART_TABS.map((item) => (
@@ -179,7 +280,7 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">
+      <div className="chart-map-scrollbar-hidden min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2" style={hiddenScrollbarStyle}>
         <div style={innerCanvasStyle}>
           {loading && (
             <div className="mb-2 text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
@@ -189,14 +290,21 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
 
           {tab === "MainT" && mainTargetThreshold && (
             <MainTargetThresholdCard
+              filePath={filePath}
               rows={mainTargetThreshold}
               imageBvValue={imageBvValue}
               imageMidratioValue={imageMidratioValue}
               corrDrMidratioValue={corrDrMidratioValue}
               midratioOriValue={midratioOriValue}
               midratioValue={midratioValue}
+              b2dValue={b2dValue}
               midCurve={mainTargetMidCurve}
+              b2dCurve={mainTargetB2dCurve}
+              b2dCorrCurve={mainTargetB2dCorrCurve}
               sourceSpec={schema.card_source?.Main_Target_Threshold ?? MAIN_TARGET_THRESHOLD_SOURCE_SPEC}
+              focusTarget={focusTarget}
+              sourceDraftText={sourceDraftText}
+              onSourceDraftTextChange={onSourceDraftTextChange}
               onSourceJump={onSourceJump}
             />
           )}
@@ -243,34 +351,67 @@ export function ChartMapMode({ filePath, schema, tomlData, activeCard, onSourceJ
   );
 }
 
-async function loadMainTargetThreshold(filePath: string): Promise<MainTargetThresholdRow[]> {
+async function loadMainTargetThreshold(
+  filePath: string,
+  rowsConfig: Array<{ label: MainTargetThresholdRow["label"]; path: string }> = MAIN_TARGET_THRESHOLD_ROWS,
+): Promise<MainTargetThresholdRow[]> {
   const rows: MainTargetThresholdRow[] = [];
-  for (const row of MAIN_TARGET_THRESHOLD_ROWS) {
+  for (const row of rowsConfig) {
+    const fields = await loadFieldEntriesAtPath(filePath, row.path);
     rows.push({
       label: row.label,
       path: row.path,
-      values: await loadFieldValuesAtPath(filePath, row.path, ["-"]),
+      values: fields.length > 0 ? fields.map((field) => field.value) : ["-"],
+      fields,
     });
   }
   return rows;
 }
 
-async function loadMainTargetMidCurve(filePath: string): Promise<MidCurveSource> {
+async function loadMainTargetMidCurve(
+  filePath: string,
+  paths: { x1: string; y1: string; x2: string; y2: string } = MID_CURVE_PATHS,
+): Promise<MidCurveSource> {
   const [x1, y1, x2, y2] = await Promise.all(
-    MID_CURVE_SOURCE_PATHS.map((path) => loadFieldValuesAtPath(filePath, path, [])),
+    [paths.x1, paths.y1, paths.x2, paths.y2].map((path) => loadFieldValuesAtPath(filePath, path, [])),
   );
   return { x1, y1, x2, y2 };
 }
 
-async function loadFieldValuesAtPath(filePath: string, path: string, fallback: string[]): Promise<string[]> {
+async function loadMainTargetB2dCurve(
+  filePath: string,
+  paths: { x: string; y: string } = B2D_CURVE_PATHS,
+): Promise<B2dCurveSource> {
+  const [x, y] = await Promise.all(
+    [paths.x, paths.y].map((path) => loadFieldValuesAtPath(filePath, path, [])),
+  );
+  return { x, y };
+}
+
+async function loadMainTargetB2dCorrCurve(
+  filePath: string,
+  paths: { value: string; x1: string; y1: string; x2: string; y2: string } = B2D_CORR_CURVE_PATHS,
+): Promise<B2dCorrCurveSource> {
+  const [value, x1, y1, x2, y2] = await Promise.all(
+    [paths.value, paths.x1, paths.y1, paths.x2, paths.y2].map((path) => loadFieldValuesAtPath(filePath, path, [])),
+  );
+  return { value, x1, y1, x2, y2 };
+}
+
+async function loadFieldEntriesAtPath(filePath: string, path: string): Promise<FieldEntry[]> {
   let fields: FieldEntry[] = [];
   try {
     fields = await cppGetFieldsAtPath(filePath, path);
   } catch {
     fields = [];
   }
-  fields = fields.filter((field) => isPathUnder(field.path, path));
-  fields.sort((a, b) => a.index - b.index || a.path.localeCompare(b.path));
+  return fields
+    .filter((field) => isPathUnder(field.path, path))
+    .sort((a, b) => a.index - b.index || a.path.localeCompare(b.path));
+}
+
+async function loadFieldValuesAtPath(filePath: string, path: string, fallback: string[]): Promise<string[]> {
+  const fields = await loadFieldEntriesAtPath(filePath, path);
   return fields.length > 0 ? fields.map((field) => field.value) : fallback;
 }
 
@@ -317,39 +458,122 @@ function buildSections(
 }
 
 function MainTargetThresholdCard({
+  filePath,
   rows,
   imageBvValue,
   imageMidratioValue,
   corrDrMidratioValue,
   midratioOriValue,
   midratioValue,
+  b2dValue,
   midCurve,
+  b2dCurve,
+  b2dCorrCurve,
   sourceSpec,
+  focusTarget,
+  sourceDraftText,
+  onSourceDraftTextChange,
   onSourceJump,
 }: {
+  filePath: string;
   rows: MainTargetThresholdRow[];
   imageBvValue: string | null;
   imageMidratioValue: string | null;
   corrDrMidratioValue: string | null;
   midratioOriValue: string | null;
   midratioValue: string | null;
+  b2dValue: string | null;
   midCurve: MidCurveSource | null;
+  b2dCurve: B2dCurveSource | null;
+  b2dCorrCurve: B2dCorrCurveSource | null;
   sourceSpec: CardSourceSpec;
+  focusTarget?: ChartFocusTarget | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
 }) {
-  const bv = rows.find((row) => row.label === "BV");
-  const base = rows.find((row) => row.label === "Base");
-  const exp = rows.find((row) => row.label === "Exp");
+  const [expanded, setExpanded] = useState(true);
+  const [editableRows, setEditableRows] = useState(rows);
+  const [editableMidCurve, setEditableMidCurve] = useState<MidCurveSource | null>(midCurve);
+  const [editableB2dCurve, setEditableB2dCurve] = useState<B2dCurveSource | null>(b2dCurve);
+  const [editableB2dCorrCurve, setEditableB2dCorrCurve] = useState<B2dCorrCurveSource | null>(b2dCorrCurve);
+  const [bindingPanel, setBindingPanel] = useState<BindingPanelKind | null>(null);
+  const [bvBindingPaths, setBvBindingPaths] = useState<Record<MainTargetThresholdRow["label"], string>>({
+    BV: MAIN_TARGET_THRESHOLD_PATHS[0],
+    Base: MAIN_TARGET_THRESHOLD_PATHS[1],
+    Exp: MAIN_TARGET_THRESHOLD_PATHS[2],
+  });
+  const [midBindingPaths, setMidBindingPaths] = useState({
+    midX1: MID_CURVE_PATHS.x1,
+    midY1: MID_CURVE_PATHS.y1,
+    midX2: MID_CURVE_PATHS.x2,
+    midY2: MID_CURVE_PATHS.y2,
+    b2dX: B2D_CURVE_PATHS.x,
+    b2dY: B2D_CURVE_PATHS.y,
+    corrValue: B2D_CORR_CURVE_PATHS.value,
+    corrX1: B2D_CORR_CURVE_PATHS.x1,
+    corrY1: B2D_CORR_CURVE_PATHS.y1,
+    corrX2: B2D_CORR_CURVE_PATHS.x2,
+    corrY2: B2D_CORR_CURVE_PATHS.y2,
+  } as Record<"midX1" | "midY1" | "midX2" | "midY2" | "b2dX" | "b2dY" | "corrValue" | "corrX1" | "corrY1" | "corrX2" | "corrY2", string>);
+  const [bindingLoading, setBindingLoading] = useState(false);
+  const [bindingMessage, setBindingMessage] = useState<string | null>(null);
+  const bvSectionRef = useRef<HTMLElement | null>(null);
+  const midSectionRef = useRef<HTMLElement | null>(null);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+  const bv = editableRows.find((row) => row.label === "BV");
+  const base = editableRows.find((row) => row.label === "Base");
+  const exp = editableRows.find((row) => row.label === "Exp");
   const orderedRows = [bv, base, exp].filter((row): row is MainTargetThresholdRow => Boolean(row));
   const defaultBv = firstNumericString(bv?.values);
   const initialBv = imageBvValue ?? defaultBv ?? "";
   const [bvInput, setBvInput] = useState(initialBv);
   const [midReadoutMode, setMidReadoutMode] = useState<"value" | "percent">("value");
+  const [midChartMode, setMidChartMode] = useState<MidChartMode>("thd");
+  const [midChartSource, setMidChartSource] = useState<MidChartSource>("mid");
   const [midChartResetKey, setMidChartResetKey] = useState(0);
+
+  useEffect(() => {
+    setEditableRows(rows);
+  }, [rows]);
+
+  useEffect(() => {
+    setEditableMidCurve(midCurve);
+  }, [midCurve]);
+
+  useEffect(() => {
+    setEditableB2dCurve(b2dCurve);
+  }, [b2dCurve]);
+
+  useEffect(() => {
+    setEditableB2dCorrCurve(b2dCorrCurve);
+  }, [b2dCorrCurve]);
+
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
 
   useEffect(() => {
     setBvInput(initialBv);
   }, [initialBv]);
+
+  useEffect(() => {
+    if (!focusTarget?.label.startsWith("Main_Target_Threshold")) return;
+    if (!expanded) {
+      setExpanded(true);
+      return;
+    }
+    const target = focusTarget.label.endsWith(".mid")
+      ? midSectionRef.current
+      : focusTarget.label.endsWith(".bv")
+        ? bvSectionRef.current
+        : null;
+    if (!target) return;
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded, focusTarget]);
 
   const bvNumber = parseFiniteNumber(bvInput);
   const baseValue = interpolateTableValue(bvNumber, bv?.values, base?.values);
@@ -358,20 +582,156 @@ function MainTargetThresholdCard({
   const thdMaxValue = Number.isFinite(baseValue) && Number.isFinite(expValue)
     ? baseValue * 2 ** (expValue / 1000)
     : NaN;
-  const midCurvePoints = useMemo(() => buildMidCurvePoints(midCurve), [midCurve]);
+  const midCurvePoints = useMemo(() => buildMidCurvePoints(editableMidCurve), [editableMidCurve]);
   const segmentedMidPoints = useMemo(() => buildSegmentedMidPoints(midCurvePoints), [midCurvePoints]);
   const midValue = parseFiniteNumber(imageMidratioValue);
   const corrDrMidratio = parseFiniteNumber(corrDrMidratioValue);
   const midratioOri = parseFiniteNumber(midratioOriValue);
   const midratio = parseFiniteNumber(midratioValue);
+  const b2d = parseFiniteNumber(b2dValue);
   const midFunctionValue = midValueAtCorr(corrDrMidratio, segmentedMidPoints, midValue);
   const effectiveMidValue = Number.isFinite(midFunctionValue) ? midFunctionValue : midValue;
   const targetValue = computeSegmentedThd(corrDrMidratio, baseValue, expValue, thdMaxValue, segmentedMidPoints, midValue);
+  const b2dCurvePoints = useMemo(() => buildB2dCurvePoints(editableB2dCurve), [editableB2dCurve]);
+  const b2dCorrCurvePoints = useMemo(() => buildB2dCorrCurvePoints(editableB2dCorrCurve), [editableB2dCorrCurve]);
+  const b2dCorrValue = parseFiniteNumber(firstNumericString(editableB2dCorrCurve?.value));
+  const b2dOriFactor = computeRatioFromKeyPoints(b2d, b2dCurvePoints);
+  const computedDrMidratioOri = Number.isFinite(midratio) && Number.isFinite(b2dOriFactor)
+    ? (midratio * b2dOriFactor) / 1024
+    : midratioOri;
   const restoreBvTitle = imageBvValue
     ? `恢复图片 BV 值：${imageBvValue}`
     : defaultBv
       ? `恢复默认 BV 值：${defaultBv}`
       : "无可恢复 BV 值";
+
+  const updateThresholdCell = (rowLabel: MainTargetThresholdRow["label"], cellIndex: number, nextValue: string) => {
+    const currentRow = editableRows.find((row) => row.label === rowLabel);
+    if (!currentRow) return;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    const nextText = replaceThresholdCellInSourceText(sourceDraftTextRef.current, currentRow, cellIndex, trimmed);
+    if (nextText === null) return;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableRows((current) => updateThresholdRowsCell(current, rowLabel, cellIndex, trimmed));
+  };
+
+  const bvBindingEntries: BindingEntry[] = orderedRows.map((row) => ({
+    id: row.label,
+    label: row.label,
+    path: bvBindingPaths[row.label] ?? row.path,
+    values: row.values,
+  }));
+  const midBindingEntries: BindingEntry[] = [
+    { id: "midX1", label: "F(corr) P1 x", path: midBindingPaths.midX1, values: editableMidCurve?.x1 ?? [] },
+    { id: "midY1", label: "F(corr) P1 y", path: midBindingPaths.midY1, values: editableMidCurve?.y1 ?? [] },
+    { id: "midX2", label: "F(corr) P2 x", path: midBindingPaths.midX2, values: editableMidCurve?.x2 ?? [] },
+    { id: "midY2", label: "F(corr) P2 y", path: midBindingPaths.midY2, values: editableMidCurve?.y2 ?? [] },
+    { id: "b2dX", label: "F(B2D)_ori x", path: midBindingPaths.b2dX, values: editableB2dCurve?.x ?? [] },
+    { id: "b2dY", label: "F(B2D)_ori y", path: midBindingPaths.b2dY, values: editableB2dCurve?.y ?? [] },
+    { id: "corrValue", label: "corr value", path: midBindingPaths.corrValue, values: editableB2dCorrCurve?.value ?? [] },
+    { id: "corrX1", label: "F(B2D)_corr P1 x", path: midBindingPaths.corrX1, values: editableB2dCorrCurve?.x1 ?? [] },
+    { id: "corrY1", label: "F(B2D)_corr P1 y", path: midBindingPaths.corrY1, values: editableB2dCorrCurve?.y1 ?? [] },
+    { id: "corrX2", label: "F(B2D)_corr P2 x", path: midBindingPaths.corrX2, values: editableB2dCorrCurve?.x2 ?? [] },
+    { id: "corrY2", label: "F(B2D)_corr P2 y", path: midBindingPaths.corrY2, values: editableB2dCorrCurve?.y2 ?? [] },
+  ];
+
+  const applyBvBindings = async (entries: BindingEntry[]) => {
+    setBindingLoading(true);
+    setBindingMessage(null);
+    try {
+      const nextPaths = {
+        BV: entries.find((entry) => entry.id === "BV")?.path.trim() || MAIN_TARGET_THRESHOLD_PATHS[0],
+        Base: entries.find((entry) => entry.id === "Base")?.path.trim() || MAIN_TARGET_THRESHOLD_PATHS[1],
+        Exp: entries.find((entry) => entry.id === "Exp")?.path.trim() || MAIN_TARGET_THRESHOLD_PATHS[2],
+      };
+      const nextRows = await loadMainTargetThreshold(filePath, [
+        { label: "BV", path: nextPaths.BV },
+        { label: "Base", path: nextPaths.Base },
+        { label: "Exp", path: nextPaths.Exp },
+      ]);
+      setBvBindingPaths(nextPaths);
+      setEditableRows(nextRows);
+      setBindingMessage("已应用 bv 控制绑定");
+    } catch (err) {
+      setBindingMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBindingLoading(false);
+    }
+  };
+
+  const applyMidBindings = async (entries: BindingEntry[]) => {
+    setBindingLoading(true);
+    setBindingMessage(null);
+    try {
+      const nextPaths = {
+        midX1: entries.find((entry) => entry.id === "midX1")?.path.trim() || MID_CURVE_PATHS.x1,
+        midY1: entries.find((entry) => entry.id === "midY1")?.path.trim() || MID_CURVE_PATHS.y1,
+        midX2: entries.find((entry) => entry.id === "midX2")?.path.trim() || MID_CURVE_PATHS.x2,
+        midY2: entries.find((entry) => entry.id === "midY2")?.path.trim() || MID_CURVE_PATHS.y2,
+        b2dX: entries.find((entry) => entry.id === "b2dX")?.path.trim() || B2D_CURVE_PATHS.x,
+        b2dY: entries.find((entry) => entry.id === "b2dY")?.path.trim() || B2D_CURVE_PATHS.y,
+        corrValue: entries.find((entry) => entry.id === "corrValue")?.path.trim() || B2D_CORR_CURVE_PATHS.value,
+        corrX1: entries.find((entry) => entry.id === "corrX1")?.path.trim() || B2D_CORR_CURVE_PATHS.x1,
+        corrY1: entries.find((entry) => entry.id === "corrY1")?.path.trim() || B2D_CORR_CURVE_PATHS.y1,
+        corrX2: entries.find((entry) => entry.id === "corrX2")?.path.trim() || B2D_CORR_CURVE_PATHS.x2,
+        corrY2: entries.find((entry) => entry.id === "corrY2")?.path.trim() || B2D_CORR_CURVE_PATHS.y2,
+      };
+      const [nextMidCurve, nextB2dCurve, nextB2dCorrCurve] = await Promise.all([
+        loadMainTargetMidCurve(filePath, {
+          x1: nextPaths.midX1,
+          y1: nextPaths.midY1,
+          x2: nextPaths.midX2,
+          y2: nextPaths.midY2,
+        }),
+        loadMainTargetB2dCurve(filePath, {
+          x: nextPaths.b2dX,
+          y: nextPaths.b2dY,
+        }),
+        loadMainTargetB2dCorrCurve(filePath, {
+          value: nextPaths.corrValue,
+          x1: nextPaths.corrX1,
+          y1: nextPaths.corrY1,
+          x2: nextPaths.corrX2,
+          y2: nextPaths.corrY2,
+        }),
+      ]);
+      setMidBindingPaths(nextPaths);
+      setEditableMidCurve(nextMidCurve);
+      setEditableB2dCurve(nextB2dCurve);
+      setEditableB2dCorrCurve(nextB2dCorrCurve);
+      setBindingMessage("已应用 mid 控制绑定");
+    } catch (err) {
+      setBindingMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBindingLoading(false);
+    }
+  };
+
+  const resetBvBindings = () => {
+    void applyBvBindings([
+      { id: "BV", label: "BV", path: MAIN_TARGET_THRESHOLD_PATHS[0], values: [] },
+      { id: "Base", label: "Base", path: MAIN_TARGET_THRESHOLD_PATHS[1], values: [] },
+      { id: "Exp", label: "Exp", path: MAIN_TARGET_THRESHOLD_PATHS[2], values: [] },
+    ]);
+  };
+
+  const resetMidBindings = () => {
+    void applyMidBindings([
+      { id: "midX1", label: "Mid x1", path: MID_CURVE_PATHS.x1, values: [] },
+      { id: "midY1", label: "Mid y1", path: MID_CURVE_PATHS.y1, values: [] },
+      { id: "midX2", label: "Mid x2", path: MID_CURVE_PATHS.x2, values: [] },
+      { id: "midY2", label: "Mid y2", path: MID_CURVE_PATHS.y2, values: [] },
+      { id: "b2dX", label: "B2D x", path: B2D_CURVE_PATHS.x, values: [] },
+      { id: "b2dY", label: "F(B2D)", path: B2D_CURVE_PATHS.y, values: [] },
+      { id: "corrValue", label: "corr value", path: B2D_CORR_CURVE_PATHS.value, values: [] },
+      { id: "corrX1", label: "F(B2D)_corr P1 x", path: B2D_CORR_CURVE_PATHS.x1, values: [] },
+      { id: "corrY1", label: "F(B2D)_corr P1 y", path: B2D_CORR_CURVE_PATHS.y1, values: [] },
+      { id: "corrX2", label: "F(B2D)_corr P2 x", path: B2D_CORR_CURVE_PATHS.x2, values: [] },
+      { id: "corrY2", label: "F(B2D)_corr P2 y", path: B2D_CORR_CURVE_PATHS.y2, values: [] },
+    ]);
+  };
 
   return (
     <section style={thresholdCardStyle}>
@@ -379,22 +739,42 @@ function MainTargetThresholdCard({
         <div style={thresholdTitleStyle}>Main_Target_Threshold</div>
         <button
           type="button"
-          title="Jump to source mapping"
-          aria-label="Jump to source mapping"
-          disabled={!onSourceJump}
-          onClick={() => onSourceJump?.("Main_Target_Threshold", sourceSpec)}
-          style={sourceButtonStyle(Boolean(onSourceJump))}
+          title={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
+          aria-label={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
+          onClick={() => setExpanded((current) => !current)}
+          style={sourceButtonStyle(true)}
         >
-          <Code24Regular className="h-4 w-4" />
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
         </button>
       </div>
       <div style={thresholdFormulaStyle}>
         <span>Main Target THD = Base(bv) x 2^(exp(bv)/1000 x Mid(corr_dr_midratio)/1024)</span>
         <strong style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
       </div>
-      <div style={thresholdDualControlStyle}>
-        <section style={thresholdGroupStyle}>
-          <div style={thresholdGroupTitleStyle}>bv控制</div>
+      {expanded && <div style={thresholdDualControlStyle}>
+        <section ref={bvSectionRef} style={thresholdGroupStyle}>
+          <div style={thresholdGroupTitleStyle}>
+            <span>bv控制</span>
+            <div style={thresholdGroupActionsStyle}>
+              <button
+                type="button"
+                title="跳转到 bv 对应源码"
+                aria-label="跳转到 bv 对应源码"
+                disabled={!onSourceJump}
+                onClick={() => onSourceJump?.("Main_Target_Threshold.bv", sourceSpec)}
+                style={groupSourceButtonStyle(Boolean(onSourceJump))}
+              >
+                <Code24Regular className="h-4 w-4" />
+              </button>
+              <BindingIconButton
+                title="参数绑定：bv 控制"
+                onClick={() => {
+                  setBindingPanel("bv");
+                  setBindingMessage(null);
+                }}
+              />
+            </div>
+          </div>
           <div style={bvControlRowStyle}>
             <div style={bvInputWrapStyle}>
               <ThresholdValueControl
@@ -419,65 +799,187 @@ function MainTargetThresholdCard({
             </div>
           </div>
           <div style={thresholdTableWrapStyle}>
-            <table style={thresholdTableStyle}>
-              <tbody>
-                {orderedRows.map((row) => (
-                  <tr key={row.label}>
-                    <th
-                      title={row.path}
-                      style={thresholdLabelCellStyle(row.label)}
-                    >
-                      {row.label}
-                    </th>
-                    {row.values.map((value, idx) => (
-                      <td
-                        key={`${row.label}:${idx}`}
-                        style={thresholdValueCellStyle(row.label, interpolationColumns.has(idx))}
+            <div style={thresholdTableSurfaceStyle}>
+              <table style={thresholdTableStyle}>
+                <tbody>
+                  {orderedRows.map((row) => (
+                    <tr key={row.label}>
+                      <th
+                        title={row.path}
+                        style={thresholdLabelCellStyle(row.label)}
                       >
-                        {value}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        {row.label}
+                      </th>
+                      {row.values.map((value, idx) => (
+                        <ThresholdEditableCell
+                          key={`${row.label}:${idx}`}
+                          label={row.label}
+                          value={value}
+                          highlighted={interpolationColumns.has(idx)}
+                          editable={Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[idx])}
+                          title={`${row.path} #${idx}`}
+                          onCommit={(nextValue) => updateThresholdCell(row.label, idx, nextValue)}
+                        />
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
 
-        <section style={thresholdGroupStyle}>
-          <div style={thresholdGroupTitleStyle}>mid控制</div>
+        <section ref={midSectionRef} style={thresholdGroupStyle}>
+          <div style={thresholdGroupTitleStyle}>
+            <span>mid控制</span>
+            <div style={thresholdGroupActionsStyle}>
+              <button
+                type="button"
+                title="跳转到 mid 对应源码"
+                aria-label="跳转到 mid 对应源码"
+                disabled={!onSourceJump}
+                onClick={() => onSourceJump?.("Main_Target_Threshold.mid", MID_CONTROL_SOURCE_SPEC)}
+                style={groupSourceButtonStyle(Boolean(onSourceJump))}
+              >
+                <Code24Regular className="h-4 w-4" />
+              </button>
+              <BindingIconButton
+                title="参数绑定：mid 控制"
+                onClick={() => {
+                  setBindingPanel("mid");
+                  setBindingMessage(null);
+                }}
+              />
+            </div>
+          </div>
           <div style={midControlRowStyle}>
             <div style={midPrimaryWrapStyle}>
               <ThresholdValueControl
                 label="Mid"
                 value={formatMidReadout(effectiveMidValue, midReadoutMode)}
-                labelButtonTitle="恢复折线图读取图片和参数时的状态"
-                onLabelClick={() => setMidChartResetKey((current) => current + 1)}
+                labelActive={midChartMode === "thd"}
+                valueActive={midChartMode === "corr_mid"}
+                labelButtonTitle="显示 Main Target THD 曲线"
+                onLabelClick={() => {
+                  setMidChartMode((current) => current === "thd" ? current : "thd");
+                  setMidChartSource("mid");
+                  setMidChartResetKey((current) => current + 1);
+                }}
                 onValueClick={() => {
+                  setMidChartMode((current) => current === "corr_mid" ? current : "corr_mid");
+                  setMidChartSource("mid_value");
+                }}
+                onValueContextMenu={() => {
                   setMidReadoutMode((current) => current === "value" ? "percent" : "value");
                 }}
                 valueTitle="百分比基于 1024 计算"
               />
             </div>
             <div style={midComputedStackStyle}>
-              <ThresholdCompactReadout label="corr_dr_midratio" value={formatComputedNumber(corrDrMidratio)} />
-              <ThresholdCompactReadout label="midratio_ori" value={formatComputedNumber(midratioOri)} />
+              <ThresholdMetricButton
+                label="corr_dr_midratio"
+                value={formatComputedNumber(corrDrMidratio)}
+                tooltipPositioning="above-center"
+                active={midChartMode === "b2d_corr"}
+                title="显示 F(B2D)_corr 曲线"
+                onClick={() => {
+                  setMidChartMode((current) => current === "b2d_corr" ? current : "b2d_corr");
+                  setMidChartSource("corr_dr_midratio");
+                }}
+              />
+              <ThresholdMetricButton
+                label="dr_midratio_ori"
+                value={formatComputedNumber(midratioOri)}
+                active={midChartMode === "b2d_ori" && midChartSource === "dr_midratio_ori"}
+                title="显示 F(B2D)_ori 曲线"
+                onClick={() => {
+                  setMidChartMode((current) => current === "b2d_ori" ? current : "b2d_ori");
+                  setMidChartSource("dr_midratio_ori");
+                }}
+              />
             </div>
-            <div style={midRatioWrapStyle}>
-              <ThresholdCompactReadout label="midratio" value={formatComputedNumber(midratio)} fillHeight />
+            <div style={midComputedStackStyle}>
+              <ThresholdMetricButton
+                label="B2D"
+                value={formatComputedNumber(b2d)}
+                disabled={midChartSource === "corr_dr_midratio" || midChartSource === "dr_midratio_ori"}
+                title="显示 F(B2D)_ori 曲线"
+                tooltipPositioning="above-center"
+              />
+              <ThresholdMetricButton
+                label="midratio"
+                value={formatComputedNumber(midratio)}
+                disabled={midChartSource === "dr_midratio_ori"}
+              />
             </div>
           </div>
-          <MidRatioChart
-            baseValue={baseValue}
-            expValue={expValue}
-            thdMaxValue={thdMaxValue}
-            midValue={effectiveMidValue}
-            corrDrMidratio={corrDrMidratio}
-            midCurvePoints={midCurvePoints}
-            resetKey={midChartResetKey}
-          />
+          {midChartMode === "thd" ? (
+            <MidRatioChart
+              baseValue={baseValue}
+              expValue={expValue}
+              thdMaxValue={thdMaxValue}
+              midValue={effectiveMidValue}
+              corrDrMidratio={corrDrMidratio}
+              midCurvePoints={midCurvePoints}
+              resetKey={midChartResetKey}
+            />
+          ) : midChartMode === "corr_mid" ? (
+            <B2dRatioChart
+              points={midCurvePoints}
+              b2dValue={corrDrMidratio}
+              titleText="F(corr_dr_midratio)"
+              formulaText={(ratio) => `F(corr_dr_midratio) = ${formatRatioTick(ratio)}`}
+              maxReferenceValue={effectiveMidValue}
+              xAxisLabel="corr_dr_midratio"
+              xMaxFloor={1024}
+              showFormula={false}
+            />
+          ) : midChartMode === "b2d_ori" ? (
+            <B2dRatioChart
+              points={b2dCurvePoints}
+              b2dValue={b2d}
+              titleText="F(B2D)_ori"
+              formulaText={(ratio) => `dr_midratio_ori = midratio x F(B2D)_ori = ${formatThresholdNumber(Number.isFinite(midratio) && Number.isFinite(ratio) ? midratio * ratio / 1024 : NaN)}`}
+              maxReferenceValue={computedDrMidratioOri}
+            />
+          ) : (
+            <B2dRatioChart
+              points={b2dCorrCurvePoints}
+              b2dValue={b2d}
+              titleText="F(B2D)_corr"
+              formulaText={(ratio) => {
+                const result = Number.isFinite(b2dCorrValue) && Number.isFinite(computedDrMidratioOri) && Number.isFinite(ratio)
+                  ? (b2dCorrValue * ratio + computedDrMidratioOri * (1024 - ratio)) / 1024
+                  : NaN;
+                return `corr_dr_midratio = value(${formatComputedNumber(b2dCorrValue)}) x F(B2D)_corr + dr_midratio_ori(${formatThresholdNumber(computedDrMidratioOri)}) x (1024 - F(B2D)_corr) = ${formatThresholdNumber(result)}`;
+              }}
+              maxReferenceValue={corrDrMidratio}
+            />
+          )}
         </section>
-      </div>
+      </div>}
+      {bindingPanel && (
+        <BindingEditorPanel
+          title={bindingPanel === "bv" ? "bv 控制参数绑定" : "mid 控制参数绑定"}
+          entries={bindingPanel === "bv" ? bvBindingEntries : midBindingEntries}
+          loading={bindingLoading}
+          message={bindingMessage}
+          onClose={() => setBindingPanel(null)}
+          onApply={bindingPanel === "bv" ? applyBvBindings : applyMidBindings}
+          onReset={bindingPanel === "bv" ? resetBvBindings : resetMidBindings}
+          onSourceJump={onSourceJump
+            ? (entry) => {
+                const path = entry.path.trim();
+                if (!path) return;
+                onSourceJump(bindingPanel === "bv" ? "Main_Target_Threshold.bv" : "Main_Target_Threshold.mid", {
+                  paths: [path],
+                  jump_to: "first",
+                  highlight: "ranges",
+                });
+              }
+            : undefined}
+        />
+      )}
     </section>
   );
 }
@@ -488,6 +990,239 @@ function ThresholdCompactReadout({ label, value, fillHeight = false }: { label: 
       <span style={compactReadoutLabelStyle}>{label}</span>
       <span style={compactReadoutValueStyle}>{value}</span>
     </div>
+  );
+}
+
+function BindingIconButton({ title, onClick }: { title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      style={bindingIconButtonStyle}
+    >
+      <TableLink24Regular className="h-4 w-4" />
+    </button>
+  );
+}
+
+function BindingEditorPanel({
+  title,
+  entries,
+  loading,
+  message,
+  onClose,
+  onApply,
+  onReset,
+  onSourceJump,
+}: {
+  title: string;
+  entries: BindingEntry[];
+  loading: boolean;
+  message: string | null;
+  onClose: () => void;
+  onApply: (entries: BindingEntry[]) => void | Promise<void>;
+  onReset: () => void;
+  onSourceJump?: (entry: BindingEntry) => void;
+}) {
+  const [draftEntries, setDraftEntries] = useState(entries);
+
+  useEffect(() => {
+    setDraftEntries(entries);
+  }, [entries]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
+
+  const updatePath = (id: string, path: string) => {
+    setDraftEntries((current) =>
+      current.map((entry) => entry.id === id ? { ...entry, path } : entry),
+    );
+  };
+
+  return (
+    <div style={bindingPanelBackdropStyle}>
+      <div style={bindingPanelStyle}>
+        <div style={bindingPanelHeaderStyle}>
+          <strong>{title}</strong>
+          <button type="button" onClick={onClose} style={bindingCloseButtonStyle}>×</button>
+        </div>
+        <div style={bindingPanelBodyStyle}>
+          {draftEntries.map((entry) => {
+            const path = entry.path.trim();
+            const canJump = Boolean(onSourceJump && path);
+            const jumpLabel = path ? `进入源码映射更换 paths：${path}` : "请先填写 paths";
+            return (
+              <div key={entry.id} style={bindingEntryStyle}>
+                <div style={bindingEntryLabelStyle}>{entry.label}</div>
+                <input
+                  value={entry.path}
+                  onChange={(event) => updatePath(entry.id, event.target.value)}
+                  spellCheck={false}
+                  style={bindingPathInputStyle}
+                />
+                <button
+                  type="button"
+                  aria-label={jumpLabel}
+                  disabled={!canJump}
+                  onClick={() => {
+                    if (!canJump) return;
+                    onSourceJump?.({ ...entry, path });
+                  }}
+                  style={bindingSourceJumpButtonStyle(canJump)}
+                >
+                  <Code24Regular className="h-4 w-4" />
+                </button>
+                <div style={bindingValuesStyle}>
+                  [{entry.values.length > 0 ? entry.values.slice(0, 8).join(", ") : "-"}{entry.values.length > 8 ? ", ..." : ""}]
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={bindingPanelFooterStyle}>
+          <span style={bindingMessageStyle}>{message}</span>
+          <button type="button" onClick={onReset} disabled={loading} style={bindingSecondaryButtonStyle}>恢复默认</button>
+          <button type="button" onClick={() => void onApply(draftEntries)} disabled={loading} style={bindingPrimaryButtonStyle}>
+            {loading ? "应用中..." : "应用"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThresholdEditableCell({
+  label,
+  value,
+  highlighted,
+  editable,
+  title,
+  onCommit,
+}: {
+  label: MainTargetThresholdRow["label"];
+  value: string;
+  highlighted: boolean;
+  editable: boolean;
+  title: string;
+  onCommit: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  const resetDraft = () => {
+    setDraftValue(value);
+  };
+
+  const commitDraft = () => {
+    if (!editable) return;
+    const nextValue = draftValue.trim();
+    if (nextValue === value.trim()) return;
+    onCommit(nextValue);
+  };
+
+  return (
+    <td title={title} style={thresholdValueCellStyle(label, highlighted, focused, editable)}>
+      <input
+        aria-label={`${label}-${title}`}
+        value={draftValue}
+        readOnly={!editable}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          resetDraft();
+        }}
+        onChange={(event) => setDraftValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            resetDraft();
+            event.currentTarget.blur();
+          }
+        }}
+        inputMode="decimal"
+        style={thresholdCellInputStyle(editable)}
+      />
+    </td>
+  );
+}
+
+function ThresholdMetricButton({
+  label,
+  value,
+  title,
+  tooltipPositioning,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  tooltipPositioning?: "below-center" | "above-center";
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const pulse = () => {
+    setPressed(true);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setPressed(false);
+      timerRef.current = null;
+    }, 150);
+  };
+
+  const button = (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={title ?? label}
+      onClick={onClick && !disabled ? () => {
+        pulse();
+        onClick();
+      } : undefined}
+      onMouseDown={onClick && !disabled ? pulse : undefined}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={metricButtonStyle(active, pressed, hovered, Boolean(onClick), disabled)}
+    >
+      <span style={metricButtonLabelStyle(disabled)}>{label}</span>
+      <span style={metricButtonValueStyle(disabled)}>{value}</span>
+    </button>
+  );
+
+  if (!title || !onClick || disabled) return button;
+  return (
+    <HoverTooltip content={title} positioning={tooltipPositioning ?? "below-center"} inline>
+      {button}
+    </HoverTooltip>
   );
 }
 
@@ -592,6 +1327,15 @@ function MidRatioChart({
       { key: "start" as const, value: startX, x: firstPointX, y: baseY, label: formatRatioTick(startX) },
       { key: "end" as const, value: endX, x: endPointX, y: maxY, label: formatRatioTick(endX) },
     ];
+  const boundaryLabelX = (x: number) => {
+    const leftGuard = chart.left + 6;
+    const rightGuard = chart.left + plotW - 6;
+    return x <= chart.left + 52
+      ? clamp(x + 6, leftGuard, rightGuard)
+      : clamp(x - 6, leftGuard, rightGuard);
+  };
+  const boundaryLabelAnchor = (x: number) => x <= chart.left + 52 ? "start" : "end";
+  const axisLabelX = chart.width - 12;
   const clientToChartValue = (clientX: number, clientY: number, svg: SVGSVGElement | null) => {
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
@@ -640,7 +1384,7 @@ function MidRatioChart({
         {boundaryXs.map((item) => (
           <g key={item.value}>
             <line x1={item.x} y1={item.y} x2={item.x} y2={axisY} style={chartBoundaryLineStyle} />
-            <text x={item.x} y={axisY + 14} textAnchor="middle" style={chartAxisTextStyle}>{item.label}</text>
+            <text x={boundaryLabelX(item.x)} y={axisY + 14} textAnchor={boundaryLabelAnchor(item.x)} style={chartAxisTextStyle}>{item.label}</text>
           </g>
         ))}
         {curvePath && <path d={curvePath} style={chartCurveStyle} />}
@@ -708,7 +1452,233 @@ function MidRatioChart({
         />
         <text x={chart.left - 10} y={maxY + 4} textAnchor="end" style={chartValueTextStyle}>{formatThresholdNumber(safeThdMax)}</text>
         <text x={chart.left - 10} y={baseY + 4} textAnchor="end" style={chartValueTextStyle}>{formatThresholdNumber(yBase)}</text>
-        <text x={chart.left + plotW + 7} y={axisY - 7} textAnchor="end" style={chartAxisTextStyle}>corr_dr_midratio</text>
+        <text x={axisLabelX} y={axisY - 7} textAnchor="end" style={chartAxisTextStyle}>corr_dr_midratio</text>
+      </svg>
+    </div>
+  );
+}
+
+function B2dRatioChart({
+  points,
+  b2dValue,
+  titleText,
+  formulaText,
+  maxReferenceValue,
+  xAxisLabel = "B2D",
+  xMaxFloor = 12000,
+  showFormula = true,
+}: {
+  points: Array<{ x: number; y: number }>;
+  b2dValue: number;
+  titleText: string;
+  formulaText: (ratio: number) => string;
+  maxReferenceValue?: number;
+  xAxisLabel?: string;
+  xMaxFloor?: number;
+  showFormula?: boolean;
+}) {
+  const sourcePoints = points
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .sort((a, b) => a.x - b.x)
+    .slice(0, 2);
+  const [draggedPoints, setDraggedPoints] = useState<Array<{ x: number; y: number }> | null>(null);
+  const [draggedCurrentX, setDraggedCurrentX] = useState<number | null>(null);
+  const [draggingPoint, setDraggingPoint] = useState<"current" | null>(null);
+
+  useEffect(() => {
+    setDraggedPoints(null);
+    setDraggedCurrentX(null);
+    setDraggingPoint(null);
+  }, [b2dValue, points]);
+
+  const keyPoints = normalizeB2dKeyPoints(draggedPoints ?? sourcePoints);
+  const valid = keyPoints.length === 2;
+  const [leftPoint, rightPoint] = valid ? keyPoints : [{ x: 0, y: 1024 }, { x: 1024, y: 1024 }];
+  const currentXValue = draggedCurrentX ?? (Number.isFinite(b2dValue) ? b2dValue : leftPoint.x);
+  const currentYValue = valid ? b2dFunctionValue(currentXValue, leftPoint, rightPoint) : NaN;
+  const sourceMaxX = Math.max(1024, currentXValue, ...sourcePoints.map((point) => point.x));
+  const sourceMaxY = Math.max(1024, currentYValue, maxReferenceValue ?? 0, ...sourcePoints.map((point) => point.y));
+  const xMin = 0;
+  const xMax = Math.max(xMaxFloor, sourceMaxX * 1.18, rightPoint.x * 1.12, 1024);
+  const yMin = 0;
+  const yMax = Math.max(sourceMaxY * 1.12, leftPoint.y, rightPoint.y, 1024);
+  const chart = {
+    left: 50,
+    top: showFormula ? 44 : 30,
+    right: 18,
+    bottom: 28,
+    width: 460,
+    height: 210,
+  };
+  const plotW = chart.width - chart.left - chart.right;
+  const plotH = chart.height - chart.top - chart.bottom;
+  const axisY = chart.top + plotH;
+  const visualP1X = chart.left + plotW * 0.18;
+  const visualP2X = chart.left + plotW * 0.64;
+  const visualHighY = chart.top + plotH * 0.14;
+  const yVisualHighValue = Math.max(leftPoint.y, rightPoint.y);
+  const yVisualLowValue = Math.min(leftPoint.y, rightPoint.y);
+  const lowValueOnAxis = yVisualLowValue <= yMin + 0.0001;
+  const visualLowY = lowValueOnAxis ? axisY : axisY - plotH * 0.22;
+  const xToPx = (x: number) => {
+    if (!valid) return chart.left + (clamp(x, xMin, xMax) - xMin) / Math.max(1, xMax - xMin) * plotW;
+    if (x <= leftPoint.x) {
+      return chart.left + (clamp(x, xMin, leftPoint.x) - xMin) / Math.max(1, leftPoint.x - xMin) * (visualP1X - chart.left);
+    }
+    if (x >= rightPoint.x) {
+      return visualP2X + (clamp(x, rightPoint.x, xMax) - rightPoint.x) / Math.max(1, xMax - rightPoint.x) * (chart.left + plotW - visualP2X);
+    }
+    return visualP1X + (x - leftPoint.x) / Math.max(1, rightPoint.x - leftPoint.x) * (visualP2X - visualP1X);
+  };
+  const yToPx = (y: number) => {
+    if (!valid || yVisualHighValue === yVisualLowValue) {
+      return chart.top + (1 - (y - yMin) / Math.max(1, yMax - yMin)) * plotH;
+    }
+    const ratio = (clamp(y, yVisualLowValue, yVisualHighValue) - yVisualLowValue) / Math.max(1, yVisualHighValue - yVisualLowValue);
+    return visualLowY - ratio * (visualLowY - visualHighY);
+  };
+  const shouldShowPointYTick = (value: number) => Number.isFinite(value) && Math.abs(value - yMin) > 0.0001;
+  const curvePoints = valid
+    ? [
+      { x: xMin, y: leftPoint.y },
+      leftPoint,
+      rightPoint,
+      { x: xMax, y: rightPoint.y },
+    ]
+    : [];
+  const curvePath = valid ? buildSvgPath(curvePoints, xToPx, yToPx) : "";
+  const currentX = xToPx(clamp(currentXValue, xMin, xMax));
+  const currentY = yToPx(currentYValue);
+  const currentLabelToRight = Number.isFinite(currentX) ? currentX < chart.left + plotW * 0.72 : true;
+  const currentLabelX = Number.isFinite(currentX)
+    ? clamp(currentX + (currentLabelToRight ? 22 : -22), chart.left + 30, chart.left + plotW - 30)
+    : chart.left + plotW / 2;
+  const currentLabelY = Number.isFinite(currentY)
+    ? currentY > chart.top + 28
+      ? currentY - 16
+      : currentY + 22
+    : chart.top + 32;
+  const currentLabelAnchor = currentLabelToRight ? "start" : "end";
+  const clientToChartValue = (clientX: number, clientY: number, svg: SVGSVGElement | null) => {
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const svgX = ((clientX - rect.left) / rect.width) * chart.width;
+    const svgY = ((clientY - rect.top) / rect.height) * chart.height;
+    const x = !valid
+      ? xMin + ((svgX - chart.left) / plotW) * (xMax - xMin)
+      : svgX <= visualP1X
+        ? xMin + ((svgX - chart.left) / Math.max(1, visualP1X - chart.left)) * (leftPoint.x - xMin)
+        : svgX >= visualP2X
+          ? rightPoint.x + ((svgX - visualP2X) / Math.max(1, chart.left + plotW - visualP2X)) * (xMax - rightPoint.x)
+          : leftPoint.x + ((svgX - visualP1X) / Math.max(1, visualP2X - visualP1X)) * (rightPoint.x - leftPoint.x);
+    const y = !valid || yVisualHighValue === yVisualLowValue
+      ? yMin + (1 - (svgY - chart.top) / plotH) * (yMax - yMin)
+      : yVisualLowValue + ((visualLowY - svgY) / Math.max(1, visualLowY - visualHighY)) * (yVisualHighValue - yVisualLowValue);
+    return {
+      x,
+      y,
+    };
+  };
+  const updateCurrentPointFromClient = (clientX: number, svg: SVGSVGElement | null) => {
+    const value = clientToChartValue(clientX, 0, svg);
+    if (!value || !valid) return;
+    setDraggedCurrentX(clamp(value.x, xMin, xMax));
+  };
+  const releasePointer = (event: PointerEvent<SVGCircleElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDraggingPoint(null);
+  };
+  const formula = showFormula ? formulaText(currentYValue) : "";
+
+  return (
+    <div style={chartWrapStyle}>
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label={`${titleText} chart`}>
+        <text x={12} y={18} textAnchor="start" style={b2dChartTitleTextStyle}>{titleText}</text>
+        {showFormula && (
+          <foreignObject x={chart.left + 84} y={5} width={chart.width - chart.left - chart.right - 86} height={38}>
+            <div style={b2dFormulaTextStyle}>{formula}</div>
+          </foreignObject>
+        )}
+        <line x1={chart.left} y1={axisY} x2={chart.left} y2={chart.top + 8} style={b2dAxisLineStyle} />
+        <line x1={chart.left} y1={axisY} x2={chart.left + plotW + 10} y2={axisY} style={b2dAxisLineStyle} />
+        <path d={`M ${chart.left} ${chart.top + 2} L ${chart.left - 4} ${chart.top + 10} L ${chart.left + 4} ${chart.top + 10} Z`} style={b2dArrowStyle} />
+        <path d={`M ${chart.left + plotW + 15} ${axisY} L ${chart.left + plotW + 7} ${axisY - 4} L ${chart.left + plotW + 7} ${axisY + 4} Z`} style={b2dArrowStyle} />
+        {curvePath ? (
+          <>
+            <line x1={xToPx(leftPoint.x)} y1={yToPx(leftPoint.y)} x2={xToPx(leftPoint.x)} y2={axisY} style={b2dGuideLineStyle} />
+            {shouldShowPointYTick(rightPoint.y) && (
+              <line x1={chart.left} y1={yToPx(rightPoint.y)} x2={xToPx(rightPoint.x)} y2={yToPx(rightPoint.y)} style={b2dGuideLineStyle} />
+            )}
+            <line x1={xToPx(rightPoint.x)} y1={yToPx(rightPoint.y)} x2={xToPx(rightPoint.x)} y2={axisY} style={b2dGuideLineSoftStyle} />
+            <path d={curvePath} style={b2dCurveStyle} />
+            {keyPoints.map((point, index) => (
+              <g key={`${point.x}:${point.y}:${index}`}>
+                <circle cx={xToPx(point.x)} cy={yToPx(point.y)} r={3.6} style={chartDragPointStyle(false)} />
+              </g>
+            ))}
+          </>
+        ) : (
+          <text x={chart.left + plotW / 2} y={chart.top + plotH / 2} textAnchor="middle" style={chartAxisTextStyle}>
+            No B2D source data
+          </text>
+        )}
+        {Number.isFinite(currentXValue) && Number.isFinite(currentYValue) && (
+          <>
+            <line x1={chart.left} y1={currentY} x2={currentX} y2={currentY} style={chartCurrentGuideLineStyle} />
+            <line x1={currentX} y1={currentY} x2={currentX} y2={axisY} style={chartCurrentGuideLineStyle} />
+            <circle cx={currentX} cy={currentY} r={3.6} style={chartCurrentPointStyle} />
+            <text x={currentX} y={axisY + 27} textAnchor="middle" style={chartCurrentValueTextStyle}>
+              {formatComputedNumber(currentXValue)}
+            </text>
+            <text x={currentLabelX} y={currentLabelY} textAnchor={currentLabelAnchor} style={chartCurrentValueTextStyle}>
+              {formatRatioTick(currentYValue)}
+            </text>
+          </>
+        )}
+        {valid && (
+          <>
+            {shouldShowPointYTick(leftPoint.y) && (
+              <text x={chart.left - 8} y={yToPx(leftPoint.y) + 4} textAnchor="end" style={b2dTickTextStyle}>
+                {formatRatioPercent(leftPoint.y)}
+              </text>
+            )}
+            {shouldShowPointYTick(rightPoint.y) && Math.abs(rightPoint.y - leftPoint.y) > 0.0001 && (
+              <text x={chart.left - 8} y={yToPx(rightPoint.y) + 4} textAnchor="end" style={b2dTickTextStyle}>
+                {formatRatioPercent(rightPoint.y)}
+              </text>
+            )}
+            <text x={xToPx(leftPoint.x)} y={axisY + 16} textAnchor="middle" style={b2dTickTextStyle}>
+              {formatComputedNumber(leftPoint.x)}
+            </text>
+            <text x={xToPx(rightPoint.x)} y={axisY + 16} textAnchor="middle" style={b2dTickTextStyle}>
+              {formatComputedNumber(rightPoint.x)}
+            </text>
+          </>
+        )}
+        <text x={chart.left - 8} y={axisY + 4} textAnchor="end" style={b2dTickTextStyle}>{formatRatioPercent(yMin)}</text>
+        <text x={chart.width - 12} y={axisY - 7} textAnchor="end" style={b2dXAxisLabelStyle}>{xAxisLabel}</text>
+        {valid && Number.isFinite(currentX) && Number.isFinite(currentY) && (
+          <circle
+            cx={currentX}
+            cy={currentY}
+            r={13}
+            style={chartFreeDragHitStyle}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDraggingPoint("current");
+              updateCurrentPointFromClient(event.clientX, event.currentTarget.ownerSVGElement);
+            }}
+            onPointerMove={(event) => {
+              if (draggingPoint !== "current") return;
+              updateCurrentPointFromClient(event.clientX, event.currentTarget.ownerSVGElement);
+            }}
+            onPointerUp={releasePointer}
+            onPointerCancel={releasePointer}
+          />
+        )}
       </svg>
     </div>
   );
@@ -719,22 +1689,28 @@ function ThresholdValueControl({
   value,
   valueTitle,
   labelButtonTitle,
+  labelActive = false,
+  valueActive = false,
   editable = false,
   onChange,
   onWheelStep,
   onLabelClick,
   onValueClick,
+  onValueContextMenu,
   showSteppers = false,
 }: {
   label: string;
   value: string;
   valueTitle?: string;
   labelButtonTitle?: string;
+  labelActive?: boolean;
+  valueActive?: boolean;
   editable?: boolean;
   onChange?: (value: string) => void;
   onWheelStep?: (delta: number) => void;
   onLabelClick?: () => void;
   onValueClick?: () => void;
+  onValueContextMenu?: () => void;
   showSteppers?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
@@ -822,6 +1798,61 @@ function ThresholdValueControl({
     onWheelStep(delta);
   };
 
+  const valueArea = (
+    <span
+      ref={valueAreaRef}
+      style={thresholdValueAreaStyle(editable, focused, valuePressed, Boolean(onValueClick || onValueContextMenu), valueActive)}
+      onClick={onValueClick ? () => {
+        pulseValue();
+        onValueClick();
+      } : undefined}
+      onContextMenu={onValueContextMenu ? (event) => {
+        event.preventDefault();
+        pulseValue();
+        onValueContextMenu();
+      } : undefined}
+    >
+      <input
+        aria-label={label}
+        value={value}
+        readOnly={!editable}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(event) => onChange?.(event.target.value)}
+        inputMode="decimal"
+        style={thresholdInputStyle}
+      />
+      {showSteppers && (
+        <span style={stepperWrapStyle}>
+          <button
+            type="button"
+            aria-label="increase bv"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              pulseStep("up");
+            }}
+            onClick={() => step(1)}
+            style={stepperButtonStyle("up", pressedStep === "up")}
+          >
+            <span style={stepperTriangleStyle("up")} />
+          </button>
+          <button
+            type="button"
+            aria-label="decrease bv"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              pulseStep("down");
+            }}
+            onClick={() => step(-1)}
+            style={stepperButtonStyle("down", pressedStep === "down")}
+          >
+            <span style={stepperTriangleStyle("down")} />
+          </button>
+        </span>
+      )}
+    </span>
+  );
+
   return (
     <div style={thresholdControlStyle}>
       {onLabelClick ? (
@@ -833,62 +1864,18 @@ function ThresholdValueControl({
             pulseLabel();
             onLabelClick();
           }}
-          style={thresholdControlLabelButtonStyle(labelPressed)}
+          style={thresholdControlLabelButtonStyle(labelPressed, labelActive)}
         >
           {label}
         </button>
       ) : (
         <span style={thresholdControlLabelStyle}>{label}</span>
       )}
-      <span
-        ref={valueAreaRef}
-        style={thresholdValueAreaStyle(editable, focused, valuePressed, Boolean(onValueClick))}
-        title={valueTitle}
-        onClick={onValueClick ? () => {
-          pulseValue();
-          onValueClick();
-        } : undefined}
-      >
-        <input
-          aria-label={label}
-          title={valueTitle}
-          value={value}
-          readOnly={!editable}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onChange={(event) => onChange?.(event.target.value)}
-          inputMode="decimal"
-          style={thresholdInputStyle}
-        />
-        {showSteppers && (
-          <span style={stepperWrapStyle}>
-            <button
-              type="button"
-              aria-label="increase bv"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                pulseStep("up");
-              }}
-              onClick={() => step(1)}
-              style={stepperButtonStyle("up", pressedStep === "up")}
-            >
-              <span style={stepperTriangleStyle("up")} />
-            </button>
-            <button
-              type="button"
-              aria-label="decrease bv"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                pulseStep("down");
-              }}
-              onClick={() => step(-1)}
-              style={stepperButtonStyle("down", pressedStep === "down")}
-            >
-              <span style={stepperTriangleStyle("down")} />
-            </button>
-          </span>
-        )}
-      </span>
+      {valueTitle ? (
+        <HoverTooltip content={valueTitle} positioning="above-center" inline>
+          {valueArea}
+        </HoverTooltip>
+      ) : valueArea}
     </div>
   );
 }
@@ -948,6 +1935,13 @@ function parseFiniteNumber(value: string | undefined | null): number {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function isSourceNumberText(value: string): boolean {
+  if (!value) return false;
+  SOURCE_NUMBER_RE.lastIndex = 0;
+  const match = SOURCE_NUMBER_RE.exec(value);
+  return Boolean(match && match[0] === value);
+}
+
 function interpolateTableValue(
   x: number,
   xValues: string[] | undefined,
@@ -992,6 +1986,25 @@ function buildMidCurvePoints(source: MidCurveSource | null): Array<{ x: number; 
   return Array.from(byX.entries())
     .map(([x, y]) => ({ x, y }))
     .sort((a, b) => a.x - b.x);
+}
+
+function buildB2dCurvePoints(source: B2dCurveSource | null): Array<{ x: number; y: number }> {
+  if (!source) return [];
+  const points: Array<{ x: number; y: number }> = [];
+  appendCurvePairs(points, source.x, source.y);
+  return points.sort((a, b) => a.x - b.x);
+}
+
+function buildB2dCorrCurvePoints(source: B2dCorrCurveSource | null): Array<{ x: number; y: number }> {
+  if (!source) return [];
+  const points: Array<{ x: number; y: number }> = [];
+  const p1x = parseFiniteNumber(firstNumericString(source.x1));
+  const p1y = parseFiniteNumber(firstNumericString(source.y1));
+  const p2x = parseFiniteNumber(firstNumericString(source.x2));
+  const p2y = parseFiniteNumber(firstNumericString(source.y2));
+  if (Number.isFinite(p1x) && Number.isFinite(p1y)) points.push({ x: p1x, y: p1y });
+  if (Number.isFinite(p2x) && Number.isFinite(p2y)) points.push({ x: p2x, y: p2y });
+  return points.sort((a, b) => a.x - b.x);
 }
 
 function buildSegmentedMidPoints(
@@ -1070,6 +2083,98 @@ function interpolatePointValue(x: number, points: Array<{ x: number; y: number }
     }
   }
   return last.y;
+}
+
+function normalizeB2dKeyPoints(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+  return points
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .slice(0, 2)
+    .sort((a, b) => a.x - b.x);
+}
+
+function b2dFunctionValue(x: number, left: { x: number; y: number }, right: { x: number; y: number }): number {
+  if (!Number.isFinite(x)) return NaN;
+  if (x < left.x) return left.y;
+  if (x > right.x) return right.y;
+  if (right.x === left.x) return (left.y + right.y) / 2;
+  const ratio = (x - left.x) / (right.x - left.x);
+  return left.y + (right.y - left.y) * ratio;
+}
+
+function computeRatioFromKeyPoints(x: number, points: Array<{ x: number; y: number }>): number {
+  const keyPoints = normalizeB2dKeyPoints(points);
+  if (keyPoints.length !== 2) return NaN;
+  return b2dFunctionValue(x, keyPoints[0], keyPoints[1]);
+}
+
+function updateThresholdRowsCell(
+  rows: MainTargetThresholdRow[],
+  label: MainTargetThresholdRow["label"],
+  cellIndex: number,
+  value: string,
+): MainTargetThresholdRow[] {
+  return rows.map((row) => {
+    if (row.label !== label) return row;
+    const values = [...row.values];
+    values[cellIndex] = value;
+    const fields = row.fields.map((field, index) => index === cellIndex ? { ...field, value } : field);
+    return { ...row, values, fields };
+  });
+}
+
+function replaceThresholdCellInSourceText(
+  sourceText: string,
+  row: MainTargetThresholdRow,
+  cellIndex: number,
+  nextValue: string,
+): string | null {
+  const field = row.fields[cellIndex];
+  if (!field || !sourceText) return null;
+  const lines = sourceText.split("\n");
+  const lineIndex = field.line - 1;
+  const line = lines[lineIndex];
+  if (line === undefined) return null;
+
+  const fieldsOnLine = row.fields
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.line === field.line)
+    .sort((a, b) => a.item.index - b.item.index || a.item.path.localeCompare(b.item.path));
+  const ordinalOnLine = fieldsOnLine.findIndex(({ index }) => index === cellIndex);
+  const replaced = replaceNumericTokenInLine(line, ordinalOnLine, field.value, nextValue);
+  if (replaced === null || replaced === line) return null;
+  lines[lineIndex] = replaced;
+  return lines.join("\n");
+}
+
+function replaceNumericTokenInLine(line: string, ordinalOnLine: number, oldValue: string, nextValue: string): string | null {
+  const commentStart = findLineCommentStart(line);
+  const codePart = commentStart < 0 ? line : line.slice(0, commentStart);
+  const commentPart = commentStart < 0 ? "" : line.slice(commentStart);
+  SOURCE_NUMBER_RE.lastIndex = 0;
+  const tokenMatches = Array.from(codePart.matchAll(SOURCE_NUMBER_RE));
+  if (tokenMatches.length === 0) return null;
+
+  const ordinalMatch = ordinalOnLine >= 0 ? tokenMatches[ordinalOnLine] : undefined;
+  if (ordinalMatch?.index !== undefined) {
+    return replaceRange(codePart, ordinalMatch.index, ordinalMatch.index + ordinalMatch[0].length, nextValue) + commentPart;
+  }
+
+  const oldNormalized = oldValue.trim();
+  const fallbackMatch = tokenMatches.find((match) => match[0] === oldNormalized);
+  if (fallbackMatch?.index === undefined) return null;
+  return replaceRange(codePart, fallbackMatch.index, fallbackMatch.index + fallbackMatch[0].length, nextValue) + commentPart;
+}
+
+function findLineCommentStart(line: string): number {
+  const slash = line.indexOf("//");
+  const block = line.indexOf("/*");
+  if (slash < 0) return block;
+  if (block < 0) return slash;
+  return Math.min(slash, block);
+}
+
+function replaceRange(text: string, start: number, end: number, value: string): string {
+  return `${text.slice(0, start)}${value}${text.slice(end)}`;
 }
 
 function interpolationColumnIndexes(x: number, xValues: string[] | undefined): Set<number> {
@@ -1152,6 +2257,11 @@ function formatRatioTick(value: number): string {
   return `${formatComputedNumber(value)}(${pct}%)`;
 }
 
+function formatRatioPercent(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  return `${Math.round((value / 1024) * 100)}%`;
+}
+
 function formatMidReadout(value: number, mode: "value" | "percent"): string {
   if (!Number.isFinite(value)) return "-";
   if (mode === "percent") return `${Math.round((value / 1024) * 100)}%`;
@@ -1175,25 +2285,32 @@ const innerCanvasStyle: CSSProperties = {
   padding: 0,
 };
 
+const hiddenScrollbarStyle: CSSProperties = {
+  scrollbarWidth: "none",
+  msOverflowStyle: "none",
+};
+
 function tabButtonStyle(active: boolean): CSSProperties {
   return {
     minWidth: 88,
     height: 30,
     padding: "0 14px",
-    border: "1px solid var(--colorNeutralStroke2)",
-    borderBottomColor: active ? "var(--colorNeutralBackground2)" : "var(--colorNeutralStroke2)",
+    border: active ? "1px solid var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
+    borderBottomColor: active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)",
     borderTopLeftRadius: 5,
     borderTopRightRadius: 5,
-    background: active ? "var(--colorNeutralBackground2)" : "var(--colorNeutralBackground3)",
-    color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground2)",
+    background: active ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground3)",
+    color: active ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground2)",
     fontSize: 12,
     fontWeight: active ? 600 : 500,
     cursor: "pointer",
     transform: active ? "translateY(1px)" : "none",
+    boxShadow: active ? "0 2px 6px color-mix(in srgb, var(--colorBrandBackground) 28%, transparent)" : "none",
   };
 }
 
 const thresholdCardStyle: CSSProperties = {
+  position: "relative",
   border: "1px solid var(--colorNeutralStroke2)",
   borderRadius: 12,
   margin: "0 0 12px",
@@ -1255,11 +2372,23 @@ const thresholdGroupStyle: CSSProperties = {
 };
 
 const thresholdGroupTitleStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minHeight: 42,
   padding: "8px 10px",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
   color: "var(--colorNeutralForeground2)",
   fontSize: 12,
   fontWeight: 700,
+};
+
+const thresholdGroupActionsStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  flex: "0 0 auto",
 };
 
 const bvControlRowStyle: CSSProperties = {
@@ -1334,6 +2463,70 @@ const compactReadoutValueStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+function metricButtonStyle(active: boolean, pressed: boolean, hovered: boolean, clickable: boolean, disabled = false): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) max-content",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    padding: "0 8px",
+    border: active && !disabled ? "1px solid var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
+    borderRadius: 6,
+    background: disabled
+      ? "color-mix(in srgb, var(--colorNeutralBackground2) 86%, var(--colorNeutralForeground1))"
+      : pressed
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 66%, var(--colorNeutralBackground1))"
+      : active
+        ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+        : hovered
+          ? "color-mix(in srgb, var(--colorNeutralForeground1) 6%, var(--colorNeutralBackground1))"
+          : "var(--colorNeutralBackground1)",
+    color: disabled
+      ? "var(--colorNeutralForeground3)"
+      : active
+        ? "var(--colorBrandForeground1)"
+        : "var(--colorNeutralForeground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    cursor: disabled ? "not-allowed" : clickable ? "pointer" : "default",
+    overflow: "hidden",
+    transform: pressed ? "scale(0.985)" : "scale(1)",
+    opacity: 1,
+    transition: "transform 100ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out",
+    willChange: pressed ? "transform" : "auto",
+  };
+}
+
+function metricButtonLabelStyle(disabled = false): CSSProperties {
+  return {
+    minWidth: 0,
+    color: disabled ? "var(--colorNeutralForegroundDisabled)" : "var(--colorNeutralForeground3)",
+    fontSize: 10,
+    fontWeight: 700,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    textAlign: "left",
+  };
+}
+
+function metricButtonValueStyle(disabled = false): CSSProperties {
+  return {
+    minWidth: 0,
+    color: disabled
+      ? "color-mix(in srgb, var(--colorBrandForeground1) 72%, var(--colorNeutralForeground1))"
+      : "inherit",
+    fontSize: 11,
+    fontWeight: disabled ? 900 : 800,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    textAlign: "right",
+  };
+}
+
 const midControlRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 0.9fr)",
@@ -1355,11 +2548,6 @@ const midComputedStackStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 4,
-  height: 44,
-  minWidth: 0,
-};
-
-const midRatioWrapStyle: CSSProperties = {
   height: 44,
   minWidth: 0,
 };
@@ -1387,7 +2575,7 @@ const thresholdControlLabelStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-function thresholdControlLabelButtonStyle(pressed: boolean): CSSProperties {
+function thresholdControlLabelButtonStyle(pressed: boolean, active = false): CSSProperties {
   return {
     ...thresholdControlLabelStyle,
     height: "100%",
@@ -1395,8 +2583,10 @@ function thresholdControlLabelButtonStyle(pressed: boolean): CSSProperties {
     borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 70%, transparent)",
     background: pressed
       ? "color-mix(in srgb, var(--colorBrandBackground2) 78%, var(--colorNeutralBackground2))"
-      : "var(--colorNeutralBackground2)",
-    color: pressed ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)",
+      : active
+        ? "color-mix(in srgb, var(--colorBrandBackground2) 56%, var(--colorNeutralBackground2))"
+        : "var(--colorNeutralBackground2)",
+    color: pressed || active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)",
     cursor: "pointer",
     fontFamily: "inherit",
     transform: pressed ? "scale(0.94)" : "scale(1)",
@@ -1405,7 +2595,7 @@ function thresholdControlLabelButtonStyle(pressed: boolean): CSSProperties {
   };
 }
 
-function thresholdValueAreaStyle(editable: boolean, focused: boolean, pressed = false, clickable = false): CSSProperties {
+function thresholdValueAreaStyle(editable: boolean, focused: boolean, pressed = false, clickable = false, active = false): CSSProperties {
   return {
     display: "flex",
     alignItems: "stretch",
@@ -1413,8 +2603,10 @@ function thresholdValueAreaStyle(editable: boolean, focused: boolean, pressed = 
     minWidth: 0,
     background: pressed
       ? "color-mix(in srgb, var(--colorBrandBackground2) 68%, var(--colorNeutralBackground1))"
-      : "var(--colorNeutralBackground1)",
-    color: editable ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+      : active
+        ? "color-mix(in srgb, var(--colorBrandBackground2) 36%, var(--colorNeutralBackground1))"
+        : "var(--colorNeutralBackground1)",
+    color: editable || active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
     borderLeft: "1px solid var(--colorNeutralStroke2)",
     boxShadow: editable && focused ? "inset 0 -2px 0 var(--colorBrandForeground1)" : "none",
     cursor: clickable ? "pointer" : undefined,
@@ -1504,18 +2696,218 @@ function sourceButtonStyle(enabled: boolean): CSSProperties {
   };
 }
 
+function groupSourceButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    flex: "0 0 auto",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    border: "1px solid var(--colorNeutralStroke2)",
+    borderRadius: 8,
+    background: enabled ? "var(--colorNeutralBackground1)" : "var(--colorNeutralBackground2)",
+    color: enabled ? "var(--colorBrandForeground1)" : "var(--colorNeutralForegroundDisabled)",
+    cursor: enabled ? "pointer" : "default",
+  };
+}
+
+const bindingIconButtonStyle: CSSProperties = {
+  flex: "0 0 auto",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 28,
+  height: 28,
+  minWidth: 28,
+  padding: 0,
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 8,
+  background: "color-mix(in srgb, var(--colorNeutralBackground1) 88%, var(--colorBrandBackground2))",
+  color: "var(--colorBrandForeground1)",
+  cursor: "pointer",
+  boxShadow: "0 1px 4px color-mix(in srgb, var(--colorNeutralForeground1) 10%, transparent)",
+};
+
+const bindingPanelBackdropStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  zIndex: 10,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 18,
+  background: "color-mix(in srgb, var(--colorNeutralBackground1) 54%, transparent)",
+  backdropFilter: "blur(1.5px)",
+};
+
+const bindingPanelStyle: CSSProperties = {
+  width: "min(760px, 92%)",
+  maxHeight: "82%",
+  display: "flex",
+  flexDirection: "column",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 12,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 18px 42px rgba(0, 0, 0, 0.18)",
+  overflow: "hidden",
+};
+
+const bindingPanelHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  minHeight: 42,
+  padding: "0 12px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground2)",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 13,
+};
+
+const bindingCloseButtonStyle: CSSProperties = {
+  width: 28,
+  height: 28,
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground2)",
+  cursor: "pointer",
+  fontSize: 16,
+  lineHeight: "24px",
+};
+
+const bindingPanelBodyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  minHeight: 0,
+  overflow: "auto",
+  padding: 12,
+};
+
+const bindingEntryStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "92px minmax(0, 1fr) 30px minmax(120px, 0.65fr)",
+  alignItems: "center",
+  gap: 8,
+  minWidth: 0,
+};
+
+const bindingEntryLabelStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const bindingPathInputStyle: CSSProperties = {
+  minWidth: 0,
+  height: 30,
+  padding: "0 8px",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 7,
+  outline: "none",
+  background: "var(--colorNeutralBackground2)",
+  color: "var(--colorNeutralForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+};
+
+function bindingSourceJumpButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 30,
+    height: 30,
+    minWidth: 30,
+    padding: 0,
+    border: "1px solid var(--colorNeutralStroke2)",
+    borderRadius: 8,
+    background: enabled
+      ? "color-mix(in srgb, var(--colorNeutralBackground1) 88%, var(--colorBrandBackground2))"
+      : "var(--colorNeutralBackground2)",
+    color: enabled ? "var(--colorBrandForeground1)" : "var(--colorNeutralForegroundDisabled)",
+    cursor: enabled ? "pointer" : "default",
+    transition: "background-color 120ms ease, color 120ms ease, transform 100ms ease-out",
+  };
+}
+
+const bindingValuesStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground3)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 10,
+};
+
+const bindingPanelFooterStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: 12,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground2)",
+};
+
+const bindingMessageStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 11,
+};
+
+const bindingSecondaryButtonStyle: CSSProperties = {
+  height: 30,
+  padding: "0 10px",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground2)",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const bindingPrimaryButtonStyle: CSSProperties = {
+  ...bindingSecondaryButtonStyle,
+  borderColor: "var(--colorBrandStroke1)",
+  background: "var(--colorBrandBackground)",
+  color: "var(--colorNeutralForegroundOnBrand)",
+};
+
 const thresholdTableWrapStyle: CSSProperties = {
   flex: 1,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   overflow: "auto",
-  padding: "14px 12px",
+  padding: "6px 10px",
   background: "var(--colorNeutralBackground2)",
 };
 
-const thresholdTableStyle: CSSProperties = {
+const thresholdTableSurfaceStyle: CSSProperties = {
+  position: "relative",
   width: "min(100%, 560px)",
+  minHeight: 190,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "10px 8px",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  boxSizing: "border-box",
+};
+
+const thresholdTableStyle: CSSProperties = {
+  width: "100%",
   minWidth: 0,
   margin: 0,
   borderCollapse: "separate",
@@ -1525,25 +2917,28 @@ const thresholdTableStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
   borderRadius: 10,
   background: "var(--colorNeutralBackground1)",
-  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
   fontFamily: "ui-monospace, Consolas, monospace",
   fontSize: 11,
   textAlign: "center",
 };
 
 const chartWrapStyle: CSSProperties = {
-  padding: "10px 10px 2px",
+  position: "relative",
+  padding: "6px 10px",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
 };
 
 const chartSvgStyle: CSSProperties = {
   display: "block",
   width: "100%",
-  maxWidth: 520,
-  minHeight: 190,
+  maxWidth: 620,
+  minHeight: 220,
   margin: "0 auto",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
   background: "var(--colorNeutralBackground1)",
   borderRadius: 8,
+  boxSizing: "border-box",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 
 const chartTitleTextStyle: CSSProperties = {
@@ -1565,6 +2960,9 @@ const chartValueTextStyle: CSSProperties = {
 
 const chartCurrentValueTextStyle: CSSProperties = {
   fill: "var(--colorBrandForeground1)",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 4,
+  paintOrder: "stroke",
   fontSize: 12,
   fontWeight: 800,
 };
@@ -1613,6 +3011,65 @@ const chartCurrentPointStyle: CSSProperties = {
   strokeWidth: 1.4,
 };
 
+const b2dChartTitleTextStyle: CSSProperties = {
+  fill: "var(--colorNeutralForeground1)",
+  fontSize: 15,
+  fontWeight: 800,
+};
+
+const b2dFormulaTextStyle: CSSProperties = {
+  height: 38,
+  overflow: "hidden",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: "13px",
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+};
+
+const b2dAxisLineStyle: CSSProperties = {
+  stroke: "color-mix(in srgb, var(--colorPaletteMarigoldForeground2) 78%, #5f3b00)",
+  strokeWidth: 3,
+  strokeLinecap: "round",
+};
+
+const b2dArrowStyle: CSSProperties = {
+  fill: "color-mix(in srgb, var(--colorPaletteMarigoldForeground2) 78%, #5f3b00)",
+};
+
+const b2dCurveStyle: CSSProperties = {
+  fill: "none",
+  stroke: "#0ea5e9",
+  strokeWidth: 3.2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+};
+
+const b2dGuideLineStyle: CSSProperties = {
+  stroke: "color-mix(in srgb, var(--colorPaletteRedForeground1) 76%, #ff5a5f)",
+  strokeWidth: 1.2,
+  strokeDasharray: "4 3",
+  strokeOpacity: 0.82,
+};
+
+const b2dGuideLineSoftStyle: CSSProperties = {
+  ...b2dGuideLineStyle,
+  strokeOpacity: 0.42,
+};
+
+const b2dTickTextStyle: CSSProperties = {
+  fill: "#006ce5",
+  fontSize: 10,
+  fontWeight: 800,
+};
+
+const b2dXAxisLabelStyle: CSSProperties = {
+  fill: "var(--colorPaletteDarkOrangeForeground2)",
+  fontSize: 10,
+  fontWeight: 700,
+};
+
 function chartDragPointStyle(active: boolean): CSSProperties {
   return {
     fill: active ? "var(--colorBrandForeground1)" : "var(--colorPaletteMarigoldForeground2)",
@@ -1654,7 +3111,12 @@ function thresholdLabelCellStyle(label: MainTargetThresholdRow["label"]): CSSPro
   };
 }
 
-function thresholdValueCellStyle(label: MainTargetThresholdRow["label"], highlighted = false): CSSProperties {
+function thresholdValueCellStyle(
+  label: MainTargetThresholdRow["label"],
+  highlighted = false,
+  focused = false,
+  editable = false,
+): CSSProperties {
   const header = label === "BV";
   const baseBackground = header
     ? "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 58%, var(--colorNeutralBackground1))"
@@ -1667,7 +3129,11 @@ function thresholdValueCellStyle(label: MainTargetThresholdRow["label"], highlig
     borderBottom: label === "Exp"
       ? "none"
       : "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
-    outline: highlighted ? "1.5px solid var(--colorBrandStroke1)" : "none",
+    outline: focused
+      ? "1.5px solid var(--colorBrandForeground1)"
+      : highlighted
+        ? "1.5px solid var(--colorBrandStroke1)"
+        : "none",
     outlineOffset: -3,
     background: highlighted
       ? `linear-gradient(0deg, color-mix(in srgb, var(--colorBrandBackground2) 54%, transparent), color-mix(in srgb, var(--colorBrandBackground2) 54%, transparent)), ${baseBackground}`
@@ -1675,10 +3141,27 @@ function thresholdValueCellStyle(label: MainTargetThresholdRow["label"], highlig
     color: header ? "var(--normal-sheet-palegreen-fg)" : "var(--colorNeutralForeground1)",
     fontSize: 11,
     fontWeight: highlighted ? 800 : header ? 700 : 500,
+    cursor: editable ? "text" : "default",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     transition: "background-color 120ms ease, outline-color 120ms ease",
+  };
+}
+
+function thresholdCellInputStyle(editable: boolean): CSSProperties {
+  return {
+    width: "100%",
+    minWidth: 0,
+    border: "none",
+    outline: "none",
+    padding: "0 2px",
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: "inherit",
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
   };
 }
 

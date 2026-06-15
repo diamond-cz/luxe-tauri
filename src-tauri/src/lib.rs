@@ -131,6 +131,8 @@ pub fn run() {
             commands::image_cmds::load_image_toml_fields_batch,
             commands::image_cmds::load_image_thumbnail_batch,
             commands::text_cmds::read_text_file,
+            commands::text_cmds::write_temp_text_file,
+            commands::text_cmds::write_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

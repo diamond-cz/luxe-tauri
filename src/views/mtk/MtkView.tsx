@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { saveStateSection } from "@/ipc/stateIo";
 import { parseCppFile } from "@/ipc/cppParser";
@@ -8,7 +8,8 @@ import { Toast, type ToastKind } from "@/components/common/Toast";
 
 import { ISP_LIST, ISP_TABS, type IspId } from "./ispTabs";
 import { IspSelectBar } from "./IspSelectBar";
-import { Isp6sAeVisual } from "./isp6s/Isp6sAeVisual";
+
+const Isp6sAeVisual = lazy(() => import("./isp6s/Isp6sAeVisual").then(({ Isp6sAeVisual }) => ({ default: Isp6sAeVisual })));
 
 /**
  * MTK platform view.
@@ -127,13 +128,15 @@ export function MtkView() {
         <>
           <div className="min-h-0 flex-1 overflow-hidden p-3">
             {isAeBasic ? (
-              <Isp6sAeVisual
-                isp={ispId}
-                tabIdx={tabIdx}
-                filePath={imports.filePath}
-                parsed={parsedReady}
-                onImageDirChange={onImageDirChange}
-              />
+              <Suspense fallback={<Hint hint="正在加载 ISP6S AE 可视化..." />}>
+                <Isp6sAeVisual
+                  isp={ispId}
+                  tabIdx={tabIdx}
+                  filePath={imports.filePath}
+                  parsed={parsedReady}
+                  onImageDirChange={onImageDirChange}
+                />
+              </Suspense>
             ) : parsedReady ? (
               <ParsedSummary parsed={imports.parsed!} />
             ) : (

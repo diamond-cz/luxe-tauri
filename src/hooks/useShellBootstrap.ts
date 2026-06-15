@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { debounce } from "lodash-es";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -33,6 +32,8 @@ import {
 } from "@/ipc/client";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
+type DebouncedVoid = (() => void) & { cancel: () => void };
+
 interface ShellHandlers {
   onNavigate?: (path: string) => void;
   onRequestCloseAsk?: () => void; // open the "remember choice" dialog
@@ -57,6 +58,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
 
     let unlisteners: Array<() => void> = [];
     let geomUnlisteners: Array<Promise<() => void>> = [];
+    let cancelPersist: (() => void) | undefined;
 
     (async () => {
       /* 1. Load persistent state, hydrate stores. */
@@ -140,11 +142,12 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       unlisteners.push(unPoetry);
 
       /* 6. Persist geometry on resize / move (debounced). */
-      const persist = debounce(() => {
+      const persist = debounceVoid(() => {
         saveWindowGeometry().catch((err) =>
           console.warn("save geom failed", err),
         );
       }, 300);
+      cancelPersist = persist.cancel;
       geomUnlisteners.push(win.onResized(() => persist()));
       geomUnlisteners.push(win.onMoved(() => persist()));
 
@@ -180,6 +183,24 @@ export function useShellBootstrap(handlers: ShellHandlers) {
     return () => {
       unlisteners.forEach((fn) => fn());
       geomUnlisteners.forEach((p) => p.then((fn) => fn()));
+      cancelPersist?.();
     };
   }, [setMainWindow, setSettings, setShortcuts]);
+}
+
+function debounceVoid(fn: () => void, delayMs: number): DebouncedVoid {
+  let timer: number | undefined;
+  const debounced = (() => {
+    if (timer !== undefined) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      fn();
+    }, delayMs);
+  }) as DebouncedVoid;
+  debounced.cancel = () => {
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    timer = undefined;
+  };
+  return debounced;
 }

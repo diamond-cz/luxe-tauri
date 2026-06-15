@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import {
   Add24Regular,
@@ -36,8 +36,10 @@ import {
   computeFaceTouchBadges, computeNormalBadges,
   type NormalBadges, type FaceTouchBadges,
 } from "./badges";
-import { ImagePane, type PreviewMode } from "./ImagePane/ImagePane";
-import { TablePane } from "./TablePane/TablePane";
+import type { PreviewMode } from "./ImagePane/ImagePane";
+
+const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
+const TablePane = lazy(() => import("./TablePane/TablePane").then(({ TablePane }) => ({ default: TablePane })));
 
 interface Props {
   isp:       IspId;
@@ -390,15 +392,17 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
       <ResizeHandle direction="horizontal" size={CARD_GAP_PX} />
       <Panel minSize={28}>
         <div className="h-full w-full">
-          <ImagePane
-            mode={visual.preview_mode ?? "param_map"}
-            onMode={setPreviewMode}
-            filePath={filePath ?? ""}
-            schema={schema}
-            entry={currentEntry}
-            tomlData={imageDir.tomlData}
-            activeCard={activeCard}
-          />
+          <Suspense fallback={<PaneFallback label="正在加载源码卡片..." />}>
+            <ImagePane
+              mode={visual.preview_mode ?? "param_map"}
+              onMode={setPreviewMode}
+              filePath={filePath ?? ""}
+              schema={schema}
+              entry={currentEntry}
+              tomlData={imageDir.tomlData}
+              activeCard={activeCard}
+            />
+          </Suspense>
         </div>
       </Panel>
     </PanelGroup>
@@ -407,19 +411,21 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
   /* ── Table panel — wraps TablePane in standard padding. ── */
   const renderTablePanel = () => (
     <div className={visual.table_collapsed ? "w-full" : "h-full w-full"}>
-      <TablePane
-        schema={schema}
-        entries={imageDir.entries}
-        current={imageDir.current}
-        imageDir={imageDir.dir}
-        tomlData={imageDir.tomlData}
-        onPickImage={onPickImage}
-        onImageDirChange={onImageDirChange}
-        collapsed={visual.table_collapsed}
-        onToggleCollapsed={(next) => patchVis({ table_collapsed: next })}
-        headerRatios={visual.table_header_ratios}
-        onHeaderRatiosChange={(next) => patchVis({ table_header_ratios: next })}
-      />
+      <Suspense fallback={<PaneFallback label="正在加载图片列表..." />}>
+        <TablePane
+          schema={schema}
+          entries={imageDir.entries}
+          current={imageDir.current}
+          imageDir={imageDir.dir}
+          tomlData={imageDir.tomlData}
+          onPickImage={onPickImage}
+          onImageDirChange={onImageDirChange}
+          collapsed={visual.table_collapsed}
+          onToggleCollapsed={(next) => patchVis({ table_collapsed: next })}
+          headerRatios={visual.table_header_ratios}
+          onHeaderRatiosChange={(next) => patchVis({ table_header_ratios: next })}
+        />
+      </Suspense>
     </div>
   );
 
@@ -482,6 +488,15 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
 }
 
 /* ─── Sub-card renderers ─── */
+
+function PaneFallback({ label }: { label: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center text-xs"
+         style={{ color: "var(--colorNeutralForeground3)" }}>
+      {label}
+    </div>
+  );
+}
 
 function NormalSub({
   name, badges, onClick,

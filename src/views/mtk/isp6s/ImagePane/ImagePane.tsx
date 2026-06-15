@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import type { ImageEntry } from "@/ipc/imageScan";
-import type { CardSourceSpec, Isp6sSchemaRoot } from "@/ipc/cppParser";
+import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
+import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ChartMapMode } from "./ChartMapMode";
 import { ParaCheckMode } from "./ParaCheckMode";
-import { ParamMapMode, type SourceOverride } from "./ParamMapMode";
+import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
+import {
+  normalizeSourceText,
+  serializeSourceText,
+  sourceDraftDirty,
+  type SourceCodeDraft,
+} from "../SourceCodeView";
 import {
   PreviewLink24Regular,
   ChartMultiple24Regular,
@@ -36,10 +43,22 @@ export function ImagePane({
 }: Props) {
   const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
+  const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
+  const [sourceDraftError, setSourceDraftError] = useState<string | null>(null);
+  const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
+  const [tempDraftPending, setTempDraftPending] = useState(false);
+  const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: PreviewMode =
     mode === "image" || mode === "image_split" ? "param_map" : mode;
+  const draftDirty = sourceDraftDirty(sourceDraft);
+  const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
+  const draftResolvePath = draftDirty && tempDraftReady ? tempDraft!.path : filePath;
+  const chartFilePath = filePath ? (draftDirty ? (tempDraftReady ? tempDraft!.path : tempDraft?.path ?? filePath) : filePath) : null;
+  const chartSourceRevision = draftDirty
+    ? (tempDraftReady ? tempDraft!.version : tempDraft?.version ?? 0)
+    : sourceDraft?.version ?? 0;
   void internalCard;
   void entry;
 
@@ -59,11 +78,70 @@ export function ImagePane({
 
   useEffect(() => {
     setSourceOverride(undefined);
+    setChartFocus(null);
   }, [activeCard]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceDraft(null);
+    setSourceDraftError(null);
+    setTempDraft(null);
+    setTempDraftPending(false);
+    if (!filePath) return;
+    readTextFile(filePath)
+      .then((rawText) => {
+        if (cancelled) return;
+        const normalized = normalizeSourceText(rawText);
+        setSourceDraft({
+          filePath,
+          text: normalized.text,
+          savedText: normalized.text,
+          initialText: normalized.text,
+          lineEnding: normalized.lineEnding,
+          version: 0,
+          loadVersion: 1,
+        });
+      })
+      .catch((e) => {
+        if (!cancelled) setSourceDraftError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath]);
+
+  useEffect(() => {
+    if (effectiveMode !== "chart_map" || !sourceDraft || !draftDirty) {
+      setTempDraftPending(false);
+      return;
+    }
+    if (tempDraft?.version === sourceDraft.version) return;
+
+    let cancelled = false;
+    const draft = sourceDraft;
+    setTempDraftPending(true);
+    writeTempTextFile(filePath, serializeSourceText(draft))
+      .then(async (path) => {
+        await cppClearCache();
+        if (!cancelled) setTempDraft({ version: draft.version, path });
+      })
+      .catch((e) => {
+        if (!cancelled) setSourceDraftError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setTempDraftPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftDirty, effectiveMode, filePath, sourceDraft, tempDraft]);
 
   const handleMode = (nextMode: PreviewMode) => {
     if (nextMode === "param_map") {
       setSourceOverride(undefined);
+    }
+    if (nextMode === "chart_map") {
+      setChartFocus(null);
     }
     onMode(nextMode);
   };
@@ -72,6 +150,61 @@ export function ImagePane({
     setSourceOverride({ label, spec });
     onMode("param_map");
   };
+
+  const handleBackToChart = useCallback((target?: ChartPreviewTarget) => {
+    if (target?.label) {
+      setChartFocus((current) => ({
+        label: target.label,
+        key: (current?.key ?? 0) + 1,
+      }));
+    }
+    onMode("chart_map");
+  }, [onMode]);
+
+  const handleDraftTextChange = useCallback((text: string) => {
+    setSourceDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        text,
+        version: current.version + 1,
+      };
+    });
+  }, []);
+
+  const handleSaveDraft = useCallback(async () => {
+    const draft = sourceDraft;
+    if (!draft) return;
+    await writeTextFile(filePath, serializeSourceText(draft));
+    await cppClearCache();
+    setSourceDraft((current) => {
+      if (!current || current.filePath !== draft.filePath || current.text !== draft.text) return current;
+      return {
+        ...current,
+        savedText: draft.text,
+        version: current.version + 1,
+      };
+    });
+    setTempDraft(null);
+  }, [filePath, sourceDraft]);
+
+  const handleSaveDraftAs = useCallback(async (path: string) => {
+    const draft = sourceDraft;
+    if (!draft) return;
+    await writeTextFile(path, serializeSourceText(draft));
+  }, [sourceDraft]);
+
+  const handleRestoreDraft = useCallback(() => {
+    setSourceDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        text: current.initialText,
+        version: current.version + 1,
+      };
+    });
+    setTempDraft(null);
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col"
@@ -118,8 +251,40 @@ export function ImagePane({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {effectiveMode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
-        {effectiveMode === "chart_map"   && <ChartMapMode   filePath={filePath} schema={schema} tomlData={tomlData} activeCard={activeCard} onSourceJump={handleSourceJump} />}
-        {effectiveMode === "param_map"   && <ParamMapMode   filePath={filePath} schema={schema} activeCard={activeCard} sourceOverride={sourceOverride} />}
+        {effectiveMode === "chart_map" && chartFilePath && (
+          <ChartMapMode
+            filePath={chartFilePath}
+            schema={schema}
+            tomlData={tomlData}
+            activeCard={activeCard}
+            focusTarget={chartFocus}
+            sourceRevision={chartSourceRevision}
+            sourceDraftText={sourceDraft?.text ?? null}
+            onSourceDraftTextChange={handleDraftTextChange}
+            onSourceJump={handleSourceJump}
+          />
+        )}
+        {effectiveMode === "chart_map" && !chartFilePath && (
+          <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
+            {tempDraftPending ? "\u6b63\u5728\u540c\u6b65\u6e90\u7801\u8349\u7a3f..." : "\u6e90\u7801\u8349\u7a3f\u672a\u51c6\u5907\u5b8c\u6210"}
+          </div>
+        )}
+        {effectiveMode === "param_map"   && (
+          <ParamMapMode
+            filePath={filePath}
+            resolveFilePath={draftResolvePath}
+            schema={schema}
+            activeCard={activeCard}
+            sourceOverride={sourceOverride}
+            draft={sourceDraft}
+            draftLoadError={sourceDraftError}
+            onDraftTextChange={handleDraftTextChange}
+            onSaveDraft={handleSaveDraft}
+            onSaveDraftAs={handleSaveDraftAs}
+            onRestoreDraft={handleRestoreDraft}
+            onBackToChart={handleBackToChart}
+          />
+        )}
       </div>
     </div>
   );
