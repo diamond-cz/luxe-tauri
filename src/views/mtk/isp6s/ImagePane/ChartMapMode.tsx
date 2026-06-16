@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import {
+  DndContext, closestCenter, PointerSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, arrayMove, useSortable, verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, TableLink24Regular } from "@fluentui/react-icons";
 
 import {
@@ -9,6 +17,7 @@ import {
   type Isp6sSchemaRoot,
 } from "@/ipc/cppParser";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { FieldEntry } from "@/types/cpp_parser";
 
 type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT" | "Touch";
@@ -16,6 +25,7 @@ type StepperDirection = "up" | "down";
 type MidChartMode = "thd" | "corr_mid" | "b2d_ori" | "b2d_corr";
 type MidChartSource = "mid" | "mid_value" | "corr_dr_midratio" | "dr_midratio_ori" | "b2d";
 type BindingPanelKind = "bv" | "mid";
+type MainTMetricCardId = "mainThd" | "mtwv" | "mainTarget";
 
 interface Props {
   filePath: string;
@@ -55,6 +65,19 @@ interface MainTargetThresholdRow {
   fields: FieldEntry[];
 }
 
+interface MtwvTableRow {
+  id:     string;
+  line:   number;
+  path:   string;
+  values: string[];
+  fields: FieldEntry[];
+}
+
+interface MtwvSource {
+  path: string;
+  rows: MtwvTableRow[];
+}
+
 interface MidCurveSource {
   x1: string[];
   y1: string[];
@@ -84,6 +107,10 @@ interface BindingEntry {
 
 const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT", "Touch"];
 const SOURCE_NUMBER_RE = /[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g;
+const MAIN_T_METRIC_CARD_ORDER: MainTMetricCardId[] = ["mainThd", "mtwv", "mainTarget"];
+const MAIN_TARGET_CWV_KEY = "AE_TAG_FACE_20_CWV";
+const MTWV_VALUE_KEY = "AE_TAG_MTV6_MAINT_Y";
+const MTWV_WEIGHT_TABLE_PATH = "[0][3][1][20]" as const;
 const MAIN_TARGET_THRESHOLD_PATHS = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"] as const;
 const MID_CURVE_PATHS = {
   x1: "[0][3][1].65",
@@ -126,6 +153,11 @@ const MID_CONTROL_SOURCE_SPEC: CardSourceSpec = {
   jump_to: "first",
   highlight: "ranges",
 };
+const MTWV_SOURCE_SPEC: CardSourceSpec = {
+  paths: [MTWV_WEIGHT_TABLE_PATH],
+  jump_to: "first",
+  highlight: "ranges",
+};
 const MAIN_TARGET_THRESHOLD_ROWS: Array<{ label: MainTargetThresholdRow["label"]; path: string }> = [
   { label: "BV",   path: MAIN_TARGET_THRESHOLD_PATHS[0] },
   { label: "Base", path: MAIN_TARGET_THRESHOLD_PATHS[1] },
@@ -143,30 +175,49 @@ export function ChartMapMode({
   onSourceDraftTextChange,
   onSourceJump,
 }: Props) {
-  const [tab, setTab] = useState<ChartTabId>(() => coerceTab(activeCard) ?? "MainT");
+  const visual = useIsp6sVisualStore((state) => state.visual);
+  const patchVis = useIsp6sVisualStore((state) => state.patch);
+  const [tab, setTabState] = useState<ChartTabId>(() => coerceTab(activeCard) ?? coerceTab(visual.chart_map_tab) ?? "MainT");
   const [sections, setSections] = useState<ChartSection[]>([]);
   const [mainTargetThreshold, setMainTargetThreshold] = useState<MainTargetThresholdRow[] | null>(null);
+  const [mainTargetMtwv, setMainTargetMtwv] = useState<MtwvSource | null>(null);
   const [mainTargetMidCurve, setMainTargetMidCurve] = useState<MidCurveSource | null>(null);
   const [mainTargetB2dCurve, setMainTargetB2dCurve] = useState<B2dCurveSource | null>(null);
   const [mainTargetB2dCorrCurve, setMainTargetB2dCorrCurve] = useState<B2dCorrCurveSource | null>(null);
+  const [mainThdValue, setMainThdValue] = useState(NaN);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const mainTCardSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+  const setTab = useCallback((next: ChartTabId) => {
+    setTabState(next);
+    patchVis({ chart_map_tab: next });
+  }, [patchVis]);
 
   useEffect(() => {
     const next = coerceTab(activeCard);
     if (next) setTab(next);
-  }, [activeCard]);
+  }, [activeCard, setTab]);
 
   useEffect(() => {
-    if (focusTarget?.label.startsWith("Main_Target_Threshold")) {
+    if (focusTarget?.label.startsWith("Main_Target_Threshold") || focusTarget?.label.startsWith("MTWV")) {
       setTab("MainT");
     }
-  }, [focusTarget]);
+  }, [focusTarget, setTab]);
 
   const sourceKey = useMemo(() => tab, [tab]);
   const imageBvValue = useMemo(
     () => readTomlValue(tomlData, schema.Image?.BV ?? "AE_TAG_REALBVX1000"),
     [schema.Image, tomlData],
+  );
+  const imageMtwvValue = useMemo(
+    () => readTomlValue(tomlData, MTWV_VALUE_KEY),
+    [tomlData],
+  );
+  const imageCwvValue = useMemo(
+    () => readTomlValue(tomlData, MAIN_TARGET_CWV_KEY),
+    [tomlData],
   );
   const imageMidratioValue = useMemo(
     () => readTomlValue(tomlData, "AE_TAG_MTV6_MAINT_MID_INTRATIO"),
@@ -188,6 +239,33 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, "AE_TAG_DRV6_B2D"),
     [tomlData],
   );
+  const mainTCardOrder = useMemo(
+    () => sanitiseMainTMetricOrder(visual.chart_main_t_card_order),
+    [visual.chart_main_t_card_order],
+  );
+  const mainTCardCollapsedIds = useMemo(
+    () => sanitiseMainTMetricCollapsed(visual.chart_main_t_card_collapsed),
+    [visual.chart_main_t_card_collapsed],
+  );
+  const visibleMainTCardOrder = useMemo(
+    () => mainTCardOrder.filter((cardId) =>
+      cardId === "mainTarget" ||
+      (cardId === "mainThd" && mainTargetThreshold) ||
+      (cardId === "mtwv" && mainTargetMtwv),
+    ),
+    [mainTCardOrder, mainTargetMtwv, mainTargetThreshold],
+  );
+  const persistMainTMidChartState = useCallback((state: {
+    mode: MidChartMode;
+    source: MidChartSource;
+    readoutMode: "value" | "percent";
+  }) => {
+    patchVis({
+      chart_main_t_mid_chart_mode: state.mode,
+      chart_main_t_mid_chart_source: state.source,
+      chart_main_t_mid_readout_mode: state.readoutMode,
+    });
+  }, [patchVis]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,15 +273,18 @@ export function ChartMapMode({
     if (!filePath) {
       setSections([]);
       setMainTargetThreshold(null);
+      setMainTargetMtwv(null);
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
+      setMainThdValue(NaN);
       setMessage("请先导入 AE.cpp 参数文件");
       return;
     }
     if (!spec) {
       setSections([]);
       setMainTargetThreshold(null);
+      setMainTargetMtwv(null);
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
@@ -215,15 +296,17 @@ export function ChartMapMode({
     setMessage(null);
     (async () => {
       let threshold: MainTargetThresholdRow[] | null = null;
+      let mtwv: MtwvSource | null = null;
       let midCurve: MidCurveSource | null = null;
       let b2dCurve: B2dCurveSource | null = null;
       let b2dCorrCurve: B2dCorrCurveSource | null = null;
       if (tab === "MainT") {
-        [threshold, midCurve, b2dCurve, b2dCorrCurve] = await Promise.all([
+        [threshold, midCurve, b2dCurve, b2dCorrCurve, mtwv] = await Promise.all([
           loadMainTargetThreshold(filePath),
           loadMainTargetMidCurve(filePath),
           loadMainTargetB2dCurve(filePath),
           loadMainTargetB2dCorrCurve(filePath),
+          loadMtwvWeightTable(filePath),
         ]);
       }
       const hit = await cppResolveCardSource(filePath, spec);
@@ -232,11 +315,12 @@ export function ChartMapMode({
         const chunk = await cppGetFieldsInRange(filePath, start, end);
         fields.push(...chunk);
       }
-      const excludedPaths = tab === "MainT" ? [...MAIN_TARGET_THRESHOLD_PATHS] : [];
+      const excludedPaths = tab === "MainT" ? [...MAIN_TARGET_THRESHOLD_PATHS, MTWV_WEIGHT_TABLE_PATH] : [];
       const nextSections = buildSections(tab, hit.ranges, dedupeFields(fields), excludedPaths);
       if (!cancelled) {
         setSections(nextSections);
         setMainTargetThreshold(threshold);
+        setMainTargetMtwv(mtwv);
         setMainTargetMidCurve(midCurve);
         setMainTargetB2dCurve(b2dCurve);
         setMainTargetB2dCorrCurve(b2dCorrCurve);
@@ -247,9 +331,11 @@ export function ChartMapMode({
       if (!cancelled) {
         setSections([]);
         setMainTargetThreshold(null);
+        setMainTargetMtwv(null);
         setMainTargetMidCurve(null);
         setMainTargetB2dCurve(null);
         setMainTargetB2dCorrCurve(null);
+        setMainThdValue(NaN);
         setMessage(err instanceof Error ? err.message : String(err));
         setLoading(false);
       }
@@ -259,6 +345,94 @@ export function ChartMapMode({
       cancelled = true;
     };
   }, [filePath, schema, sourceKey, sourceRevision, tab]);
+
+  const setMainTCardExpanded = (cardId: MainTMetricCardId, expanded: boolean) => {
+    const collapsed = new Set(mainTCardCollapsedIds);
+    if (expanded) {
+      collapsed.delete(cardId);
+    } else {
+      collapsed.add(cardId);
+    }
+    patchVis({ chart_main_t_card_collapsed: MAIN_T_METRIC_CARD_ORDER.filter((id) => collapsed.has(id)) });
+  };
+
+  const onMainTCardDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = mainTCardOrder.indexOf(String(active.id) as MainTMetricCardId);
+    const newIndex = mainTCardOrder.indexOf(String(over.id) as MainTMetricCardId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    patchVis({ chart_main_t_card_order: arrayMove(mainTCardOrder, oldIndex, newIndex) });
+  };
+
+  const renderMainTMetricCard = (cardId: MainTMetricCardId) => {
+    const sortableWrapper = (children: ReactNode) => (
+      <SortableMetricCard key={cardId} id={cardId} disabled={!mainTCardCollapsedIds.includes(cardId)}>
+        {children}
+      </SortableMetricCard>
+    );
+
+    if (cardId === "mainThd" && mainTargetThreshold) {
+      return sortableWrapper(
+          <MainTargetThresholdCard
+            filePath={filePath}
+            rows={mainTargetThreshold}
+            imageBvValue={imageBvValue}
+            imageMidratioValue={imageMidratioValue}
+            corrDrMidratioValue={corrDrMidratioValue}
+            midratioOriValue={midratioOriValue}
+            midratioValue={midratioValue}
+            b2dValue={b2dValue}
+            midCurve={mainTargetMidCurve}
+            b2dCurve={mainTargetB2dCurve}
+            b2dCorrCurve={mainTargetB2dCorrCurve}
+            sourceSpec={schema.card_source?.Main_Target_Threshold ?? MAIN_TARGET_THRESHOLD_SOURCE_SPEC}
+            focusTarget={focusTarget}
+            sourceDraftText={sourceDraftText}
+            onSourceDraftTextChange={onSourceDraftTextChange}
+            onSourceJump={onSourceJump}
+            onMainThdValueChange={setMainThdValue}
+            initialExpanded={!mainTCardCollapsedIds.includes(cardId)}
+            onExpandedChange={(expanded) => setMainTCardExpanded(cardId, expanded)}
+            initialMidChartMode={coerceMidChartMode(visual.chart_main_t_mid_chart_mode)}
+            initialMidChartSource={coerceMidChartSource(visual.chart_main_t_mid_chart_source)}
+            initialMidReadoutMode={coerceMidReadoutMode(visual.chart_main_t_mid_readout_mode)}
+            onMidChartStateChange={persistMainTMidChartState}
+          />,
+      );
+    }
+
+    if (cardId === "mtwv" && mainTargetMtwv) {
+      return sortableWrapper(
+          <MtwvCard
+            filePath={filePath}
+            source={mainTargetMtwv}
+            mtwvValue={imageMtwvValue}
+            sourceSpec={schema.card_source?.MTWV ?? MTWV_SOURCE_SPEC}
+            focusTarget={focusTarget}
+            sourceDraftText={sourceDraftText}
+            onSourceDraftTextChange={onSourceDraftTextChange}
+            onSourceJump={onSourceJump}
+            initialExpanded={!mainTCardCollapsedIds.includes(cardId)}
+            onExpandedChange={(expanded) => setMainTCardExpanded(cardId, expanded)}
+          />,
+      );
+    }
+
+    if (cardId === "mainTarget") {
+      return sortableWrapper(
+          <MainTargetCard
+            cwvValue={imageCwvValue}
+            mainThdValue={mainThdValue}
+            mtwvValue={imageMtwvValue}
+            initialExpanded={!mainTCardCollapsedIds.includes(cardId)}
+            onExpandedChange={(expanded) => setMainTCardExpanded(cardId, expanded)}
+          />,
+      );
+    }
+
+    return null;
+  };
 
   return (
     <div className="flex h-full w-full flex-col" style={canvasStyle}>
@@ -288,25 +462,16 @@ export function ChartMapMode({
             </div>
           )}
 
-          {tab === "MainT" && mainTargetThreshold && (
-            <MainTargetThresholdCard
-              filePath={filePath}
-              rows={mainTargetThreshold}
-              imageBvValue={imageBvValue}
-              imageMidratioValue={imageMidratioValue}
-              corrDrMidratioValue={corrDrMidratioValue}
-              midratioOriValue={midratioOriValue}
-              midratioValue={midratioValue}
-              b2dValue={b2dValue}
-              midCurve={mainTargetMidCurve}
-              b2dCurve={mainTargetB2dCurve}
-              b2dCorrCurve={mainTargetB2dCorrCurve}
-              sourceSpec={schema.card_source?.Main_Target_Threshold ?? MAIN_TARGET_THRESHOLD_SOURCE_SPEC}
-              focusTarget={focusTarget}
-              sourceDraftText={sourceDraftText}
-              onSourceDraftTextChange={onSourceDraftTextChange}
-              onSourceJump={onSourceJump}
-            />
+          {tab === "MainT" && (
+            <DndContext
+              sensors={mainTCardSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onMainTCardDragEnd}
+            >
+              <SortableContext items={visibleMainTCardOrder} strategy={verticalListSortingStrategy}>
+                {visibleMainTCardOrder.map(renderMainTMetricCard)}
+              </SortableContext>
+            </DndContext>
           )}
 
           {sections.map((section) => (
@@ -368,6 +533,17 @@ async function loadMainTargetThreshold(
   return rows;
 }
 
+async function loadMtwvWeightTable(
+  filePath: string,
+  path: string = MTWV_WEIGHT_TABLE_PATH,
+): Promise<MtwvSource> {
+  const fields = await loadFieldEntriesAtPath(filePath, path);
+  return {
+    path,
+    rows: buildMtwvRows(path, fields),
+  };
+}
+
 async function loadMainTargetMidCurve(
   filePath: string,
   paths: { x1: string; y1: string; x2: string; y2: string } = MID_CURVE_PATHS,
@@ -419,6 +595,36 @@ function coerceTab(value: string | undefined): ChartTabId | null {
   return CHART_TABS.includes(value as ChartTabId) ? (value as ChartTabId) : null;
 }
 
+function sanitiseMainTMetricOrder(order: string[] | undefined): MainTMetricCardId[] {
+  const known = new Set<MainTMetricCardId>(MAIN_T_METRIC_CARD_ORDER);
+  const cleaned = (order ?? [])
+    .filter((id): id is MainTMetricCardId => known.has(id as MainTMetricCardId));
+  for (const id of MAIN_T_METRIC_CARD_ORDER) {
+    if (!cleaned.includes(id)) cleaned.push(id);
+  }
+  return cleaned;
+}
+
+function sanitiseMainTMetricCollapsed(collapsed: string[] | undefined): MainTMetricCardId[] {
+  const known = new Set<MainTMetricCardId>(MAIN_T_METRIC_CARD_ORDER);
+  return (collapsed ?? [])
+    .filter((id): id is MainTMetricCardId => known.has(id as MainTMetricCardId));
+}
+
+function coerceMidChartMode(value: string | undefined): MidChartMode {
+  return value === "corr_mid" || value === "b2d_ori" || value === "b2d_corr" ? value : "thd";
+}
+
+function coerceMidChartSource(value: string | undefined): MidChartSource {
+  return value === "mid_value" || value === "corr_dr_midratio" || value === "dr_midratio_ori" || value === "b2d"
+    ? value
+    : "mid";
+}
+
+function coerceMidReadoutMode(value: string | undefined): "value" | "percent" {
+  return value === "percent" ? "percent" : "value";
+}
+
 function dedupeFields(fields: FieldEntry[]): FieldEntry[] {
   const seen = new Set<string>();
   const out: FieldEntry[] = [];
@@ -457,6 +663,39 @@ function buildSections(
   return sections;
 }
 
+function SortableMetricCard({
+  id,
+  disabled,
+  children,
+}: {
+  id: MainTMetricCardId;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...metricCardDragWrapStyle(!disabled, isDragging),
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      {...(!disabled ? { ...attributes, ...listeners } : {})}
+    >
+      {children}
+    </div>
+  );
+}
+
 function MainTargetThresholdCard({
   filePath,
   rows,
@@ -474,6 +713,13 @@ function MainTargetThresholdCard({
   sourceDraftText,
   onSourceDraftTextChange,
   onSourceJump,
+  onMainThdValueChange,
+  initialExpanded,
+  onExpandedChange,
+  initialMidChartMode,
+  initialMidChartSource,
+  initialMidReadoutMode,
+  onMidChartStateChange,
 }: {
   filePath: string;
   rows: MainTargetThresholdRow[];
@@ -491,8 +737,19 @@ function MainTargetThresholdCard({
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onMainThdValueChange?: (value: number) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  initialMidChartMode?: MidChartMode;
+  initialMidChartSource?: MidChartSource;
+  initialMidReadoutMode?: "value" | "percent";
+  onMidChartStateChange?: (state: {
+    mode: MidChartMode;
+    source: MidChartSource;
+    readoutMode: "value" | "percent";
+  }) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [editableRows, setEditableRows] = useState(rows);
   const [editableMidCurve, setEditableMidCurve] = useState<MidCurveSource | null>(midCurve);
   const [editableB2dCurve, setEditableB2dCurve] = useState<B2dCurveSource | null>(b2dCurve);
@@ -528,9 +785,9 @@ function MainTargetThresholdCard({
   const defaultBv = firstNumericString(bv?.values);
   const initialBv = imageBvValue ?? defaultBv ?? "";
   const [bvInput, setBvInput] = useState(initialBv);
-  const [midReadoutMode, setMidReadoutMode] = useState<"value" | "percent">("value");
-  const [midChartMode, setMidChartMode] = useState<MidChartMode>("thd");
-  const [midChartSource, setMidChartSource] = useState<MidChartSource>("mid");
+  const [midReadoutMode, setMidReadoutMode] = useState<"value" | "percent">(initialMidReadoutMode ?? "value");
+  const [midChartMode, setMidChartMode] = useState<MidChartMode>(initialMidChartMode ?? "thd");
+  const [midChartSource, setMidChartSource] = useState<MidChartSource>(initialMidChartSource ?? "mid");
   const [midChartResetKey, setMidChartResetKey] = useState(0);
 
   useEffect(() => {
@@ -554,6 +811,14 @@ function MainTargetThresholdCard({
   }, [sourceDraftText]);
 
   useEffect(() => {
+    onMidChartStateChange?.({
+      mode: midChartMode,
+      source: midChartSource,
+      readoutMode: midReadoutMode,
+    });
+  }, [midChartMode, midChartSource, midReadoutMode, onMidChartStateChange]);
+
+  useEffect(() => {
     setBvInput(initialBv);
   }, [initialBv]);
 
@@ -561,6 +826,7 @@ function MainTargetThresholdCard({
     if (!focusTarget?.label.startsWith("Main_Target_Threshold")) return;
     if (!expanded) {
       setExpanded(true);
+      onExpandedChange?.(true);
       return;
     }
     const target = focusTarget.label.endsWith(".mid")
@@ -592,6 +858,9 @@ function MainTargetThresholdCard({
   const midFunctionValue = midValueAtCorr(corrDrMidratio, segmentedMidPoints, midValue);
   const effectiveMidValue = Number.isFinite(midFunctionValue) ? midFunctionValue : midValue;
   const targetValue = computeSegmentedThd(corrDrMidratio, baseValue, expValue, thdMaxValue, segmentedMidPoints, midValue);
+  useEffect(() => {
+    onMainThdValueChange?.(targetValue);
+  }, [onMainThdValueChange, targetValue]);
   const b2dCurvePoints = useMemo(() => buildB2dCurvePoints(editableB2dCurve), [editableB2dCurve]);
   const b2dCorrCurvePoints = useMemo(() => buildB2dCorrCurvePoints(editableB2dCorrCurve), [editableB2dCorrCurve]);
   const b2dCorrValue = parseFiniteNumber(firstNumericString(editableB2dCorrCurve?.value));
@@ -741,14 +1010,18 @@ function MainTargetThresholdCard({
           type="button"
           title={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
           aria-label={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
           style={sourceButtonStyle(true)}
         >
           {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
         </button>
       </div>
       <div style={thresholdFormulaStyle}>
-        <span>Main Target THD = Base(bv) x 2^(exp(bv)/1000 x Mid(corr_dr_midratio)/1024)</span>
+        <span>Main THD = Base(bv) x 2^(exp(bv)/1000 x Mid(corr_dr_midratio)/1024)</span>
         <strong style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
       </div>
       {expanded && <div style={thresholdDualControlStyle}>
@@ -780,6 +1053,7 @@ function MainTargetThresholdCard({
               <ThresholdValueControl
                 label="bv"
                 value={bvInput}
+                valueTitle="支持滚轮加减数值"
                 labelButtonTitle={restoreBvTitle}
                 onLabelClick={initialBv ? () => setBvInput(initialBv) : undefined}
                 editable
@@ -859,7 +1133,7 @@ function MainTargetThresholdCard({
                 value={formatMidReadout(effectiveMidValue, midReadoutMode)}
                 labelActive={midChartMode === "thd"}
                 valueActive={midChartMode === "corr_mid"}
-                labelButtonTitle="显示 Main Target THD 曲线"
+                labelButtonTitle="显示 Main THD 曲线"
                 onLabelClick={() => {
                   setMidChartMode((current) => current === "thd" ? current : "thd");
                   setMidChartSource("mid");
@@ -903,13 +1177,15 @@ function MainTargetThresholdCard({
                 label="B2D"
                 value={formatComputedNumber(b2d)}
                 disabled={midChartSource === "corr_dr_midratio" || midChartSource === "dr_midratio_ori"}
-                title="显示 F(B2D)_ori 曲线"
+                title="DR_B2D"
                 tooltipPositioning="above-center"
               />
               <ThresholdMetricButton
                 label="midratio"
                 value={formatComputedNumber(midratio)}
                 disabled={midChartSource === "dr_midratio_ori"}
+                title="DR_midratio = (DR_M2D/DR_B2D)*1000"
+                tooltipPositioning="below-center"
               />
             </div>
           </div>
@@ -981,6 +1257,325 @@ function MainTargetThresholdCard({
         />
       )}
     </section>
+  );
+}
+
+function MtwvCard({
+  filePath,
+  source,
+  mtwvValue,
+  sourceSpec,
+  focusTarget,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  filePath: string;
+  source: MtwvSource;
+  mtwvValue: string | null;
+  sourceSpec: CardSourceSpec;
+  focusTarget?: ChartFocusTarget | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const [bindingOpen, setBindingOpen] = useState(false);
+  const [bindingPath, setBindingPath] = useState(source.path);
+  const [bindingLoading, setBindingLoading] = useState(false);
+  const [bindingMessage, setBindingMessage] = useState<string | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+  const maxColumns = Math.max(1, ...editableSource.rows.map((row) => row.values.length));
+  const sourceJumpSpec = {
+    ...sourceSpec,
+    paths: [editableSource.path],
+    jump_to: sourceSpec.jump_to ?? "first",
+    highlight: sourceSpec.highlight ?? "ranges",
+  };
+
+  useEffect(() => {
+    setEditableSource(source);
+    setBindingPath(source.path);
+  }, [source]);
+
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+
+  useEffect(() => {
+    if (!focusTarget?.label.startsWith("MTWV")) return;
+    if (!expanded) {
+      setExpanded(true);
+      onExpandedChange?.(true);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      cardRef.current?.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded, focusTarget]);
+
+  const bindingEntries: BindingEntry[] = [{
+    id: "weightTable",
+    label: "Weight table",
+    path: bindingPath,
+    values: editableSource.rows.flatMap((row) => row.values),
+  }];
+
+  const applyBindings = async (entries: BindingEntry[]) => {
+    setBindingLoading(true);
+    setBindingMessage(null);
+    try {
+      const nextPath = entries.find((entry) => entry.id === "weightTable")?.path.trim() || MTWV_WEIGHT_TABLE_PATH;
+      const nextSource = await loadMtwvWeightTable(filePath, nextPath);
+      setBindingPath(nextPath);
+      setEditableSource(nextSource);
+      setBindingMessage("Applied Weight table binding");
+    } catch (err) {
+      setBindingMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBindingLoading(false);
+    }
+  };
+
+  const resetBindings = () => {
+    void applyBindings([{ id: "weightTable", label: "Weight table", path: MTWV_WEIGHT_TABLE_PATH, values: [] }]);
+  };
+
+  const updateWeightCell = (rowId: string, cellIndex: number, nextValue: string) => {
+    const currentRow = editableSource.rows.find((row) => row.id === rowId);
+    if (!currentRow) return;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    const nextText = replaceMtwvCellInSourceText(sourceDraftTextRef.current, currentRow, cellIndex, trimmed);
+    if (nextText === null) return;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => ({
+      ...current,
+      rows: updateMtwvRowsCell(current.rows, rowId, cellIndex, trimmed),
+    }));
+  };
+
+  return (
+    <section ref={cardRef} style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>MTWV</div>
+        <button
+          type="button"
+          title={expanded ? "Collapse MTWV" : "Expand MTWV"}
+          aria-label={expanded ? "Collapse MTWV" : "Expand MTWV"}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <span>MTWV =</span>
+        <strong style={thresholdResultStyle}>{mtwvValue ?? "-"}</strong>
+      </div>
+      {expanded && (
+        <div style={mtwvControlWrapStyle}>
+          <section style={thresholdGroupStyle}>
+            <div style={thresholdGroupTitleStyle}>
+              <span>Weight table</span>
+              <div style={thresholdGroupActionsStyle}>
+                <button
+                  type="button"
+                  title="Jump to Weight table source"
+                  aria-label="Jump to Weight table source"
+                  disabled={!onSourceJump}
+                  onClick={() => onSourceJump?.("MTWV.weight_table", sourceJumpSpec)}
+                  style={groupSourceButtonStyle(Boolean(onSourceJump))}
+                >
+                  <Code24Regular className="h-4 w-4" />
+                </button>
+                <BindingIconButton
+                  title="Bind Weight table parameter"
+                  onClick={() => {
+                    setBindingOpen(true);
+                    setBindingMessage(null);
+                  }}
+                />
+              </div>
+            </div>
+            <div style={mtwvTableWrapStyle}>
+              <div style={mtwvTableSurfaceStyle}>
+                <table style={mtwvTableStyle}>
+                  <thead>
+                    <tr>
+                      <th title={editableSource.path} style={mtwvHeaderCellStyle}>
+                        {editableSource.rows.length}x{maxColumns}
+                      </th>
+                      {Array.from({ length: maxColumns }, (_, index) => (
+                        <th key={index} style={mtwvHeaderCellStyle}>C{index + 1}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editableSource.rows.map((row, rowIndex) => (
+                      <tr key={row.id}>
+                        <th title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvRowHeaderCellStyle}>
+                          R{rowIndex + 1}
+                        </th>
+                        {Array.from({ length: maxColumns }, (_, cellIndex) => (
+                          <MtwvEditableCell
+                            key={`${row.id}:${cellIndex}`}
+                            value={row.values[cellIndex] ?? ""}
+                            editable={Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[cellIndex])}
+                            title={row.line > 0 ? `${row.path} L${row.line} #${cellIndex}` : row.path}
+                            onCommit={(nextValue) => updateWeightCell(row.id, cellIndex, nextValue)}
+                          />
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+      {bindingOpen && (
+        <BindingEditorPanel
+          title="Weight table parameter binding"
+          entries={bindingEntries}
+          loading={bindingLoading}
+          message={bindingMessage}
+          onClose={() => setBindingOpen(false)}
+          onApply={applyBindings}
+          onReset={resetBindings}
+          onSourceJump={onSourceJump
+            ? (entry) => {
+                const path = entry.path.trim();
+                if (!path) return;
+                onSourceJump("MTWV.weight_table", {
+                  paths: [path],
+                  jump_to: "first",
+                  highlight: "ranges",
+                });
+              }
+            : undefined}
+        />
+      )}
+    </section>
+  );
+}
+
+function MainTargetCard({
+  cwvValue,
+  mainThdValue,
+  mtwvValue,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  cwvValue: string | null;
+  mainThdValue: number;
+  mtwvValue: string | null;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const cwvNumber = parseFiniteNumber(cwvValue);
+  const mtwvNumber = parseFiniteNumber(mtwvValue);
+  const mainTargetValue = Number.isFinite(cwvNumber) && Number.isFinite(mainThdValue) && Number.isFinite(mtwvNumber) && mtwvNumber !== 0
+    ? cwvNumber * (mainThdValue / mtwvNumber)
+    : NaN;
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Main Target</div>
+        <button
+          type="button"
+          title={expanded ? "Collapse Main Target" : "Expand Main Target"}
+          aria-label={expanded ? "Collapse Main Target" : "Expand Main Target"}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <span>Main Target = CWV * (Main THD / MTWV) =</span>
+        <strong style={thresholdResultStyle}>{formatThresholdNumber(mainTargetValue)}</strong>
+      </div>
+      {expanded && <div style={mainTargetBlankStyle} aria-hidden="true" />}
+    </section>
+  );
+}
+
+function MtwvEditableCell({
+  value,
+  editable,
+  title,
+  onCommit,
+}: {
+  value: string;
+  editable: boolean;
+  title: string;
+  onCommit: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  const resetDraft = () => {
+    setDraftValue(value);
+  };
+
+  const commitDraft = () => {
+    if (!editable) return;
+    const nextValue = draftValue.trim();
+    if (nextValue === value.trim()) return;
+    onCommit(nextValue);
+  };
+
+  return (
+    <td title={title} style={mtwvValueCellStyle(focused, editable)}>
+      <input
+        aria-label={title}
+        value={draftValue}
+        readOnly={!editable}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          resetDraft();
+        }}
+        onChange={(event) => setDraftValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            resetDraft();
+            event.currentTarget.blur();
+          }
+        }}
+        inputMode="decimal"
+        style={mtwvCellInputStyle(editable)}
+      />
+    </td>
   );
 }
 
@@ -1218,7 +1813,7 @@ function ThresholdMetricButton({
     </button>
   );
 
-  if (!title || !onClick || disabled) return button;
+  if (!title) return button;
   return (
     <HoverTooltip content={title} positioning={tooltipPositioning ?? "below-center"} inline>
       {button}
@@ -1374,8 +1969,8 @@ function MidRatioChart({
 
   return (
     <div style={chartWrapStyle}>
-      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label="Main Target THD chart">
-        <text x={12} y={17} textAnchor="start" style={chartTitleTextStyle}>Main Target THD</text>
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label="Main THD chart">
+        <text x={12} y={17} textAnchor="start" style={chartTitleTextStyle}>Main THD</text>
         <line x1={chart.left} y1={axisY} x2={chart.left} y2={chart.top + 16} style={chartAxisLineStyle} />
         <line x1={chart.left} y1={axisY} x2={chart.left + plotW + 10} y2={axisY} style={chartAxisLineStyle} />
         <path d={`M ${chart.left} ${chart.top + 10} L ${chart.left - 4} ${chart.top + 17} L ${chart.left + 4} ${chart.top + 17} Z`} style={chartArrowStyle} />
@@ -1901,6 +2496,33 @@ function groupRows(fields: FieldEntry[]): ChartRow[] {
   });
 }
 
+function buildMtwvRows(path: string, fields: FieldEntry[]): MtwvTableRow[] {
+  const byLine = new Map<number, FieldEntry[]>();
+  for (const field of fields) {
+    const current = byLine.get(field.line) ?? [];
+    current.push(field);
+    byLine.set(field.line, current);
+  }
+
+  const rows = Array.from(byLine.entries())
+    .sort(([leftLine], [rightLine]) => leftLine - rightLine)
+    .map(([line, rowFields], rowIndex) => {
+      rowFields.sort((a, b) => a.index - b.index || a.path.localeCompare(b.path));
+      const first = rowFields[0];
+      return {
+        id: `${path}:${line}:${rowIndex}`,
+        line,
+        path: first?.path ?? path,
+        values: rowFields.map((field) => field.value),
+        fields: rowFields,
+      };
+    });
+
+  return rows.length > 0
+    ? rows
+    : [{ id: `${path}:empty`, line: 0, path, values: ["-"], fields: [] }];
+}
+
 function cleanLabel(comment: string): string {
   return comment
     .replace(/^[/\s*]+/, "")
@@ -2122,9 +2744,48 @@ function updateThresholdRowsCell(
   });
 }
 
+function updateMtwvRowsCell(
+  rows: MtwvTableRow[],
+  rowId: string,
+  cellIndex: number,
+  value: string,
+): MtwvTableRow[] {
+  return rows.map((row) => {
+    if (row.id !== rowId) return row;
+    const values = [...row.values];
+    values[cellIndex] = value;
+    const fields = row.fields.map((field, index) => index === cellIndex ? { ...field, value } : field);
+    return { ...row, values, fields };
+  });
+}
+
 function replaceThresholdCellInSourceText(
   sourceText: string,
   row: MainTargetThresholdRow,
+  cellIndex: number,
+  nextValue: string,
+): string | null {
+  const field = row.fields[cellIndex];
+  if (!field || !sourceText) return null;
+  const lines = sourceText.split("\n");
+  const lineIndex = field.line - 1;
+  const line = lines[lineIndex];
+  if (line === undefined) return null;
+
+  const fieldsOnLine = row.fields
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.line === field.line)
+    .sort((a, b) => a.item.index - b.item.index || a.item.path.localeCompare(b.item.path));
+  const ordinalOnLine = fieldsOnLine.findIndex(({ index }) => index === cellIndex);
+  const replaced = replaceNumericTokenInLine(line, ordinalOnLine, field.value, nextValue);
+  if (replaced === null || replaced === line) return null;
+  lines[lineIndex] = replaced;
+  return lines.join("\n");
+}
+
+function replaceMtwvCellInSourceText(
+  sourceText: string,
+  row: MtwvTableRow,
   cellIndex: number,
   nextValue: string,
 ): string | null {
@@ -2320,6 +2981,16 @@ const thresholdCardStyle: CSSProperties = {
   boxShadow: "0 10px 26px rgba(0, 0, 0, 0.10)",
 };
 
+function metricCardDragWrapStyle(draggable: boolean, dragging: boolean): CSSProperties {
+  return {
+    opacity: dragging ? 0.58 : 1,
+    cursor: draggable ? "grab" : "default",
+    touchAction: draggable ? "none" : "auto",
+    userSelect: draggable ? "none" : "auto",
+    transition: "opacity 120ms ease, transform 120ms ease",
+  };
+}
+
 const thresholdHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -2359,6 +3030,20 @@ const thresholdDualControlStyle: CSSProperties = {
   gap: 12,
   minWidth: 0,
   padding: 12,
+};
+
+const mtwvControlWrapStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 12,
+  minWidth: 0,
+  padding: 12,
+};
+
+const mainTargetBlankStyle: CSSProperties = {
+  minHeight: 96,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
 };
 
 const thresholdGroupStyle: CSSProperties = {
@@ -2921,6 +3606,97 @@ const thresholdTableStyle: CSSProperties = {
   fontSize: 11,
   textAlign: "center",
 };
+
+const mtwvTableWrapStyle: CSSProperties = {
+  overflow: "auto",
+  padding: "10px",
+  background: "var(--colorNeutralBackground2)",
+};
+
+const mtwvTableSurfaceStyle: CSSProperties = {
+  minWidth: 0,
+  padding: "10px",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+};
+
+const mtwvTableStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  margin: 0,
+  borderCollapse: "separate",
+  borderSpacing: 0,
+  tableLayout: "fixed",
+  overflow: "hidden",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
+  borderRadius: 10,
+  background: "var(--colorNeutralBackground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  textAlign: "center",
+};
+
+const mtwvHeaderCellStyle: CSSProperties = {
+  minWidth: 48,
+  padding: "6px 7px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 68%, transparent)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 76%, transparent)",
+  background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 62%, var(--colorNeutralBackground1))",
+  color: "var(--normal-sheet-palegreen-fg)",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+const mtwvRowHeaderCellStyle: CSSProperties = {
+  width: 54,
+  padding: "6px 7px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+  background: "color-mix(in srgb, var(--colorNeutralForeground1) 8%, var(--colorNeutralBackground2))",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+function mtwvValueCellStyle(focused = false, editable = false): CSSProperties {
+  return {
+    minWidth: 0,
+    padding: "6px 7px",
+    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -3,
+    background: "color-mix(in srgb, var(--colorNeutralForeground1) 8%, var(--colorNeutralBackground1))",
+    color: "var(--colorNeutralForeground1)",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: editable ? "text" : "default",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    transition: "background-color 120ms ease, outline-color 120ms ease",
+  };
+}
+
+function mtwvCellInputStyle(editable: boolean): CSSProperties {
+  return {
+    width: "100%",
+    minWidth: 0,
+    border: "none",
+    outline: "none",
+    padding: "0 2px",
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: "inherit",
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
+  };
+}
 
 const chartWrapStyle: CSSProperties = {
   position: "relative",

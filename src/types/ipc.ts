@@ -62,6 +62,12 @@ export interface Isp6sAeVisual {
   normal_sub_order:           NormalSubOrder;
   table_collapsed:            boolean;
   table_header_ratios:        number[];
+  chart_main_t_card_order:     string[];
+  chart_main_t_card_collapsed: string[];
+  chart_main_t_mid_chart_mode: string;
+  chart_main_t_mid_chart_source: string;
+  chart_main_t_mid_readout_mode: string;
+  chart_map_tab:              string;
 }
 
 export interface StateRoot {

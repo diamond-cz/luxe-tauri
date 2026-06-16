@@ -112,6 +112,17 @@ pub struct Isp6sAeVisual {
     #[serde(default = "default_true")] pub table_collapsed: bool,
     #[serde(default = "default_table_header_ratios")]
     pub table_header_ratios:                          Vec<f32>,
+    #[serde(default = "default_chart_main_t_card_order")]
+    pub chart_main_t_card_order:                       Vec<String>,
+    #[serde(default)] pub chart_main_t_card_collapsed: Vec<String>,
+    #[serde(default = "default_chart_main_t_mid_chart_mode")]
+    pub chart_main_t_mid_chart_mode:                   String,
+    #[serde(default = "default_chart_main_t_mid_chart_source")]
+    pub chart_main_t_mid_chart_source:                 String,
+    #[serde(default = "default_chart_main_t_mid_readout_mode")]
+    pub chart_main_t_mid_readout_mode:                 String,
+    #[serde(default = "default_chart_map_tab")]
+    pub chart_map_tab:                                 String,
 }
 fn default_true() -> bool { true }
 fn default_split_ratio() -> f32 { 0.7 }
@@ -119,6 +130,13 @@ fn default_image_splitter_ratio() -> f32 { 0.5 }
 fn default_image_splitter_orientation() -> String { "V".into() }
 fn default_preview_mode() -> String { "image".into() }
 fn default_table_header_ratios() -> Vec<f32> { vec![24.0, 18.0, 58.0] }
+fn default_chart_main_t_card_order() -> Vec<String> {
+    vec!["mainThd".into(), "mtwv".into(), "mainTarget".into()]
+}
+fn default_chart_main_t_mid_chart_mode() -> String { "thd".into() }
+fn default_chart_main_t_mid_chart_source() -> String { "mid".into() }
+fn default_chart_main_t_mid_readout_mode() -> String { "value".into() }
+fn default_chart_map_tab() -> String { "MainT".into() }
 
 impl Default for Isp6sAeVisual {
     fn default() -> Self {
@@ -142,6 +160,12 @@ impl Default for Isp6sAeVisual {
             normal_sub_order: NormalSubOrder::default(),
             table_collapsed: true,
             table_header_ratios: default_table_header_ratios(),
+            chart_main_t_card_order: default_chart_main_t_card_order(),
+            chart_main_t_card_collapsed: vec![],
+            chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
+            chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
+            chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
+            chart_map_tab: default_chart_map_tab(),
         }
     }
 }

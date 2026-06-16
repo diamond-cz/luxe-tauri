@@ -165,6 +165,7 @@ export function GlobalTitleTooltip() {
   const stateRef = useRef<typeof state>(null);
   const coordsRef = useRef<typeof coords>(null);
   const adjustedRenderedTooltipRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
 
   stateRef.current = state;
   coordsRef.current = coords;
@@ -175,7 +176,15 @@ export function GlobalTitleTooltip() {
     activeAnchorRef.current = null;
   }, []);
 
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
   const closeTooltip = useCallback(() => {
+    closeTimerRef.current = null;
     if (!activeAnchorRef.current && stateRef.current === null && coordsRef.current === null) return;
     activeAnchorRef.current = null;
     stateRef.current = null;
@@ -184,6 +193,11 @@ export function GlobalTitleTooltip() {
     setState((current) => current === null ? current : null);
     setCoords((current) => current === null ? current : null);
   }, []);
+
+  const scheduleCloseTooltip = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(closeTooltip, 0);
+  }, [clearCloseTimer, closeTooltip]);
 
   const updatePosition = useCallback(() => {
     const current = stateRef.current;
@@ -201,16 +215,15 @@ export function GlobalTitleTooltip() {
     const openFromTarget = (target: EventTarget | null) => {
       const anchor = findTitleAnchor(target);
       if (!anchor) {
-        closeTooltip();
         return;
       }
 
       const content = moveNativeTitleToData(anchor);
       if (!content) {
-        closeTooltip();
         return;
       }
 
+      clearCloseTimer();
       activeAnchorRef.current = anchor;
       const positioning = readGlobalTooltipPositioning(anchor);
       const wrap = anchor.getAttribute("data-tooltip-wrap") === "true";
@@ -244,13 +257,13 @@ export function GlobalTitleTooltip() {
       const active = activeAnchorRef.current;
       const next = event.relatedTarget instanceof Node ? event.relatedTarget : null;
       if (active && next && active.contains(next)) return;
-      closeTooltip();
+      scheduleCloseTooltip();
     };
     const onFocusIn = (event: FocusEvent) => {
       openFromTarget(event.target);
     };
     const onFocusOut = () => {
-      closeTooltip();
+      scheduleCloseTooltip();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeTooltip();
@@ -267,11 +280,12 @@ export function GlobalTitleTooltip() {
       document.removeEventListener("focusin", onFocusIn, true);
       document.removeEventListener("focusout", onFocusOut, true);
       document.removeEventListener("keydown", onKeyDown, true);
+      clearCloseTimer();
       restoreActiveAnchorTitle();
     };
-  }, [closeTooltip, restoreActiveAnchorTitle]);
+  }, [clearCloseTimer, closeTooltip, restoreActiveAnchorTitle, scheduleCloseTooltip]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!state) return;
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -282,7 +296,7 @@ export function GlobalTitleTooltip() {
     };
   }, [state, updatePosition]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!state || !coords || !tooltipRef.current || adjustedRenderedTooltipRef.current) return;
     adjustedRenderedTooltipRef.current = true;
     updatePosition();

@@ -8,6 +8,7 @@ import {
   Dismiss16Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { fetchPoetry } from "@/ipc/shell";
 import { usePoetryStore } from "@/stores/poetryStore";
 
 /**
@@ -25,6 +26,7 @@ export function TitleBar() {
 
   const [pinned,    setPinned]    = useState(false);
   const [maximized, setMaximized] = useState(false);
+  const [refreshingPoetry, setRefreshingPoetry] = useState(false);
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -51,6 +53,17 @@ export function TitleBar() {
   const onMin   = () => getCurrentWindow().minimize().catch(() => {});
   const onMax   = () => getCurrentWindow().toggleMaximize().catch(() => {});
   const onClose = () => getCurrentWindow().close().catch(() => {});
+  const onRefreshPoetry = useCallback(async () => {
+    if (refreshingPoetry) return;
+    setRefreshingPoetry(true);
+    try {
+      await fetchPoetry();
+    } catch (err) {
+      console.warn("fetchPoetry failed", err);
+    } finally {
+      setRefreshingPoetry(false);
+    }
+  }, [refreshingPoetry]);
 
   return (
     <div
@@ -68,13 +81,16 @@ export function TitleBar() {
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3"
       >
         <span aria-hidden style={{ fontSize: 14 }}>👀</span>
-        <span
-          className="truncate text-xs"
+        <button
+          type="button"
+          aria-label="切换诗词"
+          onClick={onRefreshPoetry}
+          onDoubleClick={(event) => event.stopPropagation()}
+          className="min-w-0 truncate rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-black/5"
           style={{ color: "var(--colorNeutralForeground2)" }}
-          title={poetry}
         >
           {poetry}
-        </span>
+        </button>
       </div>
 
       <div className="flex h-full items-stretch">

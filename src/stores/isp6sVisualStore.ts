@@ -22,6 +22,12 @@ const DEFAULT: Isp6sAeVisual = {
   normal_sub_order:           { MainT: [], HS: [], NS: [] },
   table_collapsed:            true,
   table_header_ratios:        [24, 18, 58],
+  chart_main_t_card_order:     ["mainThd", "mtwv", "mainTarget"],
+  chart_main_t_card_collapsed: [],
+  chart_main_t_mid_chart_mode: "thd",
+  chart_main_t_mid_chart_source: "mid",
+  chart_main_t_mid_readout_mode: "value",
+  chart_map_tab:              "MainT",
 };
 
 interface VisualState {
