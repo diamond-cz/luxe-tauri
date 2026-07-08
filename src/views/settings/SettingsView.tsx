@@ -1,14 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { GeneralPanel } from "./GeneralPanel";
 import { ShortcutPanel } from "./ShortcutPanel";
 import { AboutPanel } from "./AboutPanel";
 
 type Tab = "general" | "shortcut" | "about";
+const TAB_IDS: Tab[] = ["general", "shortcut", "about"];
+
+function coerceTab(value: string | null): Tab {
+  return TAB_IDS.includes(value as Tab) ? (value as Tab) : "general";
+}
 
 export function SettingsView() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<Tab>("general");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => coerceTab(searchParams.get("tab")));
+
+  useEffect(() => {
+    setTab(coerceTab(searchParams.get("tab")));
+  }, [searchParams]);
+
+  const updateTab = (next: Tab) => {
+    setTab(next);
+    setSearchParams(next === "general" ? {} : { tab: next }, { replace: true });
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "general",  label: t("tab_general",  { defaultValue: "通用" })   },
@@ -23,7 +39,7 @@ export function SettingsView() {
         <h1 className="text-2xl font-semibold">
           {t("app_title", { defaultValue: "应用设置" })}
         </h1>
-        <TabPills tabs={tabs} active={tab} onChange={setTab} />
+        <TabPills tabs={tabs} active={tab} onChange={updateTab} />
         <span aria-hidden style={{ width: 1 }} />
       </div>
 

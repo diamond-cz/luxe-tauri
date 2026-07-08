@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Pin24Regular,
   Pin24Filled,
@@ -22,6 +23,7 @@ import { usePoetryStore } from "@/stores/poetryStore";
  * maximize (matches native title bar behaviour).
  */
 export function TitleBar() {
+  const navigate = useNavigate();
   const poetry = usePoetryStore((s) => s.line);
 
   const [pinned,    setPinned]    = useState(false);
@@ -53,6 +55,12 @@ export function TitleBar() {
   const onMin   = () => getCurrentWindow().minimize().catch(() => {});
   const onMax   = () => getCurrentWindow().toggleMaximize().catch(() => {});
   const onClose = () => getCurrentWindow().close().catch(() => {});
+  const goShortcutSettings = useCallback(() => {
+    navigate("/settings?tab=shortcut");
+  }, [navigate]);
+  const goAboutSettings = useCallback(() => {
+    navigate("/settings?tab=about");
+  }, [navigate]);
   const onRefreshPoetry = useCallback(async () => {
     if (refreshingPoetry) return;
     setRefreshingPoetry(true);
@@ -80,11 +88,16 @@ export function TitleBar() {
         data-tauri-drag-region
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3"
       >
-        <span aria-hidden style={{ fontSize: 14 }}>👀</span>
+        <BlinkingEyesButton onClick={goAboutSettings} />
         <button
           type="button"
-          aria-label="切换诗词"
-          onClick={onRefreshPoetry}
+          aria-label="进入快捷键设置"
+          onClick={goShortcutSettings}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void onRefreshPoetry();
+          }}
           onDoubleClick={(event) => event.stopPropagation()}
           className="min-w-0 truncate rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-black/5"
           style={{ color: "var(--colorNeutralForeground2)" }}
@@ -115,6 +128,80 @@ export function TitleBar() {
   );
 }
 
+function BlinkingEyesButton({ onClick }: { onClick: () => void }) {
+  const [blinking, setBlinking] = useState(false);
+  const [lookOffset, setLookOffset] = useState({ x: 0, y: 0 });
+  const timerRef = useRef<number | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  const blink = useCallback(() => {
+    setBlinking(true);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setBlinking(false);
+      timerRef.current = null;
+    }, 150);
+  }, []);
+
+  useEffect(() => {
+    intervalRef.current = window.setInterval(blink, 4800);
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
+    };
+  }, [blink]);
+
+  useEffect(() => {
+    let frame = 0;
+
+    const updateLookOffset = (event: PointerEvent) => {
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        if (centerX <= 0 || centerY <= 0) return;
+
+        setLookOffset({
+          x: clamp(((event.clientX - centerX) / centerX) * 4, -4, 4),
+          y: clamp(((event.clientY - centerY) / centerY) * 3.5, -3.5, 3.5),
+        });
+        frame = 0;
+      });
+    };
+
+    window.addEventListener("pointermove", updateLookOffset, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", updateLookOffset);
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <button
+      type="button"
+      aria-label="进入关于页面"
+      onClick={onClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        blink();
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+      className="relative flex h-6 w-7 shrink-0 items-center justify-center overflow-hidden rounded transition-colors hover:bg-black/5"
+      style={{ color: "var(--colorNeutralForeground1)" }}
+    >
+      <span style={eyePairStyle(lookOffset)}>
+        <span style={eyeStyle(blinking)}>
+          <span style={pupilStyle(blinking)} />
+        </span>
+        <span style={eyeStyle(blinking)}>
+          <span style={pupilStyle(blinking)} />
+        </span>
+      </span>
+    </button>
+  );
+}
+
 interface CtrlBtnProps {
   title:    string;
   onClick:  () => void;
@@ -122,6 +209,51 @@ interface CtrlBtnProps {
   variant?: "default" | "danger";
   active?:  boolean;
 }
+
+function eyePairStyle(offset: { x: number; y: number }): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    transform: `translate(${offset.x}px, ${offset.y}px)`,
+    transition: "transform 120ms ease-out",
+  };
+}
+
+function eyeStyle(blinking: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    width: 9,
+    height: blinking ? 2 : 12,
+    boxSizing: "border-box",
+    border: "1.8px solid currentColor",
+    borderRadius: "999px",
+    background: "var(--colorNeutralBackground1)",
+    overflow: "hidden",
+    transition: "height 90ms ease-out, transform 90ms ease-out",
+    transform: blinking ? "translateY(1px)" : "translateY(0)",
+  };
+}
+
+function pupilStyle(blinking: boolean): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 3,
+    height: 3,
+    borderRadius: "999px",
+    background: "currentColor",
+    opacity: blinking ? 0 : 1,
+    transform: "translate(-50%, -50%)",
+    transition: "opacity 60ms ease-out",
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function CtrlButton({ title, onClick, children, variant = "default", active }: CtrlBtnProps) {
   const dangerHover = variant === "danger";
   return (

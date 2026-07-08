@@ -7,7 +7,11 @@ import {
   type CSSProperties,
 } from "react";
 import { Button } from "@fluentui/react-components";
-import { Copy24Regular, PreviewLink24Regular } from "@fluentui/react-icons";
+import {
+  ChevronDown24Regular,
+  ChevronUp24Regular,
+  Copy24Regular,
+} from "@fluentui/react-icons";
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { cppGetFieldsByLine } from "@/ipc/cppParser";
@@ -22,7 +26,23 @@ interface Props {
   jumpLine?: number;
   jumpKey?: number;
   onTextChange: (text: string) => void;
-  onPreviewChart?: () => void;
+  onPreviewChart?: (targetLabel?: string) => void;
+  chartJumpLabel?: string;
+  rangeGroups?: SourceRangeGroup[];
+}
+
+export interface SourceRangeGroup {
+  id: string;
+  label: string;
+  paths: string[];
+  chartTargetLabel?: string;
+}
+
+interface SourceArea {
+  id: string;
+  label: string;
+  chartTargetLabel?: string;
+  rangeIndices: number[];
 }
 
 export interface SourceCodeDraft {
@@ -64,6 +84,8 @@ export function SourceCodeView({
   jumpKey,
   onTextChange,
   onPreviewChart,
+  chartJumpLabel,
+  rangeGroups,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -71,8 +93,10 @@ export function SourceCodeView({
   const [scrollFrame, setScrollFrame] = useState({ top: 0, height: 0 });
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [activeLinePaths, setActiveLinePaths] = useState<string[]>([]);
+  const [rangeStartPaths, setRangeStartPaths] = useState<string[][]>([]);
   const [pathCopied, setPathCopied] = useState(false);
 
+  const parserPath = resolveFilePath ?? draft?.filePath;
   const text = draft?.text ?? "";
   const lines = useMemo(() => text.split(/\r?\n/), [text]);
   const lineCount = Math.max(1, lines.length);
@@ -82,16 +106,52 @@ export function SourceCodeView({
     return Math.max(900, maxLen * 7 + 32);
   }, [lines]);
 
+  const highlightRanges = useMemo(() => {
+    const out: Array<[number, number]> = [];
+    for (const [a, b] of ranges ?? []) {
+      const start = clampNumber(Math.min(a, b), 1, lineCount);
+      const end = clampNumber(Math.max(a, b), 1, lineCount);
+      if (start <= end) out.push([start, end]);
+    }
+    return out.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  }, [lineCount, ranges]);
+  const highlightRangeKey = useMemo(
+    () => highlightRanges.map(([start, end]) => `${start}-${end}`).join("|"),
+    [highlightRanges],
+  );
+
   const hiSet = useMemo(() => {
     const result = new Set<number>();
-    for (const [a, b] of ranges ?? []) {
+    for (const [a, b] of highlightRanges) {
       for (let i = a; i <= b; i += 1) result.add(i);
     }
     return result;
-  }, [ranges]);
+  }, [highlightRanges]);
   const highlightedLines = useMemo(
     () => Array.from(hiSet).filter((lineNo) => lineNo >= 1 && lineNo <= lineCount),
     [hiSet, lineCount],
+  );
+  const activeRangeIndex = useMemo(() => {
+    if (!activeLine) return -1;
+    return highlightRanges.findIndex(([start, end]) => activeLine >= start && activeLine <= end);
+  }, [activeLine, highlightRanges]);
+  const sourceAreas = useMemo(
+    () => buildSourceAreas(highlightRanges, rangeStartPaths, rangeGroups, chartJumpLabel),
+    [chartJumpLabel, highlightRanges, rangeGroups, rangeStartPaths],
+  );
+  const activeAreaIndex = useMemo(() => {
+    if (activeRangeIndex < 0) return -1;
+    return sourceAreas.findIndex((area) => area.rangeIndices.includes(activeRangeIndex));
+  }, [activeRangeIndex, sourceAreas]);
+  const activeArea = activeAreaIndex >= 0 ? sourceAreas[activeAreaIndex] : null;
+  const sourceAreaButtonPlacements = useMemo(
+    () => sourceAreas
+      .map((area) => ({
+        area,
+        top: sourceAreaButtonTop(area, highlightRanges, scrollFrame),
+      }))
+      .filter((item): item is { area: SourceArea; top: number } => item.top !== null),
+    [highlightRanges, scrollFrame, sourceAreas],
   );
   const activeLinePathText = useMemo(() => activeLinePaths.join(", "), [activeLinePaths]);
   const activeLinePathSummary = useMemo(() => {
@@ -100,17 +160,42 @@ export function SourceCodeView({
   }, [activeLinePaths]);
   const activePathTop = useMemo(() => {
     if (!activeLine || activeLinePaths.length === 0) return null;
+    if (activeArea) {
+      const areaTop = sourceAreaTop(activeArea, highlightRanges, scrollFrame);
+      if (areaTop !== null) {
+        return clampNumber(areaTop - LINE_PATH_BADGE_H - 8, 8, Math.max(8, scrollFrame.height - LINE_PATH_BADGE_H - 8));
+      }
+    }
+
     const lineViewportTop = (activeLine - 1) * LINE_H - scrollFrame.top;
     if (scrollFrame.height > 0 && (lineViewportTop < -LINE_H || lineViewportTop > scrollFrame.height)) return null;
-    const rawTop = lineViewportTop - 5;
-    if (scrollFrame.height <= 0) return rawTop;
+    const rawTop = lineViewportTop - LINE_PATH_BADGE_H - 8;
+    if (scrollFrame.height <= 0) return Math.max(0, rawTop);
     return clampNumber(rawTop, 8, Math.max(8, scrollFrame.height - LINE_PATH_BADGE_H - 8));
-  }, [activeLine, activeLinePaths.length, scrollFrame]);
+  }, [activeArea, activeLine, activeLinePaths.length, highlightRanges, scrollFrame]);
 
   const syncActiveLineFromTextarea = (nextText = text, selectionStart = textareaRef.current?.selectionStart ?? 0) => {
     const maxLine = Math.max(1, lineNumberFromOffset(nextText, nextText.length));
     const nextLine = clampNumber(lineNumberFromOffset(nextText, selectionStart), 1, maxLine);
     setActiveLine((current) => current === nextLine ? current : nextLine);
+  };
+
+  const jumpToLine = (line: number) => {
+    const nextLine = clampNumber(line, 1, lineCount);
+    scrollerRef.current?.scrollTo({ top: Math.max(0, (nextLine - 6) * LINE_H), behavior: "auto" });
+    setActiveLine(nextLine);
+  };
+
+  const jumpToRange = (index: number) => {
+    const range = highlightRanges[index];
+    if (!range) return;
+    jumpToLine(range[0]);
+  };
+
+  const jumpToArea = (index: number) => {
+    const area = sourceAreas[index];
+    if (!area) return;
+    jumpToRange(area.rangeIndices[0]);
   };
 
   const copyActiveLinePaths = async () => {
@@ -149,6 +234,31 @@ export function SourceCodeView({
     };
   }, []);
 
+  useEffect(() => {
+    if (!parserPath || highlightRanges.length === 0) {
+      setRangeStartPaths([]);
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      highlightRanges.map(async ([start]) => {
+        try {
+          const fields = await cppGetFieldsByLine(parserPath, start);
+          return uniqueFieldPaths(fields.map((field) => field.path));
+        } catch (error) {
+          console.warn("load source range paths failed", error);
+          return [];
+        }
+      }),
+    ).then((next) => {
+      if (!cancelled) setRangeStartPaths(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [highlightRangeKey, highlightRanges, parserPath]);
+
   useLayoutEffect(() => {
     if (!jumpLine || !scrollerRef.current) return;
     const top = (jumpLine - 6) * LINE_H;
@@ -161,7 +271,6 @@ export function SourceCodeView({
   }, [jumpLine, jumpKey, lineCount]);
 
   useEffect(() => {
-    const parserPath = resolveFilePath ?? draft?.filePath;
     if (!parserPath || !activeLine) {
       setActiveLinePaths([]);
       return;
@@ -289,29 +398,68 @@ export function SourceCodeView({
                   style={linePathActionButtonStyle(pathCopied)}
                 />
               </HoverTooltip>
-              {onPreviewChart && (
-                <HoverTooltip content="预览当前修改后的图表" positioning="below-center" inline>
-                  <Button
-                    size="small"
-                    appearance="subtle"
-                    icon={<PreviewLink24Regular />}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={onPreviewChart}
-                    aria-label="预览当前修改后的图表"
-                    style={linePathActionButtonStyle(false)}
-                  />
-                </HoverTooltip>
+              {sourceAreas.length > 1 && activeAreaIndex >= 0 && (
+                <div style={linePathRegionNavStyle} aria-label="源码区域跳转">
+                  <span style={linePathSeparatorStyle} aria-hidden />
+                  <span style={linePathRegionTextStyle}>{activeAreaIndex + 1}/{sourceAreas.length}</span>
+                  <HoverTooltip content="跳转到上一个源码区域" positioning="below-center" inline>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<ChevronUp24Regular />}
+                      disabled={activeAreaIndex <= 0}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => jumpToArea(activeAreaIndex - 1)}
+                      aria-label="跳转到上一个源码区域"
+                      style={linePathActionButtonStyle(false)}
+                    />
+                  </HoverTooltip>
+                  <HoverTooltip content="跳转到下一个源码区域" positioning="below-center" inline>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<ChevronDown24Regular />}
+                      disabled={activeAreaIndex >= sourceAreas.length - 1}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => jumpToArea(activeAreaIndex + 1)}
+                      aria-label="跳转到下一个源码区域"
+                      style={linePathActionButtonStyle(false)}
+                    />
+                  </HoverTooltip>
+                </div>
               )}
             </div>
           </div>
         </div>
       )}
+      {onPreviewChart && sourceAreaButtonPlacements.map(({ area, top }) => (
+        <div key={area.id} style={{ ...highlightCardJumpWrapStyle, top }}>
+          <HoverTooltip
+            content={`跳转到 ${area.label} 图表区域`}
+            positioning="below-center"
+            inline
+          >
+            <Button
+              size="small"
+              appearance="subtle"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onPreviewChart(area.chartTargetLabel)}
+              aria-label={`跳转到 ${area.label} 图表区域`}
+              style={highlightCardJumpButtonStyle}
+            >
+              {area.label}
+            </Button>
+          </HoverTooltip>
+        </div>
+      ))}
     </div>
   );
 }
 
 const LINE_H = 18;
 const LINE_PATH_BADGE_H = 30;
+const CARD_JUMP_BUTTON_H = 30;
+const SOURCE_AREA_BUTTON_COLUMN_W = 172;
 const SOURCE_HIGHLIGHT_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 46%, transparent)";
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -336,6 +484,96 @@ function uniqueFieldPaths(paths: string[]): string[] {
     result.push(path);
   }
   return result;
+}
+
+function buildSourceAreas(
+  ranges: Array<[number, number]>,
+  rangePaths: string[][],
+  groups: SourceRangeGroup[] | undefined,
+  fallbackLabel: string | undefined,
+): SourceArea[] {
+  const areas: SourceArea[] = [];
+  const areaById = new Map<string, SourceArea>();
+  const hasGroups = Boolean(groups?.length);
+  if (hasGroups && rangePaths.length < ranges.length) return areas;
+
+  ranges.forEach((_, rangeIndex) => {
+    const group = hasGroups ? findRangeGroup(rangePaths[rangeIndex] ?? [], groups ?? []) : null;
+    const id = group?.id ?? `range-${rangeIndex}`;
+    const label = group?.label ?? fallbackLabel ?? `区域 ${rangeIndex + 1}`;
+    const chartTargetLabel = group?.chartTargetLabel ?? fallbackLabel;
+
+    let area = areaById.get(id);
+    if (!area) {
+      area = { id, label, chartTargetLabel, rangeIndices: [] };
+      areaById.set(id, area);
+      areas.push(area);
+    }
+    area.rangeIndices.push(rangeIndex);
+  });
+
+  return areas;
+}
+
+function sourceAreaButtonTop(
+  area: SourceArea,
+  ranges: Array<[number, number]>,
+  scrollFrame: { top: number; height: number },
+): number | null {
+  if (scrollFrame.height <= 0) return null;
+
+  let visibleTop: number | null = null;
+  let visibleBottom: number | null = null;
+  for (const rangeIndex of area.rangeIndices) {
+    const range = ranges[rangeIndex];
+    if (!range) continue;
+    const [start, end] = range;
+    const top = (start - 1) * LINE_H - scrollFrame.top;
+    const bottom = end * LINE_H - scrollFrame.top;
+    if (bottom < 0 || top > scrollFrame.height) continue;
+    const rangeTop = clampNumber(top, 0, scrollFrame.height);
+    const rangeBottom = clampNumber(bottom, 0, scrollFrame.height);
+    visibleTop = visibleTop === null ? rangeTop : Math.min(visibleTop, rangeTop);
+    visibleBottom = visibleBottom === null ? rangeBottom : Math.max(visibleBottom, rangeBottom);
+  }
+
+  if (visibleTop === null || visibleBottom === null) return null;
+  const rawTop = (visibleTop + visibleBottom - CARD_JUMP_BUTTON_H) / 2;
+  return clampNumber(rawTop, 8, Math.max(8, scrollFrame.height - CARD_JUMP_BUTTON_H - 8));
+}
+
+function sourceAreaTop(
+  area: SourceArea,
+  ranges: Array<[number, number]>,
+  scrollFrame: { top: number; height: number },
+): number | null {
+  if (scrollFrame.height <= 0) return null;
+
+  let topMost: number | null = null;
+  for (const rangeIndex of area.rangeIndices) {
+    const range = ranges[rangeIndex];
+    if (!range) continue;
+    const [start, end] = range;
+    const top = (start - 1) * LINE_H - scrollFrame.top;
+    const bottom = end * LINE_H - scrollFrame.top;
+    if (bottom < 0 || top > scrollFrame.height) continue;
+    const visibleTop = clampNumber(top, 0, scrollFrame.height);
+    topMost = topMost === null ? visibleTop : Math.min(topMost, visibleTop);
+  }
+  return topMost;
+}
+
+function findRangeGroup(paths: string[], groups: SourceRangeGroup[]): SourceRangeGroup | null {
+  for (const group of groups) {
+    if (group.paths.some((prefix) => paths.some((path) => pathMatchesPrefix(path, prefix)))) {
+      return group;
+    }
+  }
+  return null;
+}
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`);
 }
 
 const sourceScrollerStyle: CSSProperties = {
@@ -398,9 +636,9 @@ const sourceTextareaStyle: CSSProperties = {
 
 const linePathBadgeWrapStyle: CSSProperties = {
   position: "absolute",
-  right: 16,
+  right: SOURCE_AREA_BUTTON_COLUMN_W + 28,
   zIndex: 8,
-  maxWidth: "min(600px, calc(100% - 96px))",
+  maxWidth: `min(760px, calc(100% - ${SOURCE_AREA_BUTTON_COLUMN_W + 108}px))`,
   pointerEvents: "auto",
 };
 
@@ -448,6 +686,53 @@ const linePathActionsStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 2,
+};
+
+const linePathRegionNavStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 2,
+};
+
+const linePathSeparatorStyle: CSSProperties = {
+  width: 1,
+  height: 16,
+  margin: "0 4px",
+  background: "var(--colorNeutralStroke2)",
+};
+
+const linePathRegionTextStyle: CSSProperties = {
+  minWidth: 34,
+  textAlign: "center",
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const highlightCardJumpWrapStyle: CSSProperties = {
+  position: "absolute",
+  right: 16,
+  zIndex: 7,
+  pointerEvents: "auto",
+};
+
+const highlightCardJumpButtonStyle: CSSProperties = {
+  width: "auto",
+  minWidth: 0,
+  maxWidth: SOURCE_AREA_BUTTON_COLUMN_W,
+  height: CARD_JUMP_BUTTON_H,
+  padding: "0 10px",
+  color: "var(--colorBrandForeground1)",
+  border: "1px solid color-mix(in srgb, var(--colorBrandStroke1) 60%, var(--colorNeutralStroke2))",
+  borderRadius: 8,
+  background: "color-mix(in srgb, var(--colorNeutralBackground1) 88%, var(--colorBrandBackground2))",
+  boxShadow: "0 8px 20px color-mix(in srgb, var(--colorNeutralForeground1) 14%, transparent)",
+  fontSize: 12,
+  fontWeight: 800,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 function linePathActionButtonStyle(active: boolean): CSSProperties {

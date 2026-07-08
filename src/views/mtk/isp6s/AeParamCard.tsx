@@ -14,6 +14,7 @@ interface Props {
   children?:  React.ReactNode;
   /** When provided, the whole card header becomes clickable. */
   onClick?:   () => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -21,8 +22,8 @@ interface Props {
  * strip on the same row. Optional `onClick` makes the header tile clickable
  * so the param_map preview can jump to the matching source range.
  */
-export function AeParamCard({ title, badges, accent, children, onClick }: Props) {
-  const clickable = !!onClick;
+export function AeParamCard({ title, badges, accent, children, onClick, onContextMenu }: Props) {
+  const clickable = !!onClick || !!onContextMenu;
   return (
     <div
       className="flex flex-col rounded-lg border transition-colors"
@@ -32,6 +33,7 @@ export function AeParamCard({ title, badges, accent, children, onClick }: Props)
         cursor:      clickable ? "pointer" : "default",
       }}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={(e) => {
         if (clickable) (e.currentTarget as HTMLDivElement).style.borderColor =
           "var(--colorBrandStroke1)";

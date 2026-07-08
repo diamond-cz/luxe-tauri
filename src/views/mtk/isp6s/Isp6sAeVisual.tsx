@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Button } from "@fluentui/react-components";
 import {
   Add24Regular,
@@ -61,6 +61,19 @@ const NORMAL_SUB_NAMES = ["MainT", "HS", "ABL", "NS"] as const;
 const FACE_SUB_NAMES   = ["Face", "Touch"] as const;
 const TOP_NAMES        = ["Normal", "Face/Touch"] as const;
 const CARD_GAP_PX      = 12;
+const CHART_TARGET_BY_CARD: Record<string, string> = {
+  MainT: "MainT",
+  HS: "HS",
+  ABL: "ABL",
+  NS: "NS",
+  Face: "Face_FLT",
+  Touch: "Touch",
+};
+
+interface CardJumpTarget {
+  label: string;
+  key:   number;
+}
 
 function sanitiseOrder(order: string[], canonical: readonly string[]): string[] {
   const known = new Set<string>(canonical);
@@ -75,7 +88,9 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
-  const [activeCard, setActiveCard] = useState<string | undefined>(undefined);
+  const [chartCardTarget, setChartCardTarget] = useState<CardJumpTarget | undefined>(undefined);
+  const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
+  const cardJumpKeyRef = useRef(0);
   const initialEmptyTableCollapseAppliedRef = useRef(false);
 
   const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${tabIdx}`]);
@@ -170,10 +185,20 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
   const toggleFaceLayout = () =>
     patchVis({ face_wf_row_mode:   !visual.face_wf_row_mode });
 
-  /** When user clicks a sub-card, snap the right pane to param_map mode and
-   *  remember the card so the source view can scroll there. */
+  /** Left click opens the chart tab; right click opens the matching source range. */
+  const nextCardJumpTarget = (label: string): CardJumpTarget => {
+    cardJumpKeyRef.current += 1;
+    return { label, key: cardJumpKeyRef.current };
+  };
+
   const onCardClick = (card: string) => {
-    setActiveCard(card);
+    setChartCardTarget(nextCardJumpTarget(CHART_TARGET_BY_CARD[card] ?? card));
+    patchVis({ preview_mode: "chart_map" });
+  };
+
+  const onCardContextMenu = (event: MouseEvent<HTMLDivElement>, card: string) => {
+    event.preventDefault();
+    setSourceCardTarget(nextCardJumpTarget(card));
     patchVis({ preview_mode: "param_map" });
   };
 
@@ -275,7 +300,6 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
             <BadgeStrip
               items={[
                 { label: "CWR",           value: normalBadges?.cwr ?? "—", hint: schema.card?.Normal?.CWR },
-                { label: "_",             value: normalBadges?.tar_abl_mt_hs ?? "—", hint: "tar_abl_mt_hs" },
                 { label: "Cal",           value: normalBadges?.cal ?? "—" },
               ]}
             />
@@ -311,7 +335,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
                     borderRadius={8}
                   >
                     <NormalSub name={sub} badges={normalBadges}
-                               onClick={() => onCardClick(sub)} />
+                               onClick={() => onCardClick(sub)}
+                               onContextMenu={(event) => onCardContextMenu(event, sub)} />
                   </SortableCard>
                 ))}
               </div>
@@ -366,7 +391,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
                     borderRadius={8}
                   >
                     <FaceTouchSub name={sub} badges={faceBadges}
-                                  onClick={() => onCardClick(sub)} />
+                                  onClick={() => onCardClick(sub)}
+                                  onContextMenu={(event) => onCardContextMenu(event, sub)} />
                   </SortableCard>
                 ))}
               </div>
@@ -400,7 +426,8 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, parsed, onImageDirChange 
               schema={schema}
               entry={currentEntry}
               tomlData={imageDir.tomlData}
-              activeCard={activeCard}
+              chartCardTarget={chartCardTarget}
+              sourceCardTarget={sourceCardTarget}
             />
           </Suspense>
         </div>
@@ -499,14 +526,20 @@ function PaneFallback({ label }: { label: string }) {
 }
 
 function NormalSub({
-  name, badges, onClick,
-}: { name: string; badges: NormalBadges | null; onClick?: () => void }) {
+  name, badges, onClick, onContextMenu,
+}: {
+  name: string;
+  badges: NormalBadges | null;
+  onClick?: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+}) {
   const sub = badges?.perSub[name as "MainT" | "HS" | "ABL" | "NS"];
   return (
     <AeParamCard
       title={name}
       accent={NORMAL_SUB_ACCENTS[name]}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       badges={[
         { label: "WT",  value: sub?.wt  ?? "—", hint: sub?.wtKey  || "(未映射)" },
         { label: "Tar", value: sub?.tar ?? "—", hint: sub?.tarKey || "(未映射)" },
@@ -516,14 +549,20 @@ function NormalSub({
 }
 
 function FaceTouchSub({
-  name, badges, onClick,
-}: { name: string; badges: FaceTouchBadges | null; onClick?: () => void }) {
+  name, badges, onClick, onContextMenu,
+}: {
+  name: string;
+  badges: FaceTouchBadges | null;
+  onClick?: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+}) {
   if (name === "Face") {
     return (
       <AeParamCard
         title="Face"
         accent={FACE_TOUCH_ACCENTS.Face}
         onClick={onClick}
+        onContextMenu={onContextMenu}
         badges={[
           { label: "WT",  value: badges?.face.wt  ?? "—", hint: badges?.face.wtKey  ?? "(未映射)" },
           { label: "FBT", value: badges?.face.fbt ?? "—", hint: badges?.face.fbtKey ?? "(未映射)" },
@@ -537,6 +576,7 @@ function FaceTouchSub({
       title="Touch"
       accent={FACE_TOUCH_ACCENTS.Touch}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       badges={[
         { label: "WT",  value: badges?.touch.wt  ?? "—", hint: badges?.touch.wtKey  ?? "(未映射)" },
         { label: "Tar", value: badges?.touch.tar ?? "—", hint: badges?.touch.tarKey ?? "(未映射)" },

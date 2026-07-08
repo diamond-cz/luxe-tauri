@@ -24,6 +24,8 @@ const DEFAULT: Isp6sAeVisual = {
   table_header_ratios:        [24, 18, 58],
   chart_main_t_card_order:     ["mainThd", "mtwv", "mainTarget"],
   chart_main_t_card_collapsed: [],
+  chart_hs_card_order:         ["hsTarget", "hsWeight", "hsBright", "hsMiddle", "hsDark"],
+  chart_hs_card_collapsed:     [],
   chart_main_t_mid_chart_mode: "thd",
   chart_main_t_mid_chart_source: "mid",
   chart_main_t_mid_readout_mode: "value",

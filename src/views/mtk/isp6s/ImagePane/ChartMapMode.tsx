@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import {
   DndContext, closestCenter, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  SortableContext, arrayMove, useSortable, verticalListSortingStrategy,
+  SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, TableLink24Regular } from "@fluentui/react-icons";
@@ -26,12 +26,20 @@ type MidChartMode = "thd" | "corr_mid" | "b2d_ori" | "b2d_corr";
 type MidChartSource = "mid" | "mid_value" | "corr_dr_midratio" | "dr_midratio_ori" | "b2d";
 type BindingPanelKind = "bv" | "mid";
 type MainTMetricCardId = "mainThd" | "mtwv" | "mainTarget";
+type HsMetricCardId = "hsTarget" | "hsWeight" | "hsBright" | "hsMiddle" | "hsDark";
+type HsWeightToneId = "target" | "dark" | "middle" | "bright";
+type HsWeightCellTarget =
+  | { kind: "bv"; bvIndex: number }
+  | { kind: "dr"; bvIndex: number; drIndex: number }
+  | { kind: "mid"; midIndex: number }
+  | { kind: "value"; bvIndex: number; drIndex: number; midIndex: number; channelIndex: number };
 
 interface Props {
   filePath: string;
   schema:   Isp6sSchemaRoot;
   tomlData: Record<string, string>;
   activeCard?: string;
+  activeCardKey?: number;
   focusTarget?: ChartFocusTarget | null;
   sourceRevision?: number;
   sourceDraftText?: string | null;
@@ -47,6 +55,7 @@ interface ChartFocusTarget {
 interface ChartSection {
   id:    string;
   title: string;
+  subtitle?: string;
   rows:  ChartRow[];
 }
 
@@ -76,6 +85,22 @@ interface MtwvTableRow {
 interface MtwvSource {
   path: string;
   rows: MtwvTableRow[];
+}
+
+interface HsWeightSource {
+  bvPath: string;
+  drB2dPath: string;
+  midPath: string;
+  matrixPath: string;
+  bvAxis: number[];
+  bvAxisFields: Array<FieldEntry | null>;
+  drB2dRows: number[][];
+  drB2dFields: Array<Array<FieldEntry | null>>;
+  midAxis: number[];
+  midAxisFields: Array<FieldEntry | null>;
+  values: number[][][][];
+  valueFields: Array<Array<Array<Array<FieldEntry | null>>>>;
+  fields: FieldEntry[];
 }
 
 interface MidCurveSource {
@@ -108,9 +133,61 @@ interface BindingEntry {
 const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT", "Touch"];
 const SOURCE_NUMBER_RE = /[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 const MAIN_T_METRIC_CARD_ORDER: MainTMetricCardId[] = ["mainThd", "mtwv", "mainTarget"];
+const HS_METRIC_CARD_ORDER: HsMetricCardId[] = ["hsTarget", "hsWeight", "hsBright", "hsMiddle", "hsDark"];
+const HS_TARGET_TERM_ORDER = ["BT", "MT", "DT"];
+const HS_TARGET_AREA_CARD_BY_ID: Record<string, HsMetricCardId> = {
+  BT: "hsBright",
+  MT: "hsMiddle",
+  DT: "hsDark",
+};
+const HS_TARGET_AREA_LABEL_BY_ID: Record<string, string> = {
+  BT: "HS Bright area 卡片",
+  MT: "HS Middle area 卡片",
+  DT: "HS Dark area 卡片",
+};
 const MAIN_TARGET_CWV_KEY = "AE_TAG_FACE_20_CWV";
+const HS_TARGET_CWV_KEY = "AE_TAG_CWV";
 const MTWV_VALUE_KEY = "AE_TAG_MTV6_MAINT_Y";
 const MTWV_WEIGHT_TABLE_PATH = "[0][3][1][20]" as const;
+const HS_WEIGHT_CHANNELS: Array<{ id: HsWeightToneId }> = [
+  { id: "target" },
+  { id: "dark" },
+  { id: "middle" },
+  { id: "bright" },
+];
+const HS_WEIGHT_RESULT_ITEMS: Array<{ id: HsWeightToneId; label: string; wetKey: string }> = [
+  { id: "target", label: "MT%",     wetKey: "AE_TAG_HSV6_MAINT_WET" },
+  { id: "dark",   label: "Dark%",   wetKey: "AE_TAG_HSV6_DT_WET" },
+  { id: "middle", label: "Middle%", wetKey: "AE_TAG_HSV6_MT_WET" },
+  { id: "bright", label: "Bright%", wetKey: "AE_TAG_HSV6_BT_WET" },
+];
+const HS_WEIGHT_BV_PATH = "[0][3][1][40]" as const;
+const HS_WEIGHT_DR_B2D_PATH = "[0][3][1][41]" as const;
+const HS_WEIGHT_MID_PATH = "[0][3][1][42]" as const;
+const HS_WEIGHT_VALUE_PATH = "[0][3][1][43]" as const;
+const HS_TARGET_INPUTS = [
+  {
+    id: "BT",
+    label: "BT",
+    thdKey: "AE_TAG_HSV6_BT_THD",
+    yKey: "AE_TAG_HSV6_BT_Final_Y",
+    wetKey: "AE_TAG_HSV6_BT_WET",
+  },
+  {
+    id: "MT",
+    label: "MT",
+    thdKey: "AE_TAG_HSV6_MT_THD",
+    yKey: "AE_TAG_HSV6_MT_Final_Y",
+    wetKey: "AE_TAG_HSV6_MT_WET",
+  },
+  {
+    id: "DT",
+    label: "DT",
+    thdKey: "AE_TAG_HSV6_DT_THD",
+    yKey: "AE_TAG_HSV6_DT_Final_Y",
+    wetKey: "AE_TAG_HSV6_DT_WET",
+  },
+] as const;
 const MAIN_TARGET_THRESHOLD_PATHS = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"] as const;
 const MID_CURVE_PATHS = {
   x1: "[0][3][1].65",
@@ -143,6 +220,13 @@ const MID_CONTROL_SOURCE_PATHS = [
   ...B2D_CORR_CURVE_SOURCE_PATHS,
   ...B2D_CURVE_SOURCE_PATHS,
 ] as const;
+const MAIN_T_SOURCE_GROUPS: Array<{ id: string; title: string; paths: readonly string[] }> = [
+  { id: "mtwv", title: "MTWV", paths: [MTWV_WEIGHT_TABLE_PATH] },
+  { id: "threshold", title: "Main Target Threshold", paths: MAIN_TARGET_THRESHOLD_PATHS },
+  { id: "mid", title: "Mid 曲线", paths: MID_CURVE_SOURCE_PATHS },
+  { id: "b2dOri", title: "B2D ori", paths: B2D_CURVE_SOURCE_PATHS },
+  { id: "b2dCorr", title: "B2D corr", paths: B2D_CORR_CURVE_SOURCE_PATHS },
+];
 const MAIN_TARGET_THRESHOLD_SOURCE_SPEC: CardSourceSpec = {
   paths: [...MAIN_TARGET_THRESHOLD_PATHS],
   jump_to: "first",
@@ -169,6 +253,7 @@ export function ChartMapMode({
   schema,
   tomlData,
   activeCard,
+  activeCardKey,
   focusTarget,
   sourceRevision,
   sourceDraftText,
@@ -184,6 +269,7 @@ export function ChartMapMode({
   const [mainTargetMidCurve, setMainTargetMidCurve] = useState<MidCurveSource | null>(null);
   const [mainTargetB2dCurve, setMainTargetB2dCurve] = useState<B2dCurveSource | null>(null);
   const [mainTargetB2dCorrCurve, setMainTargetB2dCorrCurve] = useState<B2dCorrCurveSource | null>(null);
+  const [hsWeightSource, setHsWeightSource] = useState<HsWeightSource | null>(null);
   const [mainThdValue, setMainThdValue] = useState(NaN);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -198,7 +284,7 @@ export function ChartMapMode({
   useEffect(() => {
     const next = coerceTab(activeCard);
     if (next) setTab(next);
-  }, [activeCard, setTab]);
+  }, [activeCard, activeCardKey, setTab]);
 
   useEffect(() => {
     if (focusTarget?.label.startsWith("Main_Target_Threshold") || focusTarget?.label.startsWith("MTWV")) {
@@ -217,6 +303,25 @@ export function ChartMapMode({
   );
   const imageCwvValue = useMemo(
     () => readTomlValue(tomlData, MAIN_TARGET_CWV_KEY),
+    [tomlData],
+  );
+  const hsCwvValue = useMemo(
+    () => readTomlValue(tomlData, HS_TARGET_CWV_KEY) ?? imageCwvValue,
+    [imageCwvValue, tomlData],
+  );
+  const hsTargetInputs = useMemo(
+    () => HS_TARGET_INPUTS.map((input) => ({
+      ...input,
+      thd: readTomlValue(tomlData, input.thdKey),
+      y: readTomlValue(tomlData, input.yKey),
+      wet: readTomlValue(tomlData, schema.card?.Normal?.wt?.[input.id] ?? input.wetKey),
+    })),
+    [schema.card, tomlData],
+  );
+  const hsWeightWetValues = useMemo(
+    () => Object.fromEntries(
+      HS_WEIGHT_RESULT_ITEMS.map((item) => [item.id, readTomlValue(tomlData, item.wetKey)]),
+    ) as Record<HsWeightToneId, string | null>,
     [tomlData],
   );
   const imageMidratioValue = useMemo(
@@ -246,6 +351,14 @@ export function ChartMapMode({
   const mainTCardCollapsedIds = useMemo(
     () => sanitiseMainTMetricCollapsed(visual.chart_main_t_card_collapsed),
     [visual.chart_main_t_card_collapsed],
+  );
+  const hsCardOrder = useMemo(
+    () => sanitiseHsMetricOrder(visual.chart_hs_card_order),
+    [visual.chart_hs_card_order],
+  );
+  const hsCardCollapsedIds = useMemo(
+    () => sanitiseHsMetricCollapsed(visual.chart_hs_card_collapsed),
+    [visual.chart_hs_card_collapsed],
   );
   const visibleMainTCardOrder = useMemo(
     () => mainTCardOrder.filter((cardId) =>
@@ -277,6 +390,7 @@ export function ChartMapMode({
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
+      setHsWeightSource(null);
       setMainThdValue(NaN);
       setMessage("请先导入 AE.cpp 参数文件");
       return;
@@ -300,6 +414,7 @@ export function ChartMapMode({
       let midCurve: MidCurveSource | null = null;
       let b2dCurve: B2dCurveSource | null = null;
       let b2dCorrCurve: B2dCorrCurveSource | null = null;
+      let hsWeight: HsWeightSource | null = null;
       if (tab === "MainT") {
         [threshold, midCurve, b2dCurve, b2dCorrCurve, mtwv] = await Promise.all([
           loadMainTargetThreshold(filePath),
@@ -309,6 +424,9 @@ export function ChartMapMode({
           loadMtwvWeightTable(filePath),
         ]);
       }
+      if (tab === "HS") {
+        hsWeight = await loadHsWeightSource(filePath);
+      }
       const hit = await cppResolveCardSource(filePath, spec);
       const fields: FieldEntry[] = [];
       for (const [start, end] of hit.ranges) {
@@ -316,7 +434,7 @@ export function ChartMapMode({
         fields.push(...chunk);
       }
       const excludedPaths = tab === "MainT" ? [...MAIN_TARGET_THRESHOLD_PATHS, MTWV_WEIGHT_TABLE_PATH] : [];
-      const nextSections = buildSections(tab, hit.ranges, dedupeFields(fields), excludedPaths);
+      const nextSections = tab === "MainT" ? [] : buildSections(tab, hit.ranges, dedupeFields(fields), excludedPaths);
       if (!cancelled) {
         setSections(nextSections);
         setMainTargetThreshold(threshold);
@@ -324,7 +442,8 @@ export function ChartMapMode({
         setMainTargetMidCurve(midCurve);
         setMainTargetB2dCurve(b2dCurve);
         setMainTargetB2dCorrCurve(b2dCorrCurve);
-        setMessage(nextSections.length === 0 && !threshold ? "当前源码范围内没有可展示字段" : null);
+        setHsWeightSource(hsWeight);
+        setMessage(nextSections.length === 0 && !threshold && tab !== "HS" ? "当前源码范围内没有可展示字段" : null);
         setLoading(false);
       }
     })().catch((err) => {
@@ -363,6 +482,37 @@ export function ChartMapMode({
     const newIndex = mainTCardOrder.indexOf(String(over.id) as MainTMetricCardId);
     if (oldIndex < 0 || newIndex < 0) return;
     patchVis({ chart_main_t_card_order: arrayMove(mainTCardOrder, oldIndex, newIndex) });
+  };
+
+  const setHsCardExpanded = (cardId: HsMetricCardId, expanded: boolean) => {
+    const collapsed = new Set(hsCardCollapsedIds);
+    if (expanded) {
+      collapsed.delete(cardId);
+    } else {
+      collapsed.add(cardId);
+    }
+    patchVis({ chart_hs_card_collapsed: HS_METRIC_CARD_ORDER.filter((id) => collapsed.has(id)) });
+  };
+
+  const jumpToHsAreaCard = (sourceId: string) => {
+    const targetCardId = HS_TARGET_AREA_CARD_BY_ID[sourceId];
+    if (!targetCardId) return;
+    setHsCardExpanded(targetCardId, true);
+    window.requestAnimationFrame(() => {
+      document.getElementById(hsMetricCardDomId(targetCardId))?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const onHsCardDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = hsCardOrder.indexOf(String(active.id) as HsMetricCardId);
+    const newIndex = hsCardOrder.indexOf(String(over.id) as HsMetricCardId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    patchVis({ chart_hs_card_order: arrayMove(hsCardOrder, oldIndex, newIndex) });
   };
 
   const renderMainTMetricCard = (cardId: MainTMetricCardId) => {
@@ -434,6 +584,59 @@ export function ChartMapMode({
     return null;
   };
 
+  const renderHsMetricCard = (cardId: HsMetricCardId) => {
+    const collapsed = hsCardCollapsedIds.includes(cardId);
+    const sortableWrapper = (children: ReactNode) => (
+      <SortableMetricCard key={cardId} id={cardId} disabled={!collapsed}>
+        {children}
+      </SortableMetricCard>
+    );
+
+    if (cardId === "hsTarget") {
+      return sortableWrapper(
+        <HsTargetCard
+          cwvValue={hsCwvValue}
+          inputs={hsTargetInputs}
+          onAreaJump={jumpToHsAreaCard}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+        />,
+      );
+    }
+    if (cardId === "hsWeight") {
+      return sortableWrapper(
+        <HsWeightCard
+          source={hsWeightSource}
+          bvValue={imageBvValue}
+          b2dValue={b2dValue}
+          midValue={midratioValue}
+          wetValues={hsWeightWetValues}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+        />,
+      );
+    }
+    const areaConfig: Record<Exclude<HsMetricCardId, "hsTarget" | "hsWeight">, { title: string; tone: HsWeightToneId }> = {
+      hsBright: { title: "HS Bright area", tone: "bright" },
+      hsMiddle: { title: "HS Middle area", tone: "middle" },
+      hsDark: { title: "HS Dark area", tone: "dark" },
+    };
+    const config = areaConfig[cardId as keyof typeof areaConfig];
+    if (!config) return null;
+    return sortableWrapper(
+      <HsAreaPlaceholderCard
+        domId={hsMetricCardDomId(cardId)}
+        title={config.title}
+        tone={config.tone}
+        initialExpanded={!collapsed}
+        onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+      />,
+    );
+  };
+
   return (
     <div className="flex h-full w-full flex-col" style={canvasStyle}>
       <style>
@@ -474,16 +677,45 @@ export function ChartMapMode({
             </DndContext>
           )}
 
-          {sections.map((section) => (
-            <fieldset key={section.id} style={fieldsetStyle}>
-              <legend style={legendStyle}>{section.title}</legend>
+          {tab === "HS" && (
+            <DndContext
+              sensors={mainTCardSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onHsCardDragEnd}
+            >
+              <SortableContext items={hsCardOrder} strategy={verticalListSortingStrategy}>
+                {hsCardOrder.map(renderHsMetricCard)}
+              </SortableContext>
+            </DndContext>
+          )}
+
+          {tab !== "HS" && sections.map((section) => (
+            <section key={section.id} style={sourceSectionStyle}>
+              <div style={sourceSectionHeaderStyle}>
+                <span style={sourceSectionTitleStyle}>{section.title}</span>
+                {section.subtitle && <span style={sourceSectionSubtitleStyle}>{section.subtitle}</span>}
+              </div>
               <div className="flex flex-col gap-2">
                 {section.rows.map((row) => (
-                  <div key={row.id} style={rowStyle}>
+                  <button
+                    key={row.id}
+                    type="button"
+                    title={`跳转到源码：${row.path} · L${row.line}`}
+                    aria-label={`跳转到源码：${row.path} · L${row.line}`}
+                    onClick={() => {
+                      if (!onSourceJump || row.line <= 0) return;
+                      onSourceJump(`${section.title}.${row.label}`, {
+                        line_ranges: [[row.line, row.line]],
+                        jump_to: "first",
+                        highlight: "ranges",
+                      });
+                    }}
+                    style={sourceRowButtonStyle(Boolean(onSourceJump && row.line > 0))}
+                  >
                     <div style={labelStyle} title={`${row.path} · L${row.line}`}>
                       {row.label}
                     </div>
-                    <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                    <div className="flex min-w-0 flex-wrap gap-2">
                       {row.values.map((value, idx) => (
                         <span
                           key={`${row.id}:${idx}`}
@@ -494,10 +726,10 @@ export function ChartMapMode({
                         </span>
                       ))}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
-            </fieldset>
+            </section>
           ))}
 
           {!loading && message && (
@@ -541,6 +773,39 @@ async function loadMtwvWeightTable(
   return {
     path,
     rows: buildMtwvRows(path, fields),
+  };
+}
+
+async function loadHsWeightSource(filePath: string): Promise<HsWeightSource> {
+  const [bvFields, drFields, midFields, valueFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, HS_WEIGHT_BV_PATH),
+    loadFieldEntriesAtPath(filePath, HS_WEIGHT_DR_B2D_PATH),
+    loadFieldEntriesAtPath(filePath, HS_WEIGHT_MID_PATH),
+    loadFieldEntriesAtPath(filePath, HS_WEIGHT_VALUE_PATH),
+  ]);
+  const bvAxisFields = numericFieldEntries(bvFields);
+  const midAxisFields = numericFieldEntries(midFields);
+  const bvAxis = bvAxisFields.map((field) => parseFiniteNumber(field.value));
+  const midAxis = midAxisFields.map((field) => parseFiniteNumber(field.value));
+  const bvCount = Math.max(1, bvAxis.length);
+  const midCount = Math.max(1, midAxis.length);
+  const matrix = buildHsWeightValues(valueFields, bvCount, midCount);
+  const drB2d = buildHsDrB2dRows(drFields, matrix.values);
+
+  return {
+    bvPath: HS_WEIGHT_BV_PATH,
+    drB2dPath: HS_WEIGHT_DR_B2D_PATH,
+    midPath: HS_WEIGHT_MID_PATH,
+    matrixPath: HS_WEIGHT_VALUE_PATH,
+    bvAxis,
+    bvAxisFields,
+    drB2dRows: drB2d.rows,
+    drB2dFields: drB2d.fields,
+    midAxis,
+    midAxisFields,
+    values: matrix.values,
+    valueFields: matrix.fields,
+    fields: [...bvFields, ...drFields, ...midFields, ...valueFields].sort(compareFieldEntries),
   };
 }
 
@@ -611,6 +876,26 @@ function sanitiseMainTMetricCollapsed(collapsed: string[] | undefined): MainTMet
     .filter((id): id is MainTMetricCardId => known.has(id as MainTMetricCardId));
 }
 
+function sanitiseHsMetricOrder(order: string[] | undefined): HsMetricCardId[] {
+  const known = new Set<HsMetricCardId>(HS_METRIC_CARD_ORDER);
+  const cleaned = (order ?? [])
+    .filter((id): id is HsMetricCardId => known.has(id as HsMetricCardId));
+  for (const id of HS_METRIC_CARD_ORDER) {
+    if (!cleaned.includes(id)) cleaned.push(id);
+  }
+  return cleaned;
+}
+
+function sanitiseHsMetricCollapsed(collapsed: string[] | undefined): HsMetricCardId[] {
+  const known = new Set<HsMetricCardId>(HS_METRIC_CARD_ORDER);
+  return (collapsed ?? [])
+    .filter((id): id is HsMetricCardId => known.has(id as HsMetricCardId));
+}
+
+function hsMetricCardDomId(cardId: HsMetricCardId): string {
+  return `chart-hs-card-${cardId}`;
+}
+
 function coerceMidChartMode(value: string | undefined): MidChartMode {
   return value === "corr_mid" || value === "b2d_ori" || value === "b2d_corr" ? value : "thd";
 }
@@ -647,6 +932,11 @@ function buildSections(
     !excludePathPrefixes.some((prefix) => isPathUnder(field.path, prefix)),
   );
   if (visibleFields.length === 0) return [];
+  if (tab === "MainT") {
+    const mainTSections = buildGroupedMainTSections(visibleFields);
+    if (mainTSections.length > 0) return mainTSections;
+  }
+
   const sections: ChartSection[] = [];
   for (const [rangeIdx, [start, end]] of ranges.entries()) {
     const inRange = visibleFields.filter((field) => field.line >= start && field.line <= end);
@@ -655,12 +945,52 @@ function buildSections(
     sections.push({
       id: `${tab}:${start}-${end}:${rangeIdx}`,
       title: ranges.length === 1
-        ? `${tab} · L${start}-L${end}`
-        : `${tab} 源码段 ${rangeIdx + 1} · L${start}-L${end}`,
+        ? `${tab} 源码段`
+        : `${tab} 源码段 ${rangeIdx + 1}`,
+      subtitle: `L${start}-L${end}`,
       rows,
     });
   }
   return sections;
+}
+
+function buildGroupedMainTSections(fields: FieldEntry[]): ChartSection[] {
+  const sections: ChartSection[] = [];
+  const consumed = new Set<FieldEntry>();
+
+  for (const group of MAIN_T_SOURCE_GROUPS) {
+    const groupFields = fields.filter((field) =>
+      group.paths.some((prefix) => isPathUnder(field.path, prefix)),
+    );
+    if (groupFields.length === 0) continue;
+    groupFields.forEach((field) => consumed.add(field));
+    const lineRange = fieldLineRange(groupFields);
+    sections.push({
+      id: `MainT:${group.id}`,
+      title: `${group.title}源码段`,
+      subtitle: lineRange,
+      rows: groupRows(groupFields),
+    });
+  }
+
+  const otherFields = fields.filter((field) => !consumed.has(field));
+  if (otherFields.length > 0) {
+    sections.push({
+      id: "MainT:other",
+      title: "MainT 其他源码段",
+      subtitle: fieldLineRange(otherFields),
+      rows: groupRows(otherFields),
+    });
+  }
+  return sections;
+}
+
+function fieldLineRange(fields: FieldEntry[]): string {
+  const lines = fields.map((field) => field.line).filter((line) => line > 0);
+  if (lines.length === 0) return "";
+  const minLine = Math.min(...lines);
+  const maxLine = Math.max(...lines);
+  return minLine === maxLine ? `L${minLine}` : `L${minLine}-L${maxLine}`;
 }
 
 function SortableMetricCard({
@@ -668,7 +998,7 @@ function SortableMetricCard({
   disabled,
   children,
 }: {
-  id: MainTMetricCardId;
+  id: string;
   disabled: boolean;
   children: ReactNode;
 }) {
@@ -858,6 +1188,12 @@ function MainTargetThresholdCard({
   const midFunctionValue = midValueAtCorr(corrDrMidratio, segmentedMidPoints, midValue);
   const effectiveMidValue = Number.isFinite(midFunctionValue) ? midFunctionValue : midValue;
   const targetValue = computeSegmentedThd(corrDrMidratio, baseValue, expValue, thdMaxValue, segmentedMidPoints, midValue);
+  const mainThdValueText = formatThresholdNumber(targetValue);
+  const mainThdLowerText = formatThresholdNumber(baseValue);
+  const mainThdUpperText = formatThresholdNumber(thdMaxValue);
+  const mainThdLowerActive = mainThdLowerText !== "-" && mainThdLowerText === mainThdValueText;
+  const mainThdUpperActive = mainThdUpperText !== "-" && mainThdUpperText === mainThdValueText;
+  const mainThdFormulaPrefix = `Main THD = Base(bv:${formatComputedNumber(bvNumber)}) * 2^(Exp(bv:${formatComputedNumber(bvNumber)})/1000 * Mid(corr_dr_midratio:${formatComputedNumber(corrDrMidratio)})/1024) = ${formatThresholdNumber(baseValue)} * 2^(${formatExponentCoefficient(expValue)} * ${formatMidRatioFactor(effectiveMidValue)}) = [`;
   useEffect(() => {
     onMainThdValueChange?.(targetValue);
   }, [onMainThdValueChange, targetValue]);
@@ -1005,11 +1341,11 @@ function MainTargetThresholdCard({
   return (
     <section style={thresholdCardStyle}>
       <div style={thresholdHeaderStyle}>
-        <div style={thresholdTitleStyle}>Main_Target_Threshold</div>
+        <div style={thresholdTitleStyle}>Main Target Threshold</div>
         <button
           type="button"
-          title={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
-          aria-label={expanded ? "Collapse Main_Target_Threshold" : "Expand Main_Target_Threshold"}
+          title={expanded ? "Collapse Main Target Threshold" : "Expand Main Target Threshold"}
+          aria-label={expanded ? "Collapse Main Target Threshold" : "Expand Main Target Threshold"}
           onClick={() => setExpanded((current) => {
             const next = !current;
             onExpandedChange?.(next);
@@ -1021,8 +1357,14 @@ function MainTargetThresholdCard({
         </button>
       </div>
       <div style={thresholdFormulaStyle}>
-        <span>Main THD = Base(bv) x 2^(exp(bv)/1000 x Mid(corr_dr_midratio)/1024)</span>
-        <strong style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
+        <span>
+          {mainThdFormulaPrefix}
+          <span style={mainThdLowerActive ? thresholdInlineResultStyle : undefined}>{mainThdLowerText}</span>
+          {"~"}
+          <span style={mainThdUpperActive ? thresholdInlineResultStyle : undefined}>{mainThdUpperText}</span>
+          {"] ="}
+        </span>
+        <strong style={thresholdResultStyle}>{mainThdValueText}</strong>
       </div>
       {expanded && <div style={thresholdDualControlStyle}>
         <section ref={bvSectionRef} style={thresholdGroupStyle}>
@@ -1292,6 +1634,11 @@ function MtwvCard({
   const cardRef = useRef<HTMLElement | null>(null);
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
   const maxColumns = Math.max(1, ...editableSource.rows.map((row) => row.values.length));
+  const mtwvMatrix = useMemo(
+    () => buildMtwvMatrix(editableSource.rows, maxColumns),
+    [editableSource.rows, maxColumns],
+  );
+  const mtwvStats = useMemo(() => summariseMtwvMatrix(mtwvMatrix), [mtwvMatrix]);
   const sourceJumpSpec = {
     ...sourceSpec,
     paths: [editableSource.path],
@@ -1382,7 +1729,7 @@ function MtwvCard({
         </button>
       </div>
       <div style={thresholdFormulaStyle}>
-        <span>MTWV =</span>
+        <span>MTWV = sum(Block[i] * Weight[i]) / sum(Weight[i])</span>
         <strong style={thresholdResultStyle}>{mtwvValue ?? "-"}</strong>
       </div>
       {expanded && (
@@ -1410,38 +1757,66 @@ function MtwvCard({
                 />
               </div>
             </div>
+            <div style={mtwvOverviewStyle}>
+              <div style={mtwvFormulaPanelStyle}>
+                <div style={mtwvFormulaTitleStyle}>Weighted average model</div>
+                <div style={mtwvFormulaTextStyle}>
+                  <span style={mtwvFormulaAccentStyle}>MTWV</span>
+                  <span>=</span>
+                  <span>(B1*W1 + B2*W2 + ... + BN*WN)</span>
+                  <span>/</span>
+                  <span>(W1 + W2 + ... + WN)</span>
+                </div>
+                <div style={mtwvFlowStyle} aria-hidden="true">
+                  <div style={mtwvFlowBoxStyle("block")}>Block</div>
+                  <div style={mtwvFlowOperatorStyle}>x</div>
+                  <div style={mtwvFlowBoxStyle("weight")}>Weight</div>
+                  <div style={mtwvFlowOperatorStyle}>/</div>
+                  <div style={mtwvFlowBoxStyle("sum")}>Sum(W)</div>
+                </div>
+              </div>
+              <div style={mtwvStatsGridStyle}>
+                <MtwvStat label="Result" value={mtwvValue ?? "-"} strong />
+                <MtwvStat label="Shape" value={`${mtwvStats.rowCount}x${mtwvStats.columnCount}`} />
+                <MtwvStat label="Sum(W)" value={formatComputedNumber(mtwvStats.sum)} />
+                <MtwvStat label="Center" value={formatComputedNumber(mtwvStats.center)} />
+                <MtwvStat label="Peak" value={formatComputedNumber(mtwvStats.max)} />
+                <MtwvStat label="Avg(W)" value={formatComputedNumber(mtwvStats.average)} />
+              </div>
+            </div>
             <div style={mtwvTableWrapStyle}>
               <div style={mtwvTableSurfaceStyle}>
-                <table style={mtwvTableStyle}>
-                  <thead>
-                    <tr>
-                      <th title={editableSource.path} style={mtwvHeaderCellStyle}>
-                        {editableSource.rows.length}x{maxColumns}
-                      </th>
-                      {Array.from({ length: maxColumns }, (_, index) => (
-                        <th key={index} style={mtwvHeaderCellStyle}>C{index + 1}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {editableSource.rows.map((row, rowIndex) => (
-                      <tr key={row.id}>
-                        <th title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvRowHeaderCellStyle}>
-                          R{rowIndex + 1}
-                        </th>
-                        {Array.from({ length: maxColumns }, (_, cellIndex) => (
-                          <MtwvEditableCell
+                <div style={mtwvHeatmapGridStyle(maxColumns)}>
+                  <div title={editableSource.path} style={mtwvHeatmapCornerStyle}>
+                    {editableSource.rows.length}x{maxColumns}
+                  </div>
+                  {Array.from({ length: maxColumns }, (_, index) => (
+                    <div key={`c:${index}`} style={mtwvHeatmapHeaderStyle}>C{index + 1}</div>
+                  ))}
+                  {editableSource.rows.map((row, rowIndex) => (
+                    <Fragment key={row.id}>
+                      <div title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvHeatmapRowHeaderStyle}>
+                        R{rowIndex + 1}
+                      </div>
+                      {Array.from({ length: maxColumns }, (_, cellIndex) => {
+                        const rawValue = row.values[cellIndex] ?? "";
+                        const numericValue = parseFiniteNumber(rawValue);
+                        const editable = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[cellIndex]);
+                        const intensity = mtwvCellIntensity(numericValue, mtwvStats.min, mtwvStats.max);
+                        return (
+                          <MtwvHeatmapCell
                             key={`${row.id}:${cellIndex}`}
-                            value={row.values[cellIndex] ?? ""}
-                            editable={Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[cellIndex])}
+                            value={rawValue}
+                            intensity={intensity}
+                            editable={editable}
                             title={row.line > 0 ? `${row.path} L${row.line} #${cellIndex}` : row.path}
                             onCommit={(nextValue) => updateWeightCell(row.id, cellIndex, nextValue)}
                           />
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
@@ -1473,60 +1848,32 @@ function MtwvCard({
   );
 }
 
-function MainTargetCard({
-  cwvValue,
-  mainThdValue,
-  mtwvValue,
-  initialExpanded,
-  onExpandedChange,
+function MtwvStat({
+  label,
+  value,
+  strong = false,
 }: {
-  cwvValue: string | null;
-  mainThdValue: number;
-  mtwvValue: string | null;
-  initialExpanded?: boolean;
-  onExpandedChange?: (expanded: boolean) => void;
+  label: string;
+  value: string;
+  strong?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(initialExpanded ?? true);
-  const cwvNumber = parseFiniteNumber(cwvValue);
-  const mtwvNumber = parseFiniteNumber(mtwvValue);
-  const mainTargetValue = Number.isFinite(cwvNumber) && Number.isFinite(mainThdValue) && Number.isFinite(mtwvNumber) && mtwvNumber !== 0
-    ? cwvNumber * (mainThdValue / mtwvNumber)
-    : NaN;
-
   return (
-    <section style={thresholdCardStyle}>
-      <div style={thresholdHeaderStyle}>
-        <div style={thresholdTitleStyle}>Main Target</div>
-        <button
-          type="button"
-          title={expanded ? "Collapse Main Target" : "Expand Main Target"}
-          aria-label={expanded ? "Collapse Main Target" : "Expand Main Target"}
-          onClick={() => setExpanded((current) => {
-            const next = !current;
-            onExpandedChange?.(next);
-            return next;
-          })}
-          style={sourceButtonStyle(true)}
-        >
-          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
-        </button>
-      </div>
-      <div style={thresholdFormulaStyle}>
-        <span>Main Target = CWV * (Main THD / MTWV) =</span>
-        <strong style={thresholdResultStyle}>{formatThresholdNumber(mainTargetValue)}</strong>
-      </div>
-      {expanded && <div style={mainTargetBlankStyle} aria-hidden="true" />}
-    </section>
+    <div style={mtwvStatStyle(strong)}>
+      <span style={mtwvStatLabelStyle}>{label}</span>
+      <strong style={mtwvStatValueStyle(strong)}>{value}</strong>
+    </div>
   );
 }
 
-function MtwvEditableCell({
+function MtwvHeatmapCell({
   value,
+  intensity,
   editable,
   title,
   onCommit,
 }: {
   value: string;
+  intensity: number;
   editable: boolean;
   title: string;
   onCommit: (value: string) => void;
@@ -1550,7 +1897,7 @@ function MtwvEditableCell({
   };
 
   return (
-    <td title={title} style={mtwvValueCellStyle(focused, editable)}>
+    <div title={title} style={mtwvHeatmapCellStyle(intensity, focused, editable)}>
       <input
         aria-label={title}
         value={draftValue}
@@ -1573,9 +1920,624 @@ function MtwvEditableCell({
           }
         }}
         inputMode="decimal"
-        style={mtwvCellInputStyle(editable)}
+        style={mtwvHeatmapInputStyle(editable)}
       />
-    </td>
+    </div>
+  );
+}
+
+function MainTargetCard({
+  cwvValue,
+  mainThdValue,
+  mtwvValue,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  cwvValue: string | null;
+  mainThdValue: number;
+  mtwvValue: string | null;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+  const cwvNumber = parseFiniteNumber(cwvValue);
+  const mtwvNumber = parseFiniteNumber(mtwvValue);
+  const mainTargetValue = Number.isFinite(cwvNumber) && Number.isFinite(mainThdValue) && Number.isFinite(mtwvNumber) && mtwvNumber !== 0
+    ? cwvNumber * (mainThdValue / mtwvNumber)
+    : NaN;
+  const mainTargetFormula = `Main Target = CWV * (Main THD / MTWV) = ${formatThresholdNumber(cwvNumber)} * (${formatThresholdNumber(mainThdValue)} / ${formatThresholdNumber(mtwvNumber)}) =`;
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Main Target</div>
+        <button
+          type="button"
+          title={expanded ? "Collapse Main Target" : "Expand Main Target"}
+          aria-label={expanded ? "Collapse Main Target" : "Expand Main Target"}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <span>{mainTargetFormula}</span>
+        <strong style={thresholdResultStyle}>{formatThresholdNumber(mainTargetValue)}</strong>
+      </div>
+      {expanded && <div style={mainTargetBlankStyle} aria-hidden="true" />}
+    </section>
+  );
+}
+
+function HsTargetCard({
+  cwvValue,
+  inputs,
+  onAreaJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  cwvValue: string | null;
+  inputs: Array<{
+    id: string;
+    label: string;
+    thdKey: string;
+    yKey: string;
+    wetKey: string;
+    thd: string | null;
+    y: string | null;
+    wet: string | null;
+  }>;
+  onAreaJump?: (sourceId: string) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [termOrder, setTermOrder] = useState<string[]>(HS_TARGET_TERM_ORDER);
+  const termSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+  const cwvNumber = parseFiniteNumber(cwvValue);
+  const termsById = new Map(inputs.map((input) => [input.id, input]));
+  const orderedInputs = termOrder
+    .map((id) => termsById.get(id))
+    .filter((input): input is typeof inputs[number] => Boolean(input));
+  for (const input of inputs) {
+    if (!termOrder.includes(input.id)) orderedInputs.push(input);
+  }
+  const terms = orderedInputs.map((input) => {
+    const thd = parseFiniteNumber(input.thd);
+    const y = parseFiniteNumber(input.y);
+    const wet = parseFiniteNumber(input.wet);
+    const target = Number.isFinite(cwvNumber) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0
+      ? cwvNumber * thd / y
+      : NaN;
+    const missing = [
+      Number.isFinite(cwvNumber) ? null : "CWV",
+      Number.isFinite(thd) ? null : `${input.label}_THD`,
+      Number.isFinite(y) ? null : `${input.label}_Y`,
+      Number.isFinite(wet) ? null : `${input.label}_Wet`,
+    ].filter((item): item is string => Boolean(item));
+    const contribution = Number.isFinite(wet) && wet === 0
+      ? 0
+      : Number.isFinite(target) && Number.isFinite(wet)
+        ? target * wet
+        : NaN;
+    return { ...input, thd, y, wet, target, contribution, missing };
+  });
+  const termIds = terms.map((term) => term.id);
+  const wetSum = terms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
+  const weightedSum = terms.reduce((sum, term) =>
+    sum + (Number.isFinite(term.contribution) ? term.contribution : 0), 0);
+  const targetValue = wetSum > 0 ? weightedSum / wetSum : NaN;
+  const formula = "HS Target = ((CWV*BT_THD/BT_Y)*BT_Wet + (CWV*MT_THD/MT_Y)*MT_Wet + (CWV*DT_THD/DT_Y)*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
+  const onTermDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = termOrder.indexOf(String(active.id));
+    const newIndex = termOrder.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    setTermOrder((current) => arrayMove(current, oldIndex, newIndex));
+  };
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Histogram Stretch Target</div>
+        <button
+          type="button"
+          title={expanded ? "Collapse Histogram Stretch Target" : "Expand Histogram Stretch Target"}
+          aria-label={expanded ? "Collapse Histogram Stretch Target" : "Expand Histogram Stretch Target"}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <span>{formula}</span>
+        <strong style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
+      </div>
+      {expanded && <div style={hsTargetBodyStyle}>
+        <DndContext
+          sensors={termSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onTermDragEnd}
+        >
+          <SortableContext items={termIds} strategy={rectSortingStrategy}>
+            <div style={hsTargetTermGridStyle}>
+              {terms.map((term) => {
+                const hasMissing = term.missing.length > 0;
+                const active = Number.isFinite(term.wet) && term.wet > 0;
+                const status = hasMissing ? `缺失 ${term.missing.join("/")}` : active ? "参与加权" : "Wet=0";
+                const jumpLabel = HS_TARGET_AREA_LABEL_BY_ID[term.id] ?? "HS area";
+                return (
+                <SortableHsTargetTermCard key={term.id} id={term.id}>
+                  <div
+                    title={`右键跳转到 ${jumpLabel}，按住左键拖拽调整位置`}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onAreaJump?.(term.id);
+                    }}
+                    style={hsTargetTermCardStyle(hasMissing, active)}
+                  >
+                    <div style={hsTargetTermHeaderStyle}>
+                      <span style={hsTargetTermTitleStyle}>{term.label}</span>
+                      <span style={hsTargetStatusBadgeStyle(hasMissing, active)}>{status}</span>
+                    </div>
+                    <div style={hsTargetTermEquationStyle}>
+                      <span style={hsTargetTermFormulaStyle}>
+                        {formatThresholdNumber(cwvNumber)} * {formatThresholdNumber(term.thd)} / {formatThresholdNumber(term.y)}
+                      </span>
+                      <strong style={hsTargetTermValueStyle}>{formatThresholdNumber(term.target)}</strong>
+                    </div>
+                    <div style={hsTargetMetricRowsStyle}>
+                      <div style={hsTargetMetricRowStyle("thd", !Number.isFinite(term.thd), active)}>
+                        <span>THD</span>
+                        <strong>{formatThresholdNumber(term.thd)}</strong>
+                      </div>
+                      <div style={hsTargetMetricRowStyle("y", !Number.isFinite(term.y), active)}>
+                        <span>Y</span>
+                        <strong>{formatThresholdNumber(term.y)}</strong>
+                      </div>
+                      <div style={hsTargetMetricRowStyle("wet", !Number.isFinite(term.wet), active)}>
+                        <span>Wet</span>
+                        <strong>{formatComputedNumber(term.wet)}</strong>
+                      </div>
+                    </div>
+                    <div style={hsTargetContributionStyle(active)}>
+                      <span>Contribution</span>
+                      <strong>{formatThresholdNumber(term.contribution)}</strong>
+                    </div>
+                  </div>
+                </SortableHsTargetTermCard>
+              );})}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </div>}
+    </section>
+  );
+}
+
+function SortableHsTargetTermCard({
+  id,
+  children,
+}: {
+  id: string;
+  children: ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...hsTargetTermDragWrapStyle(isDragging),
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+}
+
+function HsWeightCard({
+  source,
+  bvValue,
+  b2dValue,
+  midValue,
+  wetValues,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  source: HsWeightSource | null;
+  bvValue: string | null;
+  b2dValue: string | null;
+  midValue: string | null;
+  wetValues: Record<HsWeightToneId, string | null>;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+  const bv = parseFiniteNumber(bvValue);
+  const b2d = parseFiniteNumber(b2dValue);
+  const mid = parseFiniteNumber(midValue);
+  const resultItems = HS_WEIGHT_RESULT_ITEMS.map((item) => {
+    const channelIndex = HS_WEIGHT_CHANNELS.findIndex((channel) => channel.id === item.id);
+    const interpolated = editableSource && channelIndex >= 0
+      ? interpolateHsWeightSource(editableSource, channelIndex, bv, b2d, mid)
+      : NaN;
+    return {
+      ...item,
+      wetText: formatHsWeightWetValue(wetValues[item.id]),
+      interpolatedText: formatHsWeightInterpolatedValue(interpolated),
+    };
+  });
+  const selected = locateHsWeightSelection(editableSource, bv, b2d, mid);
+  const selectedPointText = formatHsSelectedPoint(bv, b2d, mid);
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+
+  const updateWeightCell = (target: HsWeightCellTarget, nextValue: string) => {
+    if (!editableSource) return;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    const field = getHsWeightTargetField(editableSource, target);
+    if (!field) return;
+    const nextText = replaceHsWeightCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
+    if (nextText === null) return;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateHsWeightSourceField(current, field, trimmed) : current);
+  };
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>HS Weight</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            title="Jump to HS Weight source"
+            aria-label="Jump to HS Weight source"
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.("HS.Weight", {
+              paths: [HS_WEIGHT_BV_PATH, HS_WEIGHT_DR_B2D_PATH, HS_WEIGHT_MID_PATH, HS_WEIGHT_VALUE_PATH],
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title={expanded ? "Collapse HS Weight" : "Expand HS Weight"}
+            aria-label={expanded ? "Collapse HS Weight" : "Expand HS Weight"}
+            onClick={() => setExpanded((current) => {
+              const next = !current;
+              onExpandedChange?.(next);
+              return next;
+            })}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <strong style={hsWeightSelectedPointStyle}>{selectedPointText}</strong>
+        <span style={hsWeightFormulaTextStyle}>
+          {"("}
+          {resultItems.map((item, index) => (
+            <Fragment key={item.id}>
+              {index > 0 && <span>, </span>}
+              <span>{item.label}:</span>
+              <span style={hsWeightWetValueStyle}>{item.wetText}</span>
+              <span>|</span>
+              <span style={hsWeightInterpolatedValueStyle}>{item.interpolatedText}</span>
+            </Fragment>
+          ))}
+          {")"}
+        </span>
+      </div>
+      {expanded && <div style={hsWeightBodyStyle}>
+        <div style={hsWeightTableWrapStyle}>
+          <HsWeightGrid
+            source={editableSource}
+            selected={selected}
+            editable={canEdit}
+            onCellCommit={updateWeightCell}
+          />
+        </div>
+      </div>}
+    </section>
+  );
+}
+
+function HsWeightGrid({
+  source,
+  selected,
+  editable,
+  onCellCommit,
+}: {
+  source: HsWeightSource | null;
+  selected: HsWeightSelection;
+  editable: boolean;
+  onCellCommit?: (target: HsWeightCellTarget, value: string) => void;
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const [fit, setFit] = useState({ scale: 1, width: 0, height: 0 });
+  const bvAxis = source?.bvAxis ?? [];
+  const midAxis = source?.midAxis ?? [];
+  const displayMidAxis = midAxis.length > 0 ? midAxis : [NaN];
+  const midColumnCount = displayMidAxis.length;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const sheet = sheetRef.current;
+    if (!viewport || !sheet) return;
+
+    let frame = 0;
+    const update = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const naturalWidth = Math.max(1, sheet.scrollWidth);
+        const naturalHeight = Math.max(1, sheet.scrollHeight);
+        const availableWidth = Math.max(1, viewport.clientWidth);
+        const scale = availableWidth / naturalWidth;
+        setFit({
+          scale,
+          width: naturalWidth * scale,
+          height: naturalHeight * scale,
+        });
+      });
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    observer.observe(sheet);
+    window.addEventListener("resize", update);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [source, midColumnCount]);
+
+  return (
+    <div ref={viewportRef} style={hsWeightScaleViewportStyle}>
+      <div style={hsWeightScaleSlotStyle(fit.width, fit.height)}>
+        <div
+          ref={sheetRef}
+          style={{
+            ...hsWeightSheetStyle(midColumnCount),
+            ...hsWeightScaledSheetStyle(fit.scale),
+          }}
+        >
+          <div style={hsWeightHeaderGridStyle(midColumnCount)}>
+            <div style={hsWeightAxisHeaderStyle("bv")}>BV</div>
+            <div style={hsWeightAxisHeaderStyle("dr")}>DR:B2D</div>
+            <div style={hsWeightMidGroupHeaderStyle(midColumnCount)}>Mid%</div>
+            {displayMidAxis.map((mid, midIndex) => {
+              const field = source?.midAxisFields[midIndex] ?? null;
+              return (
+                <HsWeightEditableCell
+                  key={midIndex}
+                  value={field?.value ?? formatHsWeightCell(mid)}
+                  editable={editable && Boolean(field)}
+                  title={field ? `${source?.midPath} #${midIndex}` : "Mid%"}
+                  style={hsWeightMidHeaderStyle(selected.midIndexes.has(midIndex))}
+                  onCommit={(value) => onCellCommit?.({ kind: "mid", midIndex }, value)}
+                />
+              );
+            })}
+          </div>
+          {bvAxis.map((bv, bvIndex) => {
+            const drAxis = source?.drB2dRows[bvIndex] ?? [];
+            const bvField = source?.bvAxisFields[bvIndex] ?? null;
+            return (
+            <div key={`${bvIndex}:${bv}`} style={hsWeightBvGroupGridStyle(midColumnCount, bvIndex > 0)}>
+              <HsWeightEditableCell
+                value={bvField?.value ?? formatHsWeightCell(bv)}
+                editable={editable && Boolean(bvField)}
+                title={bvField ? `${source?.bvPath} #${bvIndex}` : "BV"}
+                style={hsWeightBvHeaderStyle(selected.bvIndexes.has(bvIndex), drAxis.length)}
+                onCommit={(value) => onCellCommit?.({ kind: "bv", bvIndex }, value)}
+              />
+              <div style={hsWeightB2dColumnStyle}>
+                {drAxis.map((dr, drIndex) => {
+                  const field = source?.drB2dFields[bvIndex]?.[drIndex] ?? null;
+                  return (
+                    <HsWeightEditableCell
+                      key={`${bvIndex}:${drIndex}`}
+                      value={field?.value ?? formatHsWeightCell(dr)}
+                      editable={editable && Boolean(field)}
+                      title={field ? `${source?.drB2dPath} #${bvIndex}:${drIndex}` : "DR:B2D"}
+                      style={hsWeightB2dCellStyle(Boolean(selected.drIndexesByBv.get(bvIndex)?.has(drIndex)))}
+                      onCommit={(value) => onCellCommit?.({ kind: "dr", bvIndex, drIndex }, value)}
+                    />
+                  );
+                })}
+              </div>
+              {displayMidAxis.map((_, midIndex) => (
+                <div key={`${bvIndex}:${midIndex}`} style={hsWeightMiniTableWrapStyle(selected.bvIndexes.has(bvIndex) && selected.midIndexes.has(midIndex))}>
+                  <div style={hsWeightMiniTableStyle}>
+                    {drAxis.map((_, drIndex) => (
+                      <Fragment key={`${bvIndex}:${midIndex}:${drIndex}`}>
+                        {HS_WEIGHT_CHANNELS.map((channel, channelIndex) => {
+                          const value = source ? getHsWeightCell(source, bvIndex, drIndex, midIndex, channelIndex) : NaN;
+                          const field = source?.valueFields[bvIndex]?.[drIndex]?.[midIndex]?.[channelIndex] ?? null;
+                          const selectedCell = selected.bvIndexes.has(bvIndex)
+                            && Boolean(selected.drIndexesByBv.get(bvIndex)?.has(drIndex))
+                            && selected.midIndexes.has(midIndex);
+                          return (
+                            <HsWeightEditableCell
+                              key={channel.id}
+                              value={field?.value ?? formatHsWeightCell(value)}
+                              editable={editable && Boolean(field)}
+                              title={field ? `${source?.matrixPath} #${bvIndex}:${drIndex}:${midIndex}:${channelIndex}` : channel.id}
+                              style={hsWeightMiniCellStyle(channel.id, selectedCell)}
+                              onCommit={(nextValue) => onCellCommit?.({
+                                kind: "value",
+                                bvIndex,
+                                drIndex,
+                                midIndex,
+                                channelIndex,
+                              }, nextValue)}
+                            />
+                          );
+                        })}
+                        {drIndex < drAxis.length - 1 && <div style={hsWeightMiniRowDividerStyle} />}
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );})}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HsWeightEditableCell({
+  value,
+  editable,
+  title,
+  style,
+  onCommit,
+}: {
+  value: string;
+  editable: boolean;
+  title: string;
+  style: CSSProperties;
+  onCommit?: (value: string) => void;
+}) {
+  const [draftValue, setDraftValue] = useState(value);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  const resetDraft = () => {
+    setDraftValue(value);
+  };
+
+  const commitDraft = () => {
+    if (!editable) return;
+    const nextValue = draftValue.trim();
+    if (nextValue === value.trim()) return;
+    onCommit?.(nextValue);
+  };
+
+  return (
+    <div title={title} style={style}>
+      <input
+        aria-label={title}
+        value={draftValue}
+        readOnly={!editable}
+        tabIndex={editable ? 0 : -1}
+        onBlur={resetDraft}
+        onChange={(event) => setDraftValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            resetDraft();
+            event.currentTarget.blur();
+          }
+        }}
+        inputMode="decimal"
+        style={hsWeightCellInputStyle(editable)}
+      />
+    </div>
+  );
+}
+
+function HsAreaPlaceholderCard({
+  domId,
+  title,
+  tone,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  domId?: string;
+  title: string;
+  tone: HsWeightToneId;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+  return (
+    <section id={domId} style={hsAreaPlaceholderStyle(tone)}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>{title}</div>
+        <button
+          type="button"
+          title={expanded ? `Collapse ${title}` : `Expand ${title}`}
+          aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      {expanded && <div style={hsAreaPlaceholderBodyStyle}>
+        <span>Data source pending</span>
+      </div>}
+    </section>
   );
 }
 
@@ -2523,6 +3485,341 @@ function buildMtwvRows(path: string, fields: FieldEntry[]): MtwvTableRow[] {
     : [{ id: `${path}:empty`, line: 0, path, values: ["-"], fields: [] }];
 }
 
+function buildMtwvMatrix(rows: MtwvTableRow[], maxColumns: number): number[][] {
+  return rows.map((row) =>
+    Array.from({ length: maxColumns }, (_, cellIndex) => parseFiniteNumber(row.values[cellIndex])),
+  );
+}
+
+function summariseMtwvMatrix(matrix: number[][]): {
+  rowCount: number;
+  columnCount: number;
+  sum: number;
+  min: number;
+  max: number;
+  average: number;
+  center: number;
+} {
+  const rowCount = matrix.length;
+  const columnCount = Math.max(0, ...matrix.map((row) => row.length));
+  const values = matrix.flat().filter(Number.isFinite);
+  const sum = values.reduce((total, value) => total + value, 0);
+  const min = values.length > 0 ? Math.min(...values) : NaN;
+  const max = values.length > 0 ? Math.max(...values) : NaN;
+  const average = values.length > 0 ? sum / values.length : NaN;
+  const center = matrix[Math.floor(rowCount / 2)]?.[Math.floor(columnCount / 2)] ?? NaN;
+  return { rowCount, columnCount, sum, min, max, average, center };
+}
+
+function mtwvCellIntensity(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) return 0;
+  if (max <= min) return 0.72;
+  return clamp((value - min) / (max - min), 0, 1);
+}
+
+interface HsWeightSelection {
+  bvIndexes: Set<number>;
+  drIndexesByBv: Map<number, Set<number>>;
+  midIndexes: Set<number>;
+}
+
+function numericFieldEntries(fields: FieldEntry[]): FieldEntry[] {
+  return fields
+    .slice()
+    .sort(compareFieldEntries)
+    .filter((field) => Number.isFinite(parseFiniteNumber(field.value)));
+}
+
+function buildHsWeightValues(
+  valueFields: FieldEntry[],
+  bvCount: number,
+  midCount: number,
+): {
+  values: number[][][][];
+  fields: Array<Array<Array<Array<FieldEntry | null>>>>;
+} {
+  const channelCount = HS_WEIGHT_CHANNELS.length;
+  const structured: Array<{
+    bvIndex: number;
+    drIndex: number;
+    midIndex: number;
+    channelIndex: number;
+    value: number;
+    field: FieldEntry;
+  }> = [];
+  let maxBvIndex = -1;
+  let maxDrIndex = -1;
+  let maxMidIndex = -1;
+
+  for (const field of valueFields) {
+    const indexes = childIndexesAfterPrefix(field.path, HS_WEIGHT_VALUE_PATH);
+    const channelIndex = directValueIndex(field.path);
+    const value = parseFiniteNumber(field.value);
+    if (indexes.length < 3 || channelIndex < 0 || channelIndex >= channelCount || !Number.isFinite(value)) continue;
+    const [bvIndex, drIndex, midIndex] = indexes;
+    structured.push({ bvIndex, drIndex, midIndex, channelIndex, value, field });
+    maxBvIndex = Math.max(maxBvIndex, bvIndex);
+    maxDrIndex = Math.max(maxDrIndex, drIndex);
+    maxMidIndex = Math.max(maxMidIndex, midIndex);
+  }
+
+  if (structured.length > 0) {
+    const resolvedBvCount = Math.max(bvCount, maxBvIndex + 1);
+    const resolvedMidCount = Math.max(midCount, maxMidIndex + 1);
+    const drCounts = Array.from({ length: resolvedBvCount }, () => 0);
+    for (const item of structured) {
+      drCounts[item.bvIndex] = Math.max(drCounts[item.bvIndex] ?? 0, item.drIndex + 1);
+    }
+    const fallbackDrCount = Math.max(1, maxDrIndex + 1);
+    const values = Array.from({ length: resolvedBvCount }, (_, bvIndex) =>
+      Array.from({ length: Math.max(1, drCounts[bvIndex] || fallbackDrCount) }, () =>
+        Array.from({ length: resolvedMidCount }, () =>
+          Array.from({ length: channelCount }, () => NaN),
+        ),
+      ),
+    );
+    const fields: Array<Array<Array<Array<FieldEntry | null>>>> = Array.from({ length: resolvedBvCount }, (_, bvIndex) =>
+      Array.from({ length: Math.max(1, drCounts[bvIndex] || fallbackDrCount) }, () =>
+        Array.from({ length: resolvedMidCount }, () =>
+          Array.from({ length: channelCount }, (): FieldEntry | null => null),
+        ),
+      ),
+    );
+    for (const item of structured) {
+      values[item.bvIndex][item.drIndex][item.midIndex][item.channelIndex] = item.value;
+      fields[item.bvIndex][item.drIndex][item.midIndex][item.channelIndex] = item.field;
+    }
+    return { values, fields };
+  }
+
+  const valueEntries = numericFieldEntries(valueFields);
+  const valueFlat = valueEntries.map((field) => parseFiniteNumber(field.value));
+  const drPerBv = Math.max(1, Math.floor(valueFlat.length / Math.max(1, bvCount * midCount * channelCount)));
+  const values = Array.from({ length: bvCount }, (_, bvIndex) =>
+    Array.from({ length: drPerBv }, (_, drIndex) =>
+      Array.from({ length: midCount }, (_, midIndex) => {
+        const base = ((bvIndex * drPerBv + drIndex) * midCount + midIndex) * channelCount;
+        return Array.from({ length: channelCount }, (_, channelIndex) => valueFlat[base + channelIndex] ?? NaN);
+      }),
+    ),
+  );
+  const fields: Array<Array<Array<Array<FieldEntry | null>>>> = Array.from({ length: bvCount }, (_, bvIndex) =>
+    Array.from({ length: drPerBv }, (_, drIndex) =>
+      Array.from({ length: midCount }, (_, midIndex) => {
+        const base = ((bvIndex * drPerBv + drIndex) * midCount + midIndex) * channelCount;
+        return Array.from({ length: channelCount }, (_, channelIndex): FieldEntry | null =>
+          valueEntries[base + channelIndex] ?? null,
+        );
+      }),
+    ),
+  );
+  return { values, fields };
+}
+
+function buildHsDrB2dRows(
+  drFields: FieldEntry[],
+  values: number[][][][],
+): {
+  rows: number[][];
+  fields: Array<Array<FieldEntry | null>>;
+} {
+  const bvCount = values.length;
+  const rowCounts = values.map((bvRows) => Math.max(1, bvRows.length));
+  const maxRowCount = Math.max(1, ...rowCounts);
+  const flatEntries = numericFieldEntries(drFields);
+  const flat = flatEntries.map((field) => parseFiniteNumber(field.value));
+  const grouped = new Map<number, FieldEntry[]>();
+
+  for (const field of drFields) {
+    const indexes = childIndexesAfterPrefix(field.path, HS_WEIGHT_DR_B2D_PATH);
+    if (indexes.length === 0) continue;
+    const groupIndex = indexes[0];
+    if (!grouped.has(groupIndex)) grouped.set(groupIndex, []);
+    grouped.get(groupIndex)?.push(field);
+  }
+
+  if (grouped.size >= bvCount) {
+    const entriesByRow = Array.from({ length: bvCount }, (_, bvIndex) => numericFieldEntries(grouped.get(bvIndex) ?? []));
+    return {
+      rows: entriesByRow.map((entries, bvIndex) =>
+        padHsNumericRow(entries.map((field) => parseFiniteNumber(field.value)), rowCounts[bvIndex]),
+      ),
+      fields: entriesByRow.map((entries, bvIndex) => padHsFieldRow(entries, rowCounts[bvIndex])),
+    };
+  }
+
+  if (grouped.size === 1 && bvCount > 1) {
+    const commonEntries = numericFieldEntries(Array.from(grouped.values())[0] ?? []);
+    const common = commonEntries.map((field) => parseFiniteNumber(field.value));
+    if (common.length >= maxRowCount) {
+      return {
+        rows: rowCounts.map((rowCount) => common.slice(0, rowCount)),
+        fields: rowCounts.map((rowCount) => commonEntries.slice(0, rowCount)),
+      };
+    }
+  }
+
+  const totalRows = rowCounts.reduce((sum, count) => sum + count, 0);
+  if (flat.length >= totalRows) {
+    let offset = 0;
+    const rows = rowCounts.map((rowCount) => {
+      const row = flat.slice(offset, offset + rowCount);
+      offset += rowCount;
+      return row;
+    });
+    offset = 0;
+    const fields = rowCounts.map((rowCount) => {
+      const row = flatEntries.slice(offset, offset + rowCount);
+      offset += rowCount;
+      return row;
+    });
+    return { rows, fields };
+  }
+
+  if (flat.length >= maxRowCount) {
+    return {
+      rows: rowCounts.map((rowCount) => flat.slice(0, rowCount)),
+      fields: rowCounts.map((rowCount) => flatEntries.slice(0, rowCount)),
+    };
+  }
+
+  return {
+    rows: rowCounts.map((rowCount, bvIndex) => padHsNumericRow(flat.slice(bvIndex, bvIndex + 1), rowCount)),
+    fields: rowCounts.map((rowCount, bvIndex) => padHsFieldRow(flatEntries.slice(bvIndex, bvIndex + 1), rowCount)),
+  };
+}
+
+function padHsNumericRow(row: number[], targetLength: number): number[] {
+  return Array.from({ length: Math.max(1, targetLength) }, (_, index) => row[index] ?? NaN);
+}
+
+function padHsFieldRow(row: FieldEntry[], targetLength: number): Array<FieldEntry | null> {
+  return Array.from({ length: Math.max(1, targetLength) }, (_, index) => row[index] ?? null);
+}
+
+function childIndexesAfterPrefix(path: string, prefix: string): number[] {
+  if (!isPathUnder(path, prefix)) return [];
+  const indexes: number[] = [];
+  const tail = path.slice(prefix.length);
+  for (const match of tail.matchAll(/\[(\d+)\]/g)) {
+    indexes.push(Number.parseInt(match[1], 10));
+  }
+  return indexes.filter(Number.isFinite);
+}
+
+function directValueIndex(path: string): number {
+  const match = path.match(/\.(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : -1;
+}
+
+function compareFieldEntries(a: FieldEntry, b: FieldEntry): number {
+  const aIndexes = numericPathOrder(a.path);
+  const bIndexes = numericPathOrder(b.path);
+  const count = Math.max(aIndexes.length, bIndexes.length);
+  for (let i = 0; i < count; i += 1) {
+    const diff = (aIndexes[i] ?? -1) - (bIndexes[i] ?? -1);
+    if (diff !== 0) return diff;
+  }
+  return a.line - b.line || a.index - b.index || a.path.localeCompare(b.path);
+}
+
+function numericPathOrder(path: string): number[] {
+  const order: number[] = [];
+  for (const match of path.matchAll(/\[(\d+)\]|\.(\d+)/g)) {
+    order.push(Number.parseInt(match[1] ?? match[2], 10));
+  }
+  return order.filter(Number.isFinite);
+}
+
+function getHsWeightCell(source: HsWeightSource, bvIndex: number, drIndex: number, midIndex: number, channelIndex: number): number {
+  return source.values[bvIndex]?.[drIndex]?.[midIndex]?.[channelIndex] ?? NaN;
+}
+
+function interpolateHsWeightSource(source: HsWeightSource, channelIndex: number, bv: number, drB2d: number, mid: number): number {
+  if (!Number.isFinite(bv) || !Number.isFinite(drB2d) || !Number.isFinite(mid)) return NaN;
+  const bvBounds = boundsForAxis(bv, source.bvAxis);
+  const midBounds = boundsForAxis(mid, source.midAxis);
+  let total = 0;
+  let weightTotal = 0;
+
+  for (const bvPoint of bvBounds.points) {
+    const drAxis = source.drB2dRows[bvPoint.index] ?? [];
+    const drBounds = boundsForAxis(drB2d, drAxis);
+    for (const drPoint of drBounds.points) {
+      for (const midPoint of midBounds.points) {
+        const value = getHsWeightCell(source, bvPoint.index, drPoint.index, midPoint.index, channelIndex);
+        if (!Number.isFinite(value)) continue;
+        const weight = bvPoint.weight * drPoint.weight * midPoint.weight;
+        total += value * weight;
+        weightTotal += weight;
+      }
+    }
+  }
+
+  return weightTotal > 0 ? total / weightTotal : NaN;
+}
+
+function locateHsWeightSelection(source: HsWeightSource | null, bv: number, drB2d: number, mid: number): HsWeightSelection {
+  if (!source) return { bvIndexes: new Set(), drIndexesByBv: new Map(), midIndexes: new Set() };
+  const bvBounds = boundsForAxis(bv, source.bvAxis);
+  const midBounds = boundsForAxis(mid, source.midAxis);
+  const drIndexesByBv = new Map<number, Set<number>>();
+  for (const bvPoint of bvBounds.points) {
+    drIndexesByBv.set(
+      bvPoint.index,
+      new Set(boundsForAxis(drB2d, source.drB2dRows[bvPoint.index] ?? []).points.map((point) => point.index)),
+    );
+  }
+  return {
+    bvIndexes: new Set(bvBounds.points.map((point) => point.index)),
+    drIndexesByBv,
+    midIndexes: new Set(midBounds.points.map((point) => point.index)),
+  };
+}
+
+function boundsForAxis(value: number, axis: readonly number[]): { points: Array<{ index: number; value: number; weight: number }> } {
+  if (axis.length === 0) return { points: [] };
+  if (!Number.isFinite(value) || axis.length === 1 || value <= axis[0]) {
+    return { points: [{ index: 0, value: axis[0], weight: 1 }] };
+  }
+  const last = axis[axis.length - 1];
+  if (value >= last) return { points: [{ index: axis.length - 1, value: last, weight: 1 }] };
+  for (let i = 1; i < axis.length; i += 1) {
+    const left = axis[i - 1];
+    const right = axis[i];
+    if (value <= right) {
+      if (right === left) return { points: [{ index: i - 1, value: left, weight: 1 }] };
+      const rightWeight = (value - left) / (right - left);
+      const leftWeight = 1 - rightWeight;
+      return {
+        points: [
+          { index: i - 1, value: left, weight: leftWeight },
+          { index: i, value: right, weight: rightWeight },
+        ],
+      };
+    }
+  }
+  return { points: [{ index: axis.length - 1, value: last, weight: 1 }] };
+}
+
+function formatHsSelectedPoint(bv: number, b2d: number, mid: number): string {
+  return `BV ${formatComputedNumber(bv)} / B2D ${formatComputedNumber(b2d)} / Mid ${formatComputedNumber(mid)}`;
+}
+
+function formatHsWeightCell(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatHsWeightInterpolatedValue(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : "-";
+}
+
+function formatHsWeightWetValue(value: string | null): string {
+  const parsed = parseFiniteNumber(value);
+  return Number.isFinite(parsed) ? formatComputedNumber(parsed) : "-";
+}
+
 function cleanLabel(comment: string): string {
   return comment
     .replace(/^[/\s*]+/, "")
@@ -2541,9 +3838,17 @@ function isPathUnder(path: string, prefix: string): boolean {
 
 function readTomlValue(tomlData: Record<string, string>, key: string | undefined): string | null {
   if (!key) return null;
-  const value = tomlData[key];
+  const value = tomlData[key] ?? tomlData[key.toLowerCase()] ?? findCaseInsensitiveTomlValue(tomlData, key);
   if (value === undefined || value === null || value === "") return null;
   return Number.isFinite(parseFiniteNumber(value)) ? String(value).trim() : null;
+}
+
+function findCaseInsensitiveTomlValue(tomlData: Record<string, string>, key: string): string | undefined {
+  const lowerKey = key.toLowerCase();
+  for (const [candidate, value] of Object.entries(tomlData)) {
+    if (candidate.toLowerCase() === lowerKey) return value;
+  }
+  return undefined;
 }
 
 function firstNumericString(values: string[] | undefined): string | null {
@@ -2759,6 +4064,75 @@ function updateMtwvRowsCell(
   });
 }
 
+function getHsWeightTargetField(source: HsWeightSource, target: HsWeightCellTarget): FieldEntry | null {
+  if (target.kind === "bv") return source.bvAxisFields[target.bvIndex] ?? null;
+  if (target.kind === "dr") return source.drB2dFields[target.bvIndex]?.[target.drIndex] ?? null;
+  if (target.kind === "mid") return source.midAxisFields[target.midIndex] ?? null;
+  return source.valueFields[target.bvIndex]?.[target.drIndex]?.[target.midIndex]?.[target.channelIndex] ?? null;
+}
+
+function updateHsWeightSourceField(source: HsWeightSource, field: FieldEntry, value: string): HsWeightSource {
+  const numericValue = parseFiniteNumber(value);
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  const updateValue = (candidate: number, candidateField: FieldEntry | null): number =>
+    candidateField && sameFieldEntry(candidateField, field) && Number.isFinite(numericValue) ? numericValue : candidate;
+
+  return {
+    ...source,
+    bvAxis: source.bvAxis.map((item, index) => updateValue(item, source.bvAxisFields[index] ?? null)),
+    bvAxisFields: source.bvAxisFields.map(updateField),
+    drB2dRows: source.drB2dRows.map((row, bvIndex) =>
+      row.map((item, drIndex) => updateValue(item, source.drB2dFields[bvIndex]?.[drIndex] ?? null)),
+    ),
+    drB2dFields: source.drB2dFields.map((row) => row.map(updateField)),
+    midAxis: source.midAxis.map((item, index) => updateValue(item, source.midAxisFields[index] ?? null)),
+    midAxisFields: source.midAxisFields.map(updateField),
+    values: source.values.map((bvRows, bvIndex) =>
+      bvRows.map((drRows, drIndex) =>
+        drRows.map((midRows, midIndex) =>
+          midRows.map((item, channelIndex) =>
+            updateValue(item, source.valueFields[bvIndex]?.[drIndex]?.[midIndex]?.[channelIndex] ?? null),
+          ),
+        ),
+      ),
+    ),
+    valueFields: source.valueFields.map((bvRows) =>
+      bvRows.map((drRows) =>
+        drRows.map((midRows) => midRows.map(updateField)),
+      ),
+    ),
+    fields: source.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
+function replaceHsWeightCellInSourceText(
+  sourceText: string,
+  source: HsWeightSource,
+  field: FieldEntry,
+  nextValue: string,
+): string | null {
+  if (!sourceText) return null;
+  const lines = sourceText.split("\n");
+  const lineIndex = field.line - 1;
+  const line = lines[lineIndex];
+  if (line === undefined) return null;
+
+  const fieldsOnLine = source.fields
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.line === field.line)
+    .sort((a, b) => a.item.index - b.item.index || a.item.path.localeCompare(b.item.path) || a.index - b.index);
+  const ordinalOnLine = fieldsOnLine.findIndex(({ item }) => sameFieldEntry(item, field));
+  const replaced = replaceNumericTokenInLine(line, ordinalOnLine, field.value, nextValue);
+  if (replaced === null || replaced === line) return null;
+  lines[lineIndex] = replaced;
+  return lines.join("\n");
+}
+
+function sameFieldEntry(left: FieldEntry | null | undefined, right: FieldEntry | null | undefined): boolean {
+  return Boolean(left && right && left.path === right.path && left.line === right.line && left.index === right.index);
+}
+
 function replaceThresholdCellInSourceText(
   sourceText: string,
   row: MainTargetThresholdRow,
@@ -2881,6 +4255,14 @@ function formatComputedNumber(value: number): string {
 
 function formatThresholdNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "-";
+}
+
+function formatExponentCoefficient(value: number): string {
+  return Number.isFinite(value) ? (value / 1000).toFixed(3).replace(/\.?0+$/, "") : "-";
+}
+
+function formatMidRatioFactor(value: number): string {
+  return Number.isFinite(value) ? (value / 1024).toFixed(2) : "-";
 }
 
 function formatInputNumber(value: number): string {
@@ -3012,7 +4394,7 @@ const thresholdTitleStyle: CSSProperties = {
 
 const thresholdFormulaStyle: CSSProperties = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-end",
   justifyContent: "space-between",
   flexWrap: "wrap",
   gap: 12,
@@ -3040,11 +4422,563 @@ const mtwvControlWrapStyle: CSSProperties = {
   padding: 12,
 };
 
+const mtwvOverviewStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(300px, 1.15fr) minmax(260px, 0.85fr)",
+  gap: 10,
+  minWidth: 0,
+  padding: 10,
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const mtwvFormulaPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  minWidth: 0,
+  padding: 12,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground2)",
+};
+
+const mtwvFormulaTitleStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const mtwvFormulaTextStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 6,
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 12,
+  lineHeight: "18px",
+};
+
+const mtwvFormulaAccentStyle: CSSProperties = {
+  color: "var(--colorBrandForeground1)",
+  fontWeight: 900,
+};
+
+const mtwvFlowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
+  minWidth: 0,
+};
+
+function mtwvFlowBoxStyle(kind: "block" | "weight" | "sum"): CSSProperties {
+  const tone = kind === "block"
+    ? "var(--colorPaletteBlueBackground2)"
+    : kind === "weight"
+      ? "color-mix(in srgb, #f59e0b 24%, var(--colorNeutralBackground1))"
+      : "var(--colorNeutralBackground1)";
+  return {
+    minWidth: 82,
+    padding: "8px 10px",
+    border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 76%, transparent)",
+    borderRadius: 8,
+    background: tone,
+    color: "var(--colorNeutralForeground1)",
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: 800,
+  };
+}
+
+const mtwvFlowOperatorStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 18,
+  fontWeight: 900,
+  lineHeight: 1,
+};
+
+const mtwvStatsGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 8,
+  minWidth: 0,
+};
+
+function mtwvStatStyle(strong: boolean): CSSProperties {
+  return {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    minWidth: 0,
+    minHeight: 58,
+    padding: "8px 10px",
+    border: strong
+      ? "1px solid color-mix(in srgb, var(--colorBrandForeground1) 45%, var(--colorNeutralStroke2))"
+      : "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+    borderRadius: 8,
+    background: strong
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 34%, var(--colorNeutralBackground1))"
+      : "var(--colorNeutralBackground2)",
+  };
+}
+
+const mtwvStatLabelStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+function mtwvStatValueStyle(strong: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: strong ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: strong ? 17 : 13,
+    fontWeight: 900,
+  };
+}
+
 const mainTargetBlankStyle: CSSProperties = {
   minHeight: 96,
   borderTop: "1px solid var(--colorNeutralStroke2)",
   background: "var(--colorNeutralBackground1)",
 };
+
+const hsTargetBodyStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 12,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const hsTargetTermGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(190px, 1fr))",
+  gap: 10,
+  minWidth: 0,
+};
+
+function hsTargetTermDragWrapStyle(dragging: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    opacity: dragging ? 0.62 : 1,
+    cursor: dragging ? "grabbing" : "grab",
+    touchAction: "none",
+    userSelect: "none",
+    transition: "opacity 120ms ease, transform 120ms ease",
+  };
+}
+
+function hsTargetTermCardStyle(hasMissing: boolean, active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minWidth: 0,
+    padding: 12,
+    border: `1px solid ${hasMissing ? "var(--colorPaletteRedBorder2)" : active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)"}`,
+    borderRadius: 8,
+    background: hasMissing
+      ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 42%, var(--colorNeutralBackground1))"
+      : active
+        ? "color-mix(in srgb, var(--colorBrandBackground2) 22%, var(--colorNeutralBackground1))"
+        : "color-mix(in srgb, var(--colorNeutralForeground1) 9%, var(--colorNeutralBackground2))",
+    boxShadow: active
+      ? "0 1px 2px color-mix(in srgb, var(--colorBrandForeground1) 14%, transparent)"
+      : "inset 0 0 0 1px color-mix(in srgb, var(--colorNeutralForeground1) 5%, transparent)",
+    transition: "border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease",
+  };
+}
+
+const hsTargetTermHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minWidth: 0,
+};
+
+const hsTargetTermTitleStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+function hsTargetStatusBadgeStyle(hasMissing: boolean, active: boolean): CSSProperties {
+  return {
+    flex: "0 0 auto",
+    maxWidth: "62%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    padding: "2px 7px",
+    border: `1px solid ${hasMissing ? "var(--colorPaletteRedBorder2)" : active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)"}`,
+    borderRadius: 999,
+    background: hasMissing
+      ? "var(--colorPaletteRedBackground2)"
+      : active
+        ? "var(--colorBrandBackground2)"
+        : "var(--colorNeutralBackground1)",
+    color: hasMissing
+      ? "var(--colorPaletteRedForeground1)"
+      : active
+        ? "var(--colorBrandForeground1)"
+        : "var(--colorNeutralForeground2)",
+    fontSize: 10,
+    fontWeight: 900,
+  };
+}
+
+const hsTargetTermEquationStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) max-content",
+  alignItems: "baseline",
+  gap: 10,
+  minWidth: 0,
+};
+
+const hsTargetTermFormulaStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground3)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const hsTargetTermValueStyle: CSSProperties = {
+  color: "var(--colorBrandForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 18,
+  fontWeight: 900,
+};
+
+const hsTargetMetricRowsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 6,
+  minWidth: 0,
+};
+
+function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, active: boolean): CSSProperties {
+  const background = missing
+    ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 72%, var(--colorNeutralBackground1))"
+    : kind === "thd"
+      ? `color-mix(in srgb, #dff3ff ${active ? 78 : 62}%, var(--colorNeutralBackground1))`
+      : kind === "y"
+        ? `color-mix(in srgb, #e2f6d3 ${active ? 78 : 62}%, var(--colorNeutralBackground1))`
+        : `color-mix(in srgb, #fff4ce ${active ? 82 : 66}%, var(--colorNeutralBackground1))`;
+  const border = missing
+    ? "var(--colorPaletteRedBorder2)"
+    : kind === "thd"
+      ? "color-mix(in srgb, #1888d8 46%, var(--colorNeutralStroke2))"
+      : kind === "y"
+        ? "color-mix(in srgb, #66a83f 46%, var(--colorNeutralStroke2))"
+        : "color-mix(in srgb, #f59e0b 52%, var(--colorNeutralStroke2))";
+  const valueColor = missing
+    ? "var(--colorPaletteRedForeground1)"
+    : kind === "thd"
+      ? "var(--colorPaletteBlueForeground2)"
+      : kind === "y"
+        ? "var(--normal-sheet-palegreen-fg)"
+        : "color-mix(in srgb, #8a5a00 82%, var(--colorNeutralForeground1))";
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+    minWidth: 0,
+    padding: "6px 8px",
+    border: `1px solid ${border}`,
+    borderRadius: 6,
+    background,
+    boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralBackground1) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.62)",
+    color: valueColor,
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 11,
+    fontWeight: 800,
+  };
+}
+
+function hsTargetContributionStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    minWidth: 0,
+    paddingTop: 2,
+    color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 12,
+    fontWeight: 900,
+  };
+}
+
+const hsWeightBodyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const hsWeightTableWrapStyle: CSSProperties = {
+  overflow: "hidden",
+  padding: 16,
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const hsWeightScaleViewportStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  overflow: "auto",
+};
+
+function hsWeightScaleSlotStyle(width: number, height: number): CSSProperties {
+  return {
+    position: "relative",
+    width: width > 0 ? width : "max-content",
+    height: height > 0 ? height : 1,
+    minWidth: 0,
+  };
+}
+
+function hsWeightScaledSheetStyle(scale: number): CSSProperties {
+  return {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    transform: `scale(${scale})`,
+    transformOrigin: "top left",
+  };
+}
+
+function hsWeightCellInputStyle(editable: boolean): CSSProperties {
+  return {
+    width: "100%",
+    minWidth: 0,
+    height: "100%",
+    border: "none",
+    outline: "none",
+    padding: "0 2px",
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: "inherit",
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
+  };
+}
+
+function hsWeightSheetStyle(midCount: number): CSSProperties {
+  const count = Math.max(1, midCount);
+  const bvWidth = 42;
+  const drWidth = 52;
+  const midWidth = 144;
+  return {
+    width: "max-content",
+    minWidth: bvWidth + drWidth + count * midWidth,
+    background: "var(--colorNeutralBackground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 10,
+    lineHeight: 1.15,
+  };
+}
+
+function hsWeightHeaderGridStyle(midCount: number): CSSProperties {
+  const count = Math.max(1, midCount);
+  return {
+    display: "grid",
+    gridTemplateColumns: `42px 52px repeat(${count}, 144px)`,
+    alignItems: "stretch",
+  };
+}
+
+function hsWeightAxisHeaderStyle(kind: "bv" | "dr"): CSSProperties {
+  return {
+    display: "flex",
+    gridRow: "span 2",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+    borderRight: "1px solid var(--colorNeutralStroke2)",
+    borderBottom: "1px solid var(--colorNeutralStroke2)",
+    background: kind === "bv" ? "var(--normal-sheet-palegreen-bg)" : "var(--colorPalettePinkBackground2)",
+    color: kind === "bv" ? "var(--normal-sheet-palegreen-fg)" : "var(--colorPaletteRedForeground1)",
+    fontWeight: 900,
+  };
+}
+
+function hsWeightMidGroupHeaderStyle(midCount: number): CSSProperties {
+  return {
+    display: "flex",
+    gridColumn: `span ${Math.max(1, midCount)}`,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 20,
+    borderRight: "1px solid var(--colorNeutralStroke2)",
+    borderBottom: "1px solid var(--colorNeutralStroke2)",
+    background: "color-mix(in srgb, var(--colorPaletteBlueBackground2) 46%, var(--colorNeutralBackground1))",
+    color: "var(--colorPaletteBlueForeground2)",
+    fontWeight: 900,
+  };
+}
+
+function hsWeightMidHeaderStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 20,
+    borderRight: "1px solid var(--colorNeutralStroke2)",
+    borderBottom: active ? "2px solid var(--colorBrandForeground1)" : "1px solid var(--colorNeutralStroke2)",
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+      : "color-mix(in srgb, var(--colorPaletteBlueBackground2) 32%, var(--colorNeutralBackground1))",
+    color: active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+    fontWeight: 900,
+  };
+}
+
+function hsWeightBvGroupGridStyle(midCount: number, separated: boolean): CSSProperties {
+  const count = Math.max(1, midCount);
+  return {
+    display: "grid",
+    gridTemplateColumns: `42px 52px repeat(${count}, 144px)`,
+    alignItems: "stretch",
+    marginTop: separated ? 18 : 0,
+  };
+}
+
+function hsWeightBvHeaderStyle(active: boolean, rowCount: number): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: Math.max(1, rowCount) * 20,
+    padding: "0 4px",
+    borderRight: "1px solid var(--colorNeutralStroke2)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--normal-sheet-palegreen-bg))"
+      : "var(--normal-sheet-palegreen-bg)",
+    color: active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-palegreen-fg)",
+    fontWeight: 900,
+  };
+}
+
+const hsWeightB2dColumnStyle: CSSProperties = {
+  display: "grid",
+  gridAutoRows: "20px",
+  borderRight: "1px solid var(--colorNeutralStroke2)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+};
+
+function hsWeightB2dCellStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 20,
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 62%, transparent)",
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 36%, var(--colorPalettePinkBackground2))"
+      : "var(--colorPalettePinkBackground2)",
+    color: active ? "var(--colorBrandForeground1)" : "var(--colorPaletteRedForeground1)",
+    fontWeight: 900,
+  };
+}
+
+function hsWeightMiniTableWrapStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 14px",
+    borderRight: "1px solid var(--colorNeutralStroke2)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+    outline: active ? "2px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -4,
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground1))"
+      : "var(--colorNeutralBackground1)",
+  };
+}
+
+const hsWeightMiniTableStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, 1fr)",
+  width: "100%",
+  maxWidth: 116,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  borderLeft: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
+};
+
+function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 19,
+    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 65%, transparent)",
+    color: active ? "var(--colorBrandForeground1)" : hsWeightMiniForeground(tone),
+    background: active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, transparent)" : "transparent",
+    fontWeight: active ? 900 : 700,
+  };
+}
+
+const hsWeightMiniRowDividerStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+  height: 0,
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 65%, transparent)",
+};
+
+function hsAreaPlaceholderStyle(tone: HsWeightToneId): CSSProperties {
+  return {
+    ...thresholdCardStyle,
+    minHeight: 156,
+    borderColor: hsToneStroke(tone),
+    boxShadow: "none",
+  };
+}
+
+const hsAreaPlaceholderBodyStyle: CSSProperties = {
+  minHeight: 112,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 12,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
+};
+
+function hsToneStroke(tone: HsWeightToneId): string {
+  if (tone === "dark") return "color-mix(in srgb, #66a83f 58%, var(--colorNeutralStroke2))";
+  if (tone === "middle" || tone === "target") return "color-mix(in srgb, #1888d8 58%, var(--colorNeutralStroke2))";
+  return "color-mix(in srgb, #d83b7d 58%, var(--colorNeutralStroke2))";
+}
+
+function hsWeightMiniForeground(tone: HsWeightToneId): string {
+  if (tone === "dark") return "var(--colorNeutralForeground3)";
+  if (tone === "bright") return "var(--colorPaletteRedForeground1)";
+  return "var(--colorNeutralForeground1)";
+}
 
 const thresholdGroupStyle: CSSProperties = {
   display: "flex",
@@ -3360,8 +5294,40 @@ function stepperTriangleStyle(direction: "up" | "down"): CSSProperties {
 
 const thresholdResultStyle: CSSProperties = {
   flex: "0 0 auto",
+  marginLeft: "auto",
   color: "var(--colorBrandForeground1)",
   fontSize: 13,
+  fontWeight: 800,
+  textAlign: "right",
+};
+
+const thresholdInlineResultStyle: CSSProperties = {
+  color: "var(--colorBrandForeground1)",
+  fontWeight: 800,
+};
+
+const hsWeightSelectedPointStyle: CSSProperties = {
+  flex: "0 0 auto",
+  color: "var(--colorBrandForeground1)",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const hsWeightFormulaTextStyle: CSSProperties = {
+  flex: "0 1 auto",
+  marginLeft: "auto",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+  textAlign: "right",
+};
+
+const hsWeightWetValueStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontWeight: 800,
+};
+
+const hsWeightInterpolatedValueStyle: CSSProperties = {
+  color: "var(--colorBrandForeground1)",
   fontWeight: 800,
 };
 
@@ -3622,73 +5588,87 @@ const mtwvTableSurfaceStyle: CSSProperties = {
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 
-const mtwvTableStyle: CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  margin: 0,
-  borderCollapse: "separate",
-  borderSpacing: 0,
-  tableLayout: "fixed",
-  overflow: "hidden",
-  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
-  borderRadius: 10,
-  background: "var(--colorNeutralBackground1)",
-  fontFamily: "ui-monospace, Consolas, monospace",
-  fontSize: 11,
-  textAlign: "center",
-};
+function mtwvHeatmapGridStyle(columnCount: number): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: `42px repeat(${Math.max(1, columnCount)}, minmax(34px, 1fr))`,
+    gridAutoRows: "minmax(30px, auto)",
+    minWidth: Math.max(620, 42 + Math.max(1, columnCount) * 38),
+    overflow: "hidden",
+    border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
+    borderRadius: 10,
+    background: "var(--colorNeutralBackground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 11,
+  };
+}
 
-const mtwvHeaderCellStyle: CSSProperties = {
-  minWidth: 48,
-  padding: "6px 7px",
-  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 68%, transparent)",
+const mtwvHeatmapCornerStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "5px 6px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 70%, transparent)",
   borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 76%, transparent)",
   background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 62%, var(--colorNeutralBackground1))",
   color: "var(--normal-sheet-palegreen-fg)",
-  fontSize: 11,
-  fontWeight: 800,
-  whiteSpace: "nowrap",
+  fontWeight: 900,
 };
 
-const mtwvRowHeaderCellStyle: CSSProperties = {
-  width: 54,
-  padding: "6px 7px",
-  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+const mtwvHeatmapHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "5px 4px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 76%, transparent)",
+  background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 52%, var(--colorNeutralBackground1))",
+  color: "var(--normal-sheet-palegreen-fg)",
+  fontWeight: 800,
+};
+
+const mtwvHeatmapRowHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "5px 6px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 70%, transparent)",
   borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
   background: "color-mix(in srgb, var(--colorNeutralForeground1) 8%, var(--colorNeutralBackground2))",
   color: "var(--colorNeutralForeground2)",
-  fontSize: 11,
-  fontWeight: 800,
-  whiteSpace: "nowrap",
+  fontWeight: 900,
 };
 
-function mtwvValueCellStyle(focused = false, editable = false): CSSProperties {
+function mtwvHeatmapCellStyle(intensity: number, focused = false, editable = false): CSSProperties {
+  const pct = Math.round(12 + clamp(intensity, 0, 1) * 70);
   return {
+    display: "flex",
+    alignItems: "stretch",
     minWidth: 0,
-    padding: "6px 7px",
-    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
-    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+    minHeight: 30,
+    padding: 0,
+    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 50%, transparent)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 50%, transparent)",
     outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
     outlineOffset: -3,
-    background: "color-mix(in srgb, var(--colorNeutralForeground1) 8%, var(--colorNeutralBackground1))",
+    background: `color-mix(in srgb, #f59e0b ${pct}%, var(--colorNeutralBackground1))`,
     color: "var(--colorNeutralForeground1)",
-    fontSize: 11,
-    fontWeight: 600,
+    fontWeight: intensity > 0.68 ? 900 : 700,
     cursor: editable ? "text" : "default",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
     transition: "background-color 120ms ease, outline-color 120ms ease",
   };
 }
 
-function mtwvCellInputStyle(editable: boolean): CSSProperties {
+function mtwvHeatmapInputStyle(editable: boolean): CSSProperties {
   return {
     width: "100%",
     minWidth: 0,
     border: "none",
     outline: "none",
-    padding: "0 2px",
+    padding: "0 3px",
     background: "transparent",
     color: "inherit",
     font: "inherit",
@@ -3941,37 +5921,71 @@ function thresholdCellInputStyle(editable: boolean): CSSProperties {
   };
 }
 
-const fieldsetStyle: CSSProperties = {
+const sourceSectionStyle: CSSProperties = {
   border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 4,
+  borderRadius: 8,
   margin: "0 0 12px",
-  padding: "14px 12px 12px",
+  padding: 0,
   background: "var(--colorNeutralBackground1)",
+  overflow: "hidden",
 };
 
-const legendStyle: CSSProperties = {
-  padding: "0 8px",
-  color: "var(--colorNeutralForeground2)",
-  fontFamily: "ui-monospace, Consolas, monospace",
-  fontSize: 12,
-};
-
-const rowStyle: CSSProperties = {
+const sourceSectionHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 10,
+  justifyContent: "space-between",
+  gap: 12,
   minHeight: 34,
+  padding: "0 12px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground2)",
 };
 
-const labelStyle: CSSProperties = {
-  width: 180,
-  flex: "0 0 180px",
+const sourceSectionTitleStyle: CSSProperties = {
+  minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const sourceSectionSubtitleStyle: CSSProperties = {
+  flex: "0 0 auto",
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+function sourceRowButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "minmax(300px, 42%) minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    minHeight: 42,
+    padding: "7px 12px",
+    border: "none",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 55%, transparent)",
+    background: "transparent",
+    color: "inherit",
+    textAlign: "left",
+    cursor: enabled ? "pointer" : "default",
+  };
+}
+
+const labelStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: "visible",
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+  color: "var(--colorNeutralForeground1)",
   fontFamily: "ui-monospace, Consolas, monospace",
   fontSize: 12,
+  lineHeight: "18px",
 };
 
 const valueBoxStyle: CSSProperties = {

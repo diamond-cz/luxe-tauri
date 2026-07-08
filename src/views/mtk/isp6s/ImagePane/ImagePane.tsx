@@ -29,7 +29,13 @@ interface Props {
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
   tomlData:    Record<string, string>;
-  activeCard?: string;
+  chartCardTarget?: CardJumpTarget;
+  sourceCardTarget?: CardJumpTarget;
+}
+
+interface CardJumpTarget {
+  label: string;
+  key:   number;
 }
 
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
@@ -39,7 +45,7 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 ];
 
 export function ImagePane({
-  mode, onMode, filePath, schema, entry, tomlData, activeCard,
+  mode, onMode, filePath, schema, entry, tomlData, chartCardTarget, sourceCardTarget,
 }: Props) {
   const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
@@ -79,7 +85,7 @@ export function ImagePane({
   useEffect(() => {
     setSourceOverride(undefined);
     setChartFocus(null);
-  }, [activeCard]);
+  }, [chartCardTarget?.key, sourceCardTarget?.key]);
 
   useEffect(() => {
     let cancelled = false;
@@ -256,7 +262,8 @@ export function ImagePane({
             filePath={chartFilePath}
             schema={schema}
             tomlData={tomlData}
-            activeCard={activeCard}
+            activeCard={chartCardTarget?.label}
+            activeCardKey={chartCardTarget?.key}
             focusTarget={chartFocus}
             sourceRevision={chartSourceRevision}
             sourceDraftText={sourceDraft?.text ?? null}
@@ -274,7 +281,8 @@ export function ImagePane({
             filePath={filePath}
             resolveFilePath={draftResolvePath}
             schema={schema}
-            activeCard={activeCard}
+            activeCard={sourceCardTarget?.label}
+            activeCardKey={sourceCardTarget?.key}
             sourceOverride={sourceOverride}
             draft={sourceDraft}
             draftLoadError={sourceDraftError}

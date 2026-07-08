@@ -115,6 +115,9 @@ pub struct Isp6sAeVisual {
     #[serde(default = "default_chart_main_t_card_order")]
     pub chart_main_t_card_order:                       Vec<String>,
     #[serde(default)] pub chart_main_t_card_collapsed: Vec<String>,
+    #[serde(default = "default_chart_hs_card_order")]
+    pub chart_hs_card_order:                           Vec<String>,
+    #[serde(default)] pub chart_hs_card_collapsed:     Vec<String>,
     #[serde(default = "default_chart_main_t_mid_chart_mode")]
     pub chart_main_t_mid_chart_mode:                   String,
     #[serde(default = "default_chart_main_t_mid_chart_source")]
@@ -132,6 +135,9 @@ fn default_preview_mode() -> String { "image".into() }
 fn default_table_header_ratios() -> Vec<f32> { vec![24.0, 18.0, 58.0] }
 fn default_chart_main_t_card_order() -> Vec<String> {
     vec!["mainThd".into(), "mtwv".into(), "mainTarget".into()]
+}
+fn default_chart_hs_card_order() -> Vec<String> {
+    vec!["hsTarget".into(), "hsWeight".into(), "hsBright".into(), "hsMiddle".into(), "hsDark".into()]
 }
 fn default_chart_main_t_mid_chart_mode() -> String { "thd".into() }
 fn default_chart_main_t_mid_chart_source() -> String { "mid".into() }
@@ -162,6 +168,8 @@ impl Default for Isp6sAeVisual {
             table_header_ratios: default_table_header_ratios(),
             chart_main_t_card_order: default_chart_main_t_card_order(),
             chart_main_t_card_collapsed: vec![],
+            chart_hs_card_order: default_chart_hs_card_order(),
+            chart_hs_card_collapsed: vec![],
             chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),

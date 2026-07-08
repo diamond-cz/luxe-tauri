@@ -15,6 +15,7 @@ import {
   sourceDraftCanRestore,
   sourceDraftDirty,
   type SourceCodeDraft,
+  type SourceRangeGroup,
 } from "../SourceCodeView";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
   resolveFilePath: string;
   schema: Isp6sSchemaRoot;
   activeCard?: string;
+  activeCardKey?: number;
   sourceOverride?: SourceOverride;
   draft: SourceCodeDraft | null;
   draftLoadError?: string | null;
@@ -41,11 +43,63 @@ export interface ChartPreviewTarget {
   label: string;
 }
 
+const MAIN_T_SOURCE_RANGE_GROUPS: SourceRangeGroup[] = [
+  {
+    id: "mtwv",
+    label: "MTWV",
+    paths: ["[0][3][1][20]"],
+    chartTargetLabel: "MTWV.weight_table",
+  },
+  {
+    id: "mainTargetThreshold",
+    label: "Main Target Threshold",
+    paths: ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"],
+    chartTargetLabel: "Main_Target_Threshold.bv",
+  },
+  {
+    id: "midCurve",
+    label: "Mid 曲线",
+    paths: ["[0][3][1].65", "[0][3][1].66", "[0][3][1].67", "[0][3][1].68"],
+    chartTargetLabel: "Main_Target_Threshold.mid",
+  },
+  {
+    id: "b2dOri",
+    label: "B2D ori",
+    paths: ["[0][3][1][45]", "[0][3][1][46]"],
+    chartTargetLabel: "Main_Target_Threshold.mid",
+  },
+  {
+    id: "b2dCorr",
+    label: "B2D corr",
+    paths: ["[0][3][1].73", "[0][3][1].74", "[0][3][1].75", "[0][3][1].76", "[0][3][1].77"],
+    chartTargetLabel: "Main_Target_Threshold.mid",
+  },
+];
+const MAIN_T_MID_SOURCE_RANGE_GROUPS = MAIN_T_SOURCE_RANGE_GROUPS.filter((group) =>
+  group.id === "midCurve" || group.id === "b2dOri" || group.id === "b2dCorr",
+);
+const MAIN_TARGET_THRESHOLD_SOURCE_RANGE_GROUPS = MAIN_T_SOURCE_RANGE_GROUPS.filter((group) =>
+  group.id === "mainTargetThreshold",
+);
+const MTWV_SOURCE_RANGE_GROUPS = MAIN_T_SOURCE_RANGE_GROUPS.filter((group) =>
+  group.id === "mtwv",
+);
+
+function sourceRangeGroupsForLabel(label: string | undefined): SourceRangeGroup[] | undefined {
+  if (!label) return undefined;
+  if (label === "MainT") return MAIN_T_SOURCE_RANGE_GROUPS;
+  if (label.startsWith("Main_Target_Threshold.mid")) return MAIN_T_MID_SOURCE_RANGE_GROUPS;
+  if (label.startsWith("Main_Target_Threshold")) return MAIN_TARGET_THRESHOLD_SOURCE_RANGE_GROUPS;
+  if (label.startsWith("MTWV")) return MTWV_SOURCE_RANGE_GROUPS;
+  return undefined;
+}
+
 export function ParamMapMode({
   filePath,
   resolveFilePath,
   schema,
   activeCard,
+  activeCardKey,
   sourceOverride,
   draft,
   draftLoadError,
@@ -63,6 +117,7 @@ export function ParamMapMode({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const dirty = sourceDraftDirty(draft);
   const canRestore = sourceDraftCanRestore(draft);
+  const activeLabel = sourceOverride?.label ?? activeCard;
 
   const handleSave = async () => {
     if (saving || !dirty) return;
@@ -106,18 +161,17 @@ export function ParamMapMode({
 
   useEffect(() => {
     setActionMessage(null);
-    const label = sourceOverride?.label ?? activeCard;
-    if (!label) {
+    if (!activeLabel) {
       setRanges([]);
       setJumpLine(1);
       setErr(null);
       return;
     }
-    const spec = sourceOverride?.spec ?? schema.card_source?.[label];
+    const spec = sourceOverride?.spec ?? schema.card_source?.[activeLabel];
     if (!spec) {
       setRanges([]);
       setJumpLine(1);
-      setErr(`[card_source.${label}] \u672a\u914d\u7f6e`);
+      setErr(`[card_source.${activeLabel}] \u672a\u914d\u7f6e`);
       return;
     }
 
@@ -136,7 +190,7 @@ export function ParamMapMode({
     return () => {
       cancelled = true;
     };
-  }, [resolveFilePath, activeCard, schema, sourceOverride]);
+  }, [resolveFilePath, activeCard, activeCardKey, activeLabel, schema, sourceOverride]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -149,8 +203,8 @@ export function ParamMapMode({
         }}
       >
         <span className="shrink-0">
-          {sourceOverride?.label ?? activeCard
-            ? `\u5361\u7247\uff1a${sourceOverride?.label ?? activeCard}`
+          {activeLabel
+            ? `\u5361\u7247\uff1a${activeLabel}`
             : "\u70b9\u51fb\u5de6\u4fa7\u4efb\u4e00\u5b50\u5361\u7247\u5728\u6e90\u7801\u4e2d\u5b9a\u4f4d"}
         </span>
         <span
@@ -201,8 +255,10 @@ export function ParamMapMode({
           jumpLine={jumpLine}
           jumpKey={jumpKey}
           onTextChange={onDraftTextChange}
-          onPreviewChart={() => {
-            const label = sourceOverride?.label ?? activeCard;
+          chartJumpLabel={activeLabel}
+          rangeGroups={sourceRangeGroupsForLabel(activeLabel)}
+          onPreviewChart={(targetLabel) => {
+            const label = targetLabel ?? activeLabel;
             onBackToChart?.(label ? { label } : undefined);
           }}
         />
