@@ -161,6 +161,11 @@ const HS_WEIGHT_RESULT_ITEMS: Array<{ id: HsWeightToneId; label: string; wetKey:
   { id: "middle", label: "Middle%", wetKey: "AE_TAG_HSV6_MT_WET" },
   { id: "bright", label: "Bright%", wetKey: "AE_TAG_HSV6_BT_WET" },
 ];
+const HS_WEIGHT_BV_COLUMN_WIDTH = 42;
+const HS_WEIGHT_DR_COLUMN_WIDTH = 52;
+const HS_WEIGHT_MID_COLUMN_WIDTH = 150;
+const HS_WEIGHT_MINI_TABLE_WIDTH = 120;
+const HS_WEIGHT_MID_COLUMN_GAP = (HS_WEIGHT_MID_COLUMN_WIDTH - HS_WEIGHT_MINI_TABLE_WIDTH) / 2;
 const HS_WEIGHT_BV_PATH = "[0][3][1][40]" as const;
 const HS_WEIGHT_DR_B2D_PATH = "[0][3][1][41]" as const;
 const HS_WEIGHT_MID_PATH = "[0][3][1][42]" as const;
@@ -172,6 +177,7 @@ const HS_TARGET_INPUTS = [
     thdKey: "AE_TAG_HSV6_BT_THD",
     yKey: "AE_TAG_HSV6_BT_Final_Y",
     wetKey: "AE_TAG_HSV6_BT_WET",
+    targetKey: "AE_TAG_HSV6_BT_TARGET",
   },
   {
     id: "MT",
@@ -179,6 +185,7 @@ const HS_TARGET_INPUTS = [
     thdKey: "AE_TAG_HSV6_MT_THD",
     yKey: "AE_TAG_HSV6_MT_Final_Y",
     wetKey: "AE_TAG_HSV6_MT_WET",
+    targetKey: "AE_TAG_HSV6_MT_TARGET",
   },
   {
     id: "DT",
@@ -186,6 +193,7 @@ const HS_TARGET_INPUTS = [
     thdKey: "AE_TAG_HSV6_DT_THD",
     yKey: "AE_TAG_HSV6_DT_Final_Y",
     wetKey: "AE_TAG_HSV6_DT_WET",
+    targetKey: "AE_TAG_HSV6_DT_TARGET",
   },
 ] as const;
 const MAIN_TARGET_THRESHOLD_PATHS = ["[0][3][1][22]", "[0][3][1][23]", "[0][3][1][24]"] as const;
@@ -315,6 +323,7 @@ export function ChartMapMode({
       thd: readTomlValue(tomlData, input.thdKey),
       y: readTomlValue(tomlData, input.yKey),
       wet: readTomlValue(tomlData, schema.card?.Normal?.wt?.[input.id] ?? input.wetKey),
+      targetValue: readTomlValue(tomlData, input.targetKey),
     })),
     [schema.card, tomlData],
   );
@@ -1991,9 +2000,11 @@ function HsTargetCard({
     thdKey: string;
     yKey: string;
     wetKey: string;
+    targetKey: string;
     thd: string | null;
     y: string | null;
     wet: string | null;
+    targetValue: string | null;
   }>;
   onAreaJump?: (sourceId: string) => void;
   initialExpanded?: boolean;
@@ -2030,7 +2041,8 @@ function HsTargetCard({
       : Number.isFinite(target) && Number.isFinite(wet)
         ? target * wet
         : NaN;
-    return { ...input, thd, y, wet, target, contribution, missing };
+    const targetLabelText = formatHsTargetTitleValue(input.targetValue);
+    return { ...input, thd, y, wet, target, contribution, missing, targetLabelText };
   });
   const termIds = terms.map((term) => term.id);
   const wetSum = terms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
@@ -2093,7 +2105,9 @@ function HsTargetCard({
                     style={hsTargetTermCardStyle(hasMissing, active)}
                   >
                     <div style={hsTargetTermHeaderStyle}>
-                      <span style={hsTargetTermTitleStyle}>{term.label}</span>
+                      <span style={hsTargetTermTitleStyle}>
+                        {term.label}: <span style={hsTargetTermTitleValueStyle}>{term.targetLabelText}</span>
+                      </span>
                       <span style={hsTargetStatusBadgeStyle(hasMissing, active)}>{status}</span>
                     </div>
                     <div style={hsTargetTermEquationStyle}>
@@ -2321,8 +2335,8 @@ function HsWeightGrid({
     const update = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        const naturalWidth = Math.max(1, sheet.scrollWidth);
-        const naturalHeight = Math.max(1, sheet.scrollHeight);
+        const naturalWidth = Math.max(1, sheet.offsetWidth, sheet.scrollWidth);
+        const naturalHeight = Math.max(1, sheet.offsetHeight, sheet.scrollHeight);
         const availableWidth = Math.max(1, viewport.clientWidth);
         const scale = availableWidth / naturalWidth;
         setFit({
@@ -2417,7 +2431,7 @@ function HsWeightGrid({
                               value={field?.value ?? formatHsWeightCell(value)}
                               editable={editable && Boolean(field)}
                               title={field ? `${source?.matrixPath} #${bvIndex}:${drIndex}:${midIndex}:${channelIndex}` : channel.id}
-                              style={hsWeightMiniCellStyle(channel.id, selectedCell)}
+                              style={hsWeightMiniCellStyle(channel.id, selectedCell, channelIndex)}
                               onCommit={(nextValue) => onCellCommit?.({
                                 kind: "value",
                                 bvIndex,
@@ -2473,7 +2487,7 @@ function HsWeightEditableCell({
   };
 
   return (
-    <div title={title} style={style}>
+    <div style={style}>
       <input
         aria-label={title}
         value={draftValue}
@@ -3820,6 +3834,11 @@ function formatHsWeightWetValue(value: string | null): string {
   return Number.isFinite(parsed) ? formatComputedNumber(parsed) : "-";
 }
 
+function formatHsTargetTitleValue(value: string | null): string {
+  const parsed = parseFiniteNumber(value);
+  return Number.isFinite(parsed) ? formatComputedNumber(parsed) : "-";
+}
+
 function cleanLabel(comment: string): string {
   return comment
     .replace(/^[/\s*]+/, "")
@@ -4614,6 +4633,12 @@ const hsTargetTermTitleStyle: CSSProperties = {
   fontWeight: 800,
 };
 
+const hsTargetTermTitleValueStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontWeight: 900,
+};
+
 function hsTargetStatusBadgeStyle(hasMissing: boolean, active: boolean): CSSProperties {
   return {
     flex: "0 0 auto",
@@ -4672,26 +4697,26 @@ const hsTargetMetricRowsStyle: CSSProperties = {
 
 function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, active: boolean): CSSProperties {
   const background = missing
-    ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 72%, var(--colorNeutralBackground1))"
+    ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 70%, var(--colorNeutralBackground1))"
     : kind === "thd"
-      ? `color-mix(in srgb, #dff3ff ${active ? 78 : 62}%, var(--colorNeutralBackground1))`
+      ? `color-mix(in srgb, var(--colorPaletteBlueBackground2) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`
       : kind === "y"
-        ? `color-mix(in srgb, #e2f6d3 ${active ? 78 : 62}%, var(--colorNeutralBackground1))`
-        : `color-mix(in srgb, #fff4ce ${active ? 82 : 66}%, var(--colorNeutralBackground1))`;
+        ? `color-mix(in srgb, var(--normal-sheet-palegreen-bg) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`
+        : `color-mix(in srgb, var(--normal-sheet-yellow-bg) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`;
   const border = missing
     ? "var(--colorPaletteRedBorder2)"
     : kind === "thd"
-      ? "color-mix(in srgb, #1888d8 46%, var(--colorNeutralStroke2))"
+      ? "color-mix(in srgb, var(--colorPaletteBlueForeground2) 42%, var(--colorNeutralStroke2))"
       : kind === "y"
-        ? "color-mix(in srgb, #66a83f 46%, var(--colorNeutralStroke2))"
-        : "color-mix(in srgb, #f59e0b 52%, var(--colorNeutralStroke2))";
+        ? "color-mix(in srgb, var(--normal-sheet-palegreen-fg) 42%, var(--colorNeutralStroke2))"
+        : "color-mix(in srgb, var(--normal-sheet-yellow-fg) 48%, var(--colorNeutralStroke2))";
   const valueColor = missing
     ? "var(--colorPaletteRedForeground1)"
     : kind === "thd"
       ? "var(--colorPaletteBlueForeground2)"
       : kind === "y"
         ? "var(--normal-sheet-palegreen-fg)"
-        : "color-mix(in srgb, #8a5a00 82%, var(--colorNeutralForeground1))";
+        : "var(--normal-sheet-yellow-fg)";
   return {
     display: "flex",
     alignItems: "center",
@@ -4702,7 +4727,7 @@ function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, act
     border: `1px solid ${border}`,
     borderRadius: 6,
     background,
-    boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralBackground1) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.62)",
+    boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralForeground1) 6%, transparent), inset 0 1px 0 color-mix(in srgb, var(--colorNeutralForeground1) 10%, transparent)",
     color: valueColor,
     fontFamily: "ui-monospace, Consolas, monospace",
     fontSize: 11,
@@ -4734,25 +4759,35 @@ const hsWeightBodyStyle: CSSProperties = {
   background: "var(--colorNeutralBackground1)",
 };
 
+const HS_WEIGHT_LINE_COLOR = "color-mix(in srgb, var(--normal-sheet-line) 56%, var(--colorNeutralStroke2))";
+const HS_WEIGHT_SUBTLE_LINE_COLOR = "color-mix(in srgb, var(--normal-sheet-line) 42%, var(--colorNeutralStroke2))";
+const HS_WEIGHT_FRAME_BORDER = `1.5px solid ${HS_WEIGHT_LINE_COLOR}`;
+const HS_WEIGHT_MAJOR_BORDER = `1px solid ${HS_WEIGHT_LINE_COLOR}`;
+const HS_WEIGHT_GRID_BORDER = `1px solid ${HS_WEIGHT_SUBTLE_LINE_COLOR}`;
+const HS_WEIGHT_MID_BORDER = "1px solid #000";
+const HS_WEIGHT_MID_TEXT_COLOR = "#000";
+const HS_WEIGHT_BV_BACKGROUND = "var(--hs-weight-bv-bg)";
+const HS_WEIGHT_DR_BACKGROUND = "var(--hs-weight-dr-bg)";
+
 const hsWeightTableWrapStyle: CSSProperties = {
   overflow: "hidden",
-  padding: 16,
-  border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 8,
-  background: "var(--colorNeutralBackground1)",
+  padding: 0,
+  border: "none",
+  borderRadius: 0,
+  background: "transparent",
 };
 
 const hsWeightScaleViewportStyle: CSSProperties = {
   width: "100%",
   minWidth: 0,
-  overflow: "auto",
+  overflow: "hidden",
 };
 
 function hsWeightScaleSlotStyle(width: number, height: number): CSSProperties {
   return {
     position: "relative",
-    width: width > 0 ? width : "max-content",
-    height: height > 0 ? height : 1,
+    width: width > 0 ? width + 3 : "max-content",
+    height: height > 0 ? height + 3 : 1,
     minWidth: 0,
   };
 }
@@ -4786,13 +4821,15 @@ function hsWeightCellInputStyle(editable: boolean): CSSProperties {
 
 function hsWeightSheetStyle(midCount: number): CSSProperties {
   const count = Math.max(1, midCount);
-  const bvWidth = 42;
-  const drWidth = 52;
-  const midWidth = 144;
   return {
     width: "max-content",
-    minWidth: bvWidth + drWidth + count * midWidth,
+    minWidth: HS_WEIGHT_BV_COLUMN_WIDTH + HS_WEIGHT_DR_COLUMN_WIDTH + count * HS_WEIGHT_MID_COLUMN_WIDTH,
+    overflow: "hidden",
+    border: HS_WEIGHT_FRAME_BORDER,
+    borderRadius: 8,
+    boxSizing: "border-box",
     background: "var(--colorNeutralBackground1)",
+    boxShadow: "0 1px 2px color-mix(in srgb, var(--colorNeutralForeground1) 6%, transparent)",
     fontFamily: "ui-monospace, Consolas, monospace",
     fontSize: 10,
     lineHeight: 1.15,
@@ -4803,7 +4840,7 @@ function hsWeightHeaderGridStyle(midCount: number): CSSProperties {
   const count = Math.max(1, midCount);
   return {
     display: "grid",
-    gridTemplateColumns: `42px 52px repeat(${count}, 144px)`,
+    gridTemplateColumns: `${HS_WEIGHT_BV_COLUMN_WIDTH}px ${HS_WEIGHT_DR_COLUMN_WIDTH}px repeat(${count}, ${HS_WEIGHT_MID_COLUMN_WIDTH}px)`,
     alignItems: "stretch",
   };
 }
@@ -4815,9 +4852,9 @@ function hsWeightAxisHeaderStyle(kind: "bv" | "dr"): CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     minHeight: 40,
-    borderRight: "1px solid var(--colorNeutralStroke2)",
-    borderBottom: "1px solid var(--colorNeutralStroke2)",
-    background: kind === "bv" ? "var(--normal-sheet-palegreen-bg)" : "var(--colorPalettePinkBackground2)",
+    borderRight: HS_WEIGHT_MAJOR_BORDER,
+    borderBottom: HS_WEIGHT_MAJOR_BORDER,
+    background: kind === "bv" ? HS_WEIGHT_BV_BACKGROUND : HS_WEIGHT_DR_BACKGROUND,
     color: kind === "bv" ? "var(--normal-sheet-palegreen-fg)" : "var(--colorPaletteRedForeground1)",
     fontWeight: 900,
   };
@@ -4830,10 +4867,10 @@ function hsWeightMidGroupHeaderStyle(midCount: number): CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     minHeight: 20,
-    borderRight: "1px solid var(--colorNeutralStroke2)",
-    borderBottom: "1px solid var(--colorNeutralStroke2)",
+    borderRight: HS_WEIGHT_MAJOR_BORDER,
+    borderBottom: HS_WEIGHT_MID_BORDER,
     background: "color-mix(in srgb, var(--colorPaletteBlueBackground2) 46%, var(--colorNeutralBackground1))",
-    color: "var(--colorPaletteBlueForeground2)",
+    color: HS_WEIGHT_MID_TEXT_COLOR,
     fontWeight: 900,
   };
 }
@@ -4844,12 +4881,13 @@ function hsWeightMidHeaderStyle(active: boolean): CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     minHeight: 20,
-    borderRight: "1px solid var(--colorNeutralStroke2)",
-    borderBottom: active ? "2px solid var(--colorBrandForeground1)" : "1px solid var(--colorNeutralStroke2)",
+    margin: `0 ${HS_WEIGHT_MID_COLUMN_GAP}px`,
+    border: HS_WEIGHT_MID_BORDER,
+    borderBottomWidth: 1,
     background: active
       ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
       : "color-mix(in srgb, var(--colorPaletteBlueBackground2) 32%, var(--colorNeutralBackground1))",
-    color: active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+    color: HS_WEIGHT_MID_TEXT_COLOR,
     fontWeight: 900,
   };
 }
@@ -4858,9 +4896,9 @@ function hsWeightBvGroupGridStyle(midCount: number, separated: boolean): CSSProp
   const count = Math.max(1, midCount);
   return {
     display: "grid",
-    gridTemplateColumns: `42px 52px repeat(${count}, 144px)`,
+    gridTemplateColumns: `${HS_WEIGHT_BV_COLUMN_WIDTH}px ${HS_WEIGHT_DR_COLUMN_WIDTH}px repeat(${count}, ${HS_WEIGHT_MID_COLUMN_WIDTH}px)`,
     alignItems: "stretch",
-    marginTop: separated ? 18 : 0,
+    marginTop: separated ? 16 : 0,
   };
 }
 
@@ -4871,11 +4909,9 @@ function hsWeightBvHeaderStyle(active: boolean, rowCount: number): CSSProperties
     justifyContent: "center",
     minHeight: Math.max(1, rowCount) * 20,
     padding: "0 4px",
-    borderRight: "1px solid var(--colorNeutralStroke2)",
-    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-    background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--normal-sheet-palegreen-bg))"
-      : "var(--normal-sheet-palegreen-bg)",
+    borderRight: HS_WEIGHT_MAJOR_BORDER,
+    borderBottom: HS_WEIGHT_MAJOR_BORDER,
+    background: HS_WEIGHT_BV_BACKGROUND,
     color: active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-palegreen-fg)",
     fontWeight: 900,
   };
@@ -4884,8 +4920,8 @@ function hsWeightBvHeaderStyle(active: boolean, rowCount: number): CSSProperties
 const hsWeightB2dColumnStyle: CSSProperties = {
   display: "grid",
   gridAutoRows: "20px",
-  borderRight: "1px solid var(--colorNeutralStroke2)",
-  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+  borderRight: HS_WEIGHT_MAJOR_BORDER,
+  borderBottom: HS_WEIGHT_MAJOR_BORDER,
 };
 
 function hsWeightB2dCellStyle(active: boolean): CSSProperties {
@@ -4894,28 +4930,23 @@ function hsWeightB2dCellStyle(active: boolean): CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     minHeight: 20,
-    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 62%, transparent)",
-    background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 36%, var(--colorPalettePinkBackground2))"
-      : "var(--colorPalettePinkBackground2)",
+    borderBottom: HS_WEIGHT_GRID_BORDER,
+    background: HS_WEIGHT_DR_BACKGROUND,
     color: active ? "var(--colorBrandForeground1)" : "var(--colorPaletteRedForeground1)",
     fontWeight: 900,
   };
 }
 
-function hsWeightMiniTableWrapStyle(active: boolean): CSSProperties {
+function hsWeightMiniTableWrapStyle(_active: boolean): CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "0 14px",
-    borderRight: "1px solid var(--colorNeutralStroke2)",
-    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-    outline: active ? "2px solid var(--colorBrandForeground1)" : "none",
-    outlineOffset: -4,
-    background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground1))"
-      : "var(--colorNeutralBackground1)",
+    padding: `0 ${HS_WEIGHT_MID_COLUMN_GAP}px`,
+    borderRight: "none",
+    borderBottom: HS_WEIGHT_MAJOR_BORDER,
+    outline: "none",
+    background: "var(--colorNeutralBackground1)",
   };
 }
 
@@ -4923,19 +4954,20 @@ const hsWeightMiniTableStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, 1fr)",
   width: "100%",
-  maxWidth: 116,
-  borderTop: "1px solid var(--colorNeutralStroke2)",
-  borderLeft: "1px solid var(--colorNeutralStroke2)",
+  maxWidth: HS_WEIGHT_MINI_TABLE_WIDTH,
+  boxSizing: "border-box",
+  border: HS_WEIGHT_GRID_BORDER,
   background: "var(--colorNeutralBackground1)",
 };
 
-function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean): CSSProperties {
+function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean, columnIndex: number): CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     minHeight: 19,
-    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 65%, transparent)",
+    boxSizing: "border-box",
+    borderRight: columnIndex < HS_WEIGHT_CHANNELS.length - 1 ? HS_WEIGHT_GRID_BORDER : "none",
     color: active ? "var(--colorBrandForeground1)" : hsWeightMiniForeground(tone),
     background: active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, transparent)" : "transparent",
     fontWeight: active ? 900 : 700,
@@ -4945,7 +4977,7 @@ function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean): CSSProper
 const hsWeightMiniRowDividerStyle: CSSProperties = {
   gridColumn: "1 / -1",
   height: 0,
-  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 65%, transparent)",
+  borderBottom: HS_WEIGHT_GRID_BORDER,
 };
 
 function hsAreaPlaceholderStyle(tone: HsWeightToneId): CSSProperties {
