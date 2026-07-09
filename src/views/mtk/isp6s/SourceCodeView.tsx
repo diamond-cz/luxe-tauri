@@ -145,7 +145,7 @@ export function SourceCodeView({
   }, [activeRangeIndex, sourceAreas]);
   const activeArea = activeAreaIndex >= 0 ? sourceAreas[activeAreaIndex] : null;
   const sourceAreaButtonPlacements = useMemo(
-    () => sourceAreas
+    () => buildSourceAreaButtonAreas(sourceAreas)
       .map((area) => ({
         area,
         top: sourceAreaButtonTop(area, highlightRanges, scrollFrame),
@@ -513,6 +513,25 @@ function buildSourceAreas(
   });
 
   return areas;
+}
+
+function buildSourceAreaButtonAreas(areas: SourceArea[]): SourceArea[] {
+  const mergedByLabel = new Map<string, SourceArea>();
+
+  for (const area of areas) {
+    const key = `${area.label}\u0000${area.chartTargetLabel ?? ""}`;
+    const existing = mergedByLabel.get(key);
+    if (!existing) {
+      mergedByLabel.set(key, { ...area, rangeIndices: [...area.rangeIndices] });
+      continue;
+    }
+
+    const nextRangeIndices = new Set(existing.rangeIndices);
+    for (const rangeIndex of area.rangeIndices) nextRangeIndices.add(rangeIndex);
+    existing.rangeIndices = Array.from(nextRangeIndices).sort((left, right) => left - right);
+  }
+
+  return Array.from(mergedByLabel.values());
 }
 
 function sourceAreaButtonTop(

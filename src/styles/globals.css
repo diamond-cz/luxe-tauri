@@ -39,6 +39,9 @@ html.dark {
   --normal-sheet-palegreen-fg:   #d8f0d1;
   --hs-weight-bv-bg:             #223b2c;
   --hs-weight-dr-bg:             #4a263a;
+  --hs-weight-cell-fg:           var(--normal-sheet-text);
+  --hs-weight-dr-fg:             rgb(255, 146, 190);
+  --hs-weight-zero-fg:           rgb(205, 190, 205);
   --normal-sheet-softgreen-bg:   #1e3728;
   --normal-sheet-softgreen-fg:   #d4ecd7;
   --face-sheet-data-bg:          #202a34;
@@ -78,6 +81,9 @@ html.light {
   --normal-sheet-palegreen-fg:   #202020;
   --hs-weight-bv-bg:             rgb(225, 245, 209);
   --hs-weight-dr-bg:             rgb(248, 209, 231);
+  --hs-weight-cell-fg:           #000000;
+  --hs-weight-dr-fg:             rgb(192, 0, 74);
+  --hs-weight-zero-fg:           rgb(183, 166, 183);
   --normal-sheet-softgreen-bg:   #ddf2d8;
   --normal-sheet-softgreen-fg:   #202020;
   --face-sheet-data-bg:          #fbf2d3;
@@ -118,6 +124,9 @@ html:not(.light):not(.dark) {
   --normal-sheet-palegreen-fg:   #d8f0d1;
   --hs-weight-bv-bg:             #223b2c;
   --hs-weight-dr-bg:             #4a263a;
+  --hs-weight-cell-fg:           var(--normal-sheet-text);
+  --hs-weight-dr-fg:             rgb(255, 146, 190);
+  --hs-weight-zero-fg:           rgb(205, 190, 205);
   --normal-sheet-softgreen-bg:   #1e3728;
   --normal-sheet-softgreen-fg:   #d4ecd7;
   --face-sheet-data-bg:          #202a34;

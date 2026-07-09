@@ -84,10 +84,46 @@ const MAIN_TARGET_THRESHOLD_SOURCE_RANGE_GROUPS = MAIN_T_SOURCE_RANGE_GROUPS.fil
 const MTWV_SOURCE_RANGE_GROUPS = MAIN_T_SOURCE_RANGE_GROUPS.filter((group) =>
   group.id === "mtwv",
 );
+const HS_WEIGHT_SOURCE_RANGE_GROUPS: SourceRangeGroup[] = [
+  {
+    id: "hsWeight",
+    label: "HS.Weight",
+    paths: ["[0][3][1][40]", "[0][3][1][41]", "[0][3][1][42]", "[0][3][1][43]"],
+    chartTargetLabel: "HS.Weight",
+  },
+];
+const HS_BRIGHT_AREA_SOURCE_RANGE_GROUPS: SourceRangeGroup[] = [
+  {
+    id: "hsBrightArea",
+    label: "HS.Bright Area",
+    paths: ["[0][3][1][25]", "[0][3][1][27]", "[0][3][1][28]", "[0][3][1].93", "[0][3][1].94"],
+    chartTargetLabel: "HS.Bright Area",
+  },
+];
+const HS_MIDDLE_AREA_SOURCE_RANGE_GROUPS: SourceRangeGroup[] = [
+  {
+    id: "hsMiddleArea",
+    label: "HS.Middle Area",
+    paths: ["[0][3][1][33]", "[0][3][1][35]", "[0][3][1][36]", "[0][3][1].98", "[0][3][1].99"],
+    chartTargetLabel: "HS.Middle Area",
+  },
+];
+const HS_DARK_AREA_SOURCE_RANGE_GROUPS: SourceRangeGroup[] = [
+  {
+    id: "hsDarkArea",
+    label: "HS.Dark Area",
+    paths: ["[0][3][1][37]", "[0][3][1][38]", "[0][3][1][39]", "[0][3][1].100", "[0][3][1].101"],
+    chartTargetLabel: "HS.Dark Area",
+  },
+];
 
 function sourceRangeGroupsForLabel(label: string | undefined): SourceRangeGroup[] | undefined {
   if (!label) return undefined;
   if (label === "MainT") return MAIN_T_SOURCE_RANGE_GROUPS;
+  if (label === "HS.Weight") return HS_WEIGHT_SOURCE_RANGE_GROUPS;
+  if (label === "HS.Bright Area" || label === "HS.Bright area") return HS_BRIGHT_AREA_SOURCE_RANGE_GROUPS;
+  if (label === "HS.Middle Area" || label === "HS.Middle area") return HS_MIDDLE_AREA_SOURCE_RANGE_GROUPS;
+  if (label === "HS.Dark Area" || label === "HS.Dark area") return HS_DARK_AREA_SOURCE_RANGE_GROUPS;
   if (label.startsWith("Main_Target_Threshold.mid")) return MAIN_T_MID_SOURCE_RANGE_GROUPS;
   if (label.startsWith("Main_Target_Threshold")) return MAIN_TARGET_THRESHOLD_SOURCE_RANGE_GROUPS;
   if (label.startsWith("MTWV")) return MTWV_SOURCE_RANGE_GROUPS;

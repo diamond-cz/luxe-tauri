@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import {
   DndContext, closestCenter, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -33,6 +33,10 @@ type HsWeightCellTarget =
   | { kind: "dr"; bvIndex: number; drIndex: number }
   | { kind: "mid"; midIndex: number }
   | { kind: "value"; bvIndex: number; drIndex: number; midIndex: number; channelIndex: number };
+type HsAreaCellTarget =
+  | { kind: "rowHeader"; rowIndex: number }
+  | { kind: "columnHeader"; columnIndex: number }
+  | { kind: "value"; rowIndex: number; columnIndex: number };
 
 interface Props {
   filePath: string;
@@ -103,6 +107,31 @@ interface HsWeightSource {
   fields: FieldEntry[];
 }
 
+interface HsAreaSource {
+  rowHeaderPath: string;
+  columnHeaderPath: string;
+  valuePath: string;
+  rowCountPath: string;
+  columnCountPath: string;
+  rowCount: number;
+  columnCount: number;
+  rowHeaders: number[];
+  rowHeaderFields: Array<FieldEntry | null>;
+  columnHeaders: number[];
+  columnHeaderFields: Array<FieldEntry | null>;
+  values: number[][];
+  valueFields: Array<Array<FieldEntry | null>>;
+  fields: FieldEntry[];
+}
+
+interface HsAreaSourceConfig {
+  rowHeaderPath: string;
+  columnHeaderPath: string;
+  valuePath: string;
+  rowCountPath: string;
+  columnCountPath: string;
+}
+
 interface MidCurveSource {
   x1: string[];
   y1: string[];
@@ -141,9 +170,9 @@ const HS_TARGET_AREA_CARD_BY_ID: Record<string, HsMetricCardId> = {
   DT: "hsDark",
 };
 const HS_TARGET_AREA_LABEL_BY_ID: Record<string, string> = {
-  BT: "HS Bright area 卡片",
-  MT: "HS Middle area 卡片",
-  DT: "HS Dark area 卡片",
+  BT: "HS Bright Area 卡片",
+  MT: "HS Middle Area 卡片",
+  DT: "HS Dark Area 卡片",
 };
 const MAIN_TARGET_CWV_KEY = "AE_TAG_FACE_20_CWV";
 const HS_TARGET_CWV_KEY = "AE_TAG_CWV";
@@ -170,6 +199,65 @@ const HS_WEIGHT_BV_PATH = "[0][3][1][40]" as const;
 const HS_WEIGHT_DR_B2D_PATH = "[0][3][1][41]" as const;
 const HS_WEIGHT_MID_PATH = "[0][3][1][42]" as const;
 const HS_WEIGHT_VALUE_PATH = "[0][3][1][43]" as const;
+const HS_BRIGHT_EVD_KEY = "AE_TAG_HS_EVD";
+const HS_BRIGHT_AREA_ROW_HEADER_PATH = "[0][3][1][25]" as const;
+const HS_BRIGHT_AREA_COLUMN_HEADER_PATH = "[0][3][1][27]" as const;
+const HS_BRIGHT_AREA_VALUE_PATH = "[0][3][1][28]" as const;
+const HS_BRIGHT_AREA_ROW_COUNT_PATH = "[0][3][1].93" as const;
+const HS_BRIGHT_AREA_COLUMN_COUNT_PATH = "[0][3][1].94" as const;
+const HS_BRIGHT_AREA_SOURCE_PATHS = [
+  HS_BRIGHT_AREA_ROW_HEADER_PATH,
+  HS_BRIGHT_AREA_COLUMN_HEADER_PATH,
+  HS_BRIGHT_AREA_VALUE_PATH,
+  HS_BRIGHT_AREA_ROW_COUNT_PATH,
+  HS_BRIGHT_AREA_COLUMN_COUNT_PATH,
+] as const;
+const HS_BRIGHT_AREA_SOURCE_CONFIG: HsAreaSourceConfig = {
+  rowHeaderPath: HS_BRIGHT_AREA_ROW_HEADER_PATH,
+  columnHeaderPath: HS_BRIGHT_AREA_COLUMN_HEADER_PATH,
+  valuePath: HS_BRIGHT_AREA_VALUE_PATH,
+  rowCountPath: HS_BRIGHT_AREA_ROW_COUNT_PATH,
+  columnCountPath: HS_BRIGHT_AREA_COLUMN_COUNT_PATH,
+};
+const HS_MIDDLE_B2M_KEY = "AE_TAG_DRV6_B2M";
+const HS_MIDDLE_AREA_ROW_HEADER_PATH = "[0][3][1][33]" as const;
+const HS_MIDDLE_AREA_COLUMN_HEADER_PATH = "[0][3][1][35]" as const;
+const HS_MIDDLE_AREA_VALUE_PATH = "[0][3][1][36]" as const;
+const HS_MIDDLE_AREA_ROW_COUNT_PATH = "[0][3][1].98" as const;
+const HS_MIDDLE_AREA_COLUMN_COUNT_PATH = "[0][3][1].99" as const;
+const HS_MIDDLE_AREA_SOURCE_PATHS = [
+  HS_MIDDLE_AREA_ROW_HEADER_PATH,
+  HS_MIDDLE_AREA_COLUMN_HEADER_PATH,
+  HS_MIDDLE_AREA_VALUE_PATH,
+  HS_MIDDLE_AREA_ROW_COUNT_PATH,
+  HS_MIDDLE_AREA_COLUMN_COUNT_PATH,
+] as const;
+const HS_MIDDLE_AREA_SOURCE_CONFIG: HsAreaSourceConfig = {
+  rowHeaderPath: HS_MIDDLE_AREA_ROW_HEADER_PATH,
+  columnHeaderPath: HS_MIDDLE_AREA_COLUMN_HEADER_PATH,
+  valuePath: HS_MIDDLE_AREA_VALUE_PATH,
+  rowCountPath: HS_MIDDLE_AREA_ROW_COUNT_PATH,
+  columnCountPath: HS_MIDDLE_AREA_COLUMN_COUNT_PATH,
+};
+const HS_DARK_AREA_ROW_HEADER_PATH = "[0][3][1][37]" as const;
+const HS_DARK_AREA_COLUMN_HEADER_PATH = "[0][3][1][38]" as const;
+const HS_DARK_AREA_VALUE_PATH = "[0][3][1][39]" as const;
+const HS_DARK_AREA_ROW_COUNT_PATH = "[0][3][1].100" as const;
+const HS_DARK_AREA_COLUMN_COUNT_PATH = "[0][3][1].101" as const;
+const HS_DARK_AREA_SOURCE_PATHS = [
+  HS_DARK_AREA_ROW_HEADER_PATH,
+  HS_DARK_AREA_COLUMN_HEADER_PATH,
+  HS_DARK_AREA_VALUE_PATH,
+  HS_DARK_AREA_ROW_COUNT_PATH,
+  HS_DARK_AREA_COLUMN_COUNT_PATH,
+] as const;
+const HS_DARK_AREA_SOURCE_CONFIG: HsAreaSourceConfig = {
+  rowHeaderPath: HS_DARK_AREA_ROW_HEADER_PATH,
+  columnHeaderPath: HS_DARK_AREA_COLUMN_HEADER_PATH,
+  valuePath: HS_DARK_AREA_VALUE_PATH,
+  rowCountPath: HS_DARK_AREA_ROW_COUNT_PATH,
+  columnCountPath: HS_DARK_AREA_COLUMN_COUNT_PATH,
+};
 const HS_TARGET_INPUTS = [
   {
     id: "BT",
@@ -278,6 +366,10 @@ export function ChartMapMode({
   const [mainTargetB2dCurve, setMainTargetB2dCurve] = useState<B2dCurveSource | null>(null);
   const [mainTargetB2dCorrCurve, setMainTargetB2dCorrCurve] = useState<B2dCorrCurveSource | null>(null);
   const [hsWeightSource, setHsWeightSource] = useState<HsWeightSource | null>(null);
+  const [hsBrightAreaSource, setHsBrightAreaSource] = useState<HsAreaSource | null>(null);
+  const [hsMiddleAreaSource, setHsMiddleAreaSource] = useState<HsAreaSource | null>(null);
+  const [hsDarkAreaSource, setHsDarkAreaSource] = useState<HsAreaSource | null>(null);
+  const [hsSourceIdentity, setHsSourceIdentity] = useState<string | null>(null);
   const [mainThdValue, setMainThdValue] = useState(NaN);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -298,9 +390,20 @@ export function ChartMapMode({
     if (focusTarget?.label.startsWith("Main_Target_Threshold") || focusTarget?.label.startsWith("MTWV")) {
       setTab("MainT");
     }
+    if (hsMetricCardIdForFocusLabel(focusTarget?.label)) {
+      setTab("HS");
+    }
   }, [focusTarget, setTab]);
 
   const sourceKey = useMemo(() => tab, [tab]);
+  const sourceIdentity = useMemo(
+    () => filePath ? `${filePath}\u0000${sourceRevision ?? 0}` : null,
+    [filePath, sourceRevision],
+  );
+  const currentHsWeightSource = hsSourceIdentity === sourceIdentity ? hsWeightSource : null;
+  const currentHsBrightAreaSource = hsSourceIdentity === sourceIdentity ? hsBrightAreaSource : null;
+  const currentHsMiddleAreaSource = hsSourceIdentity === sourceIdentity ? hsMiddleAreaSource : null;
+  const currentHsDarkAreaSource = hsSourceIdentity === sourceIdentity ? hsDarkAreaSource : null;
   const imageBvValue = useMemo(
     () => readTomlValue(tomlData, schema.Image?.BV ?? "AE_TAG_REALBVX1000"),
     [schema.Image, tomlData],
@@ -353,6 +456,14 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, "AE_TAG_DRV6_B2D"),
     [tomlData],
   );
+  const b2mValue = useMemo(
+    () => readTomlValue(tomlData, HS_MIDDLE_B2M_KEY),
+    [tomlData],
+  );
+  const evdValue = useMemo(
+    () => readTomlValue(tomlData, HS_BRIGHT_EVD_KEY),
+    [tomlData],
+  );
   const mainTCardOrder = useMemo(
     () => sanitiseMainTMetricOrder(visual.chart_main_t_card_order),
     [visual.chart_main_t_card_order],
@@ -400,6 +511,10 @@ export function ChartMapMode({
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
       setHsWeightSource(null);
+      setHsBrightAreaSource(null);
+      setHsMiddleAreaSource(null);
+      setHsDarkAreaSource(null);
+      setHsSourceIdentity(null);
       setMainThdValue(NaN);
       setMessage("请先导入 AE.cpp 参数文件");
       return;
@@ -411,6 +526,13 @@ export function ChartMapMode({
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
+      if (tab === "HS") {
+        setHsWeightSource(null);
+        setHsBrightAreaSource(null);
+        setHsMiddleAreaSource(null);
+        setHsDarkAreaSource(null);
+        setHsSourceIdentity(null);
+      }
       setMessage(`[card_source.${sourceKey}] 未配置`);
       return;
     }
@@ -424,6 +546,9 @@ export function ChartMapMode({
       let b2dCurve: B2dCurveSource | null = null;
       let b2dCorrCurve: B2dCorrCurveSource | null = null;
       let hsWeight: HsWeightSource | null = null;
+      let hsBrightArea: HsAreaSource | null = null;
+      let hsMiddleArea: HsAreaSource | null = null;
+      let hsDarkArea: HsAreaSource | null = null;
       if (tab === "MainT") {
         [threshold, midCurve, b2dCurve, b2dCorrCurve, mtwv] = await Promise.all([
           loadMainTargetThreshold(filePath),
@@ -434,7 +559,12 @@ export function ChartMapMode({
         ]);
       }
       if (tab === "HS") {
-        hsWeight = await loadHsWeightSource(filePath);
+        [hsWeight, hsBrightArea, hsMiddleArea, hsDarkArea] = await Promise.all([
+          loadHsWeightSource(filePath),
+          loadHsBrightAreaSource(filePath),
+          loadHsMiddleAreaSource(filePath),
+          loadHsDarkAreaSource(filePath),
+        ]);
       }
       const hit = await cppResolveCardSource(filePath, spec);
       const fields: FieldEntry[] = [];
@@ -451,7 +581,13 @@ export function ChartMapMode({
         setMainTargetMidCurve(midCurve);
         setMainTargetB2dCurve(b2dCurve);
         setMainTargetB2dCorrCurve(b2dCorrCurve);
-        setHsWeightSource(hsWeight);
+        if (tab === "HS") {
+          setHsWeightSource(hsWeight);
+          setHsBrightAreaSource(hsBrightArea);
+          setHsMiddleAreaSource(hsMiddleArea);
+          setHsDarkAreaSource(hsDarkArea);
+          setHsSourceIdentity(sourceIdentity);
+        }
         setMessage(nextSections.length === 0 && !threshold && tab !== "HS" ? "当前源码范围内没有可展示字段" : null);
         setLoading(false);
       }
@@ -463,6 +599,13 @@ export function ChartMapMode({
         setMainTargetMidCurve(null);
         setMainTargetB2dCurve(null);
         setMainTargetB2dCorrCurve(null);
+        if (tab === "HS") {
+          setHsWeightSource(null);
+          setHsBrightAreaSource(null);
+          setHsMiddleAreaSource(null);
+          setHsDarkAreaSource(null);
+          setHsSourceIdentity(null);
+        }
         setMainThdValue(NaN);
         setMessage(err instanceof Error ? err.message : String(err));
         setLoading(false);
@@ -472,7 +615,7 @@ export function ChartMapMode({
     return () => {
       cancelled = true;
     };
-  }, [filePath, schema, sourceKey, sourceRevision, tab]);
+  }, [filePath, schema, sourceIdentity, sourceKey, sourceRevision, tab]);
 
   const setMainTCardExpanded = (cardId: MainTMetricCardId, expanded: boolean) => {
     const collapsed = new Set(mainTCardCollapsedIds);
@@ -502,6 +645,20 @@ export function ChartMapMode({
     }
     patchVis({ chart_hs_card_collapsed: HS_METRIC_CARD_ORDER.filter((id) => collapsed.has(id)) });
   };
+
+  useEffect(() => {
+    const targetCardId = hsMetricCardIdForFocusLabel(focusTarget?.label);
+    if (!targetCardId) return;
+    setTab("HS");
+    setHsCardExpanded(targetCardId, true);
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(hsMetricCardDomId(targetCardId))?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusTarget]);
 
   const jumpToHsAreaCard = (sourceId: string) => {
     const targetCardId = HS_TARGET_AREA_CARD_BY_ID[sourceId];
@@ -615,7 +772,8 @@ export function ChartMapMode({
     if (cardId === "hsWeight") {
       return sortableWrapper(
         <HsWeightCard
-          source={hsWeightSource}
+          domId={hsMetricCardDomId(cardId)}
+          source={currentHsWeightSource}
           bvValue={imageBvValue}
           b2dValue={b2dValue}
           midValue={midratioValue}
@@ -628,22 +786,76 @@ export function ChartMapMode({
         />,
       );
     }
-    const areaConfig: Record<Exclude<HsMetricCardId, "hsTarget" | "hsWeight">, { title: string; tone: HsWeightToneId }> = {
-      hsBright: { title: "HS Bright area", tone: "bright" },
-      hsMiddle: { title: "HS Middle area", tone: "middle" },
-      hsDark: { title: "HS Dark area", tone: "dark" },
-    };
-    const config = areaConfig[cardId as keyof typeof areaConfig];
-    if (!config) return null;
-    return sortableWrapper(
-      <HsAreaPlaceholderCard
-        domId={hsMetricCardDomId(cardId)}
-        title={config.title}
-        tone={config.tone}
-        initialExpanded={!collapsed}
-        onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
-      />,
-    );
+    if (cardId === "hsBright") {
+      const brightInput = hsTargetInputs.find((input) => input.id === "BT");
+      return sortableWrapper(
+        <HsAreaCard
+          domId={hsMetricCardDomId(cardId)}
+          title="HS Bright Area"
+          source={currentHsBrightAreaSource}
+          bvValue={imageBvValue}
+          axisValue={evdValue}
+          axisLabel="EVD"
+          thdLabel="BT_THD"
+          thdValue={brightInput?.thd ?? null}
+          cornerLabel="BV/EVD"
+          sourceJumpLabel="HS.Bright Area"
+          sourcePaths={[...HS_BRIGHT_AREA_SOURCE_PATHS]}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+        />,
+      );
+    }
+    if (cardId === "hsMiddle") {
+      const middleInput = hsTargetInputs.find((input) => input.id === "MT");
+      return sortableWrapper(
+        <HsAreaCard
+          domId={hsMetricCardDomId(cardId)}
+          title="HS Middle Area"
+          source={currentHsMiddleAreaSource}
+          bvValue={imageBvValue}
+          axisValue={b2mValue}
+          axisLabel="B2M"
+          thdLabel="MT_THD"
+          thdValue={middleInput?.thd ?? null}
+          cornerLabel="BV/B2M"
+          sourceJumpLabel="HS.Middle Area"
+          sourcePaths={[...HS_MIDDLE_AREA_SOURCE_PATHS]}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+        />,
+      );
+    }
+    if (cardId === "hsDark") {
+      const darkInput = hsTargetInputs.find((input) => input.id === "DT");
+      return sortableWrapper(
+        <HsAreaCard
+          domId={hsMetricCardDomId(cardId)}
+          title="HS Dark Area"
+          source={currentHsDarkAreaSource}
+          bvValue={imageBvValue}
+          axisValue={b2dValue}
+          axisLabel="B2D"
+          thdLabel="DT_THD"
+          thdValue={darkInput?.thd ?? null}
+          cornerLabel="BV/B2D"
+          sourceJumpLabel="HS.Dark Area"
+          sourcePaths={[...HS_DARK_AREA_SOURCE_PATHS]}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+        />,
+      );
+    }
+    return null;
   };
 
   return (
@@ -818,6 +1030,65 @@ async function loadHsWeightSource(filePath: string): Promise<HsWeightSource> {
   };
 }
 
+async function loadHsBrightAreaSource(filePath: string): Promise<HsAreaSource> {
+  return loadHsAreaSource(filePath, HS_BRIGHT_AREA_SOURCE_CONFIG);
+}
+
+async function loadHsMiddleAreaSource(filePath: string): Promise<HsAreaSource> {
+  return loadHsAreaSource(filePath, HS_MIDDLE_AREA_SOURCE_CONFIG);
+}
+
+async function loadHsDarkAreaSource(filePath: string): Promise<HsAreaSource> {
+  return loadHsAreaSource(filePath, HS_DARK_AREA_SOURCE_CONFIG);
+}
+
+async function loadHsAreaSource(filePath: string, config: HsAreaSourceConfig): Promise<HsAreaSource> {
+  const [rowHeaderFields, columnHeaderFields, valueFields, rowCountFields, columnCountFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, config.rowHeaderPath),
+    loadFieldEntriesAtPath(filePath, config.columnHeaderPath),
+    loadFieldEntriesAtPath(filePath, config.valuePath),
+    loadFieldEntriesAtPath(filePath, config.rowCountPath),
+    loadFieldEntriesAtPath(filePath, config.columnCountPath),
+  ]);
+  const numericRowHeaderFields = numericFieldEntries(rowHeaderFields);
+  const numericColumnHeaderFields = numericFieldEntries(columnHeaderFields);
+  const numericValueFields = numericFieldEntries(valueFields);
+  const specifiedRowCount = positiveIntegerFieldValue(rowCountFields);
+  const specifiedColumnCount = positiveIntegerFieldValue(columnCountFields);
+  const inferredShape = inferHsAreaMatrixShape(numericValueFields, config.valuePath);
+  const rowCount = specifiedRowCount
+    ?? positiveLength(numericRowHeaderFields.length)
+    ?? inferredShape.rowCount
+    ?? (specifiedColumnCount ? positiveLength(Math.ceil(numericValueFields.length / specifiedColumnCount)) : null)
+    ?? 1;
+  const columnCount = specifiedColumnCount
+    ?? positiveLength(numericColumnHeaderFields.length)
+    ?? inferredShape.columnCount
+    ?? positiveLength(Math.ceil(numericValueFields.length / rowCount))
+    ?? 1;
+  const rowAxis = buildHsAreaAxis(numericRowHeaderFields, rowCount);
+  const columnAxis = buildHsAreaAxis(numericColumnHeaderFields, columnCount);
+  const matrix = buildHsAreaMatrix(numericValueFields, rowCount, columnCount, config.valuePath);
+
+  return {
+    rowHeaderPath: config.rowHeaderPath,
+    columnHeaderPath: config.columnHeaderPath,
+    valuePath: config.valuePath,
+    rowCountPath: config.rowCountPath,
+    columnCountPath: config.columnCountPath,
+    rowCount,
+    columnCount,
+    rowHeaders: rowAxis.values,
+    rowHeaderFields: rowAxis.fields,
+    columnHeaders: columnAxis.values,
+    columnHeaderFields: columnAxis.fields,
+    values: matrix.values,
+    valueFields: matrix.fields,
+    fields: [...rowHeaderFields, ...columnHeaderFields, ...valueFields, ...rowCountFields, ...columnCountFields]
+      .sort(compareFieldEntries),
+  };
+}
+
 async function loadMainTargetMidCurve(
   filePath: string,
   paths: { x1: string; y1: string; x2: string; y2: string } = MID_CURVE_PATHS,
@@ -903,6 +1174,16 @@ function sanitiseHsMetricCollapsed(collapsed: string[] | undefined): HsMetricCar
 
 function hsMetricCardDomId(cardId: HsMetricCardId): string {
   return `chart-hs-card-${cardId}`;
+}
+
+function hsMetricCardIdForFocusLabel(label: string | undefined | null): HsMetricCardId | null {
+  const normalized = label?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "hs.weight" || normalized.startsWith("hs.weight.")) return "hsWeight";
+  if (normalized === "hs.dark area" || normalized.startsWith("hs.dark area.")) return "hsDark";
+  if (normalized === "hs.middle area" || normalized.startsWith("hs.middle area.")) return "hsMiddle";
+  if (normalized === "hs.bright area" || normalized.startsWith("hs.bright area.")) return "hsBright";
+  return null;
 }
 
 function coerceMidChartMode(value: string | undefined): MidChartMode {
@@ -2119,15 +2400,15 @@ function HsTargetCard({
                     <div style={hsTargetMetricRowsStyle}>
                       <div style={hsTargetMetricRowStyle("thd", !Number.isFinite(term.thd), active)}>
                         <span>THD</span>
-                        <strong>{formatThresholdNumber(term.thd)}</strong>
+                        <strong>{formatRoundedNumber(term.thd)}</strong>
                       </div>
                       <div style={hsTargetMetricRowStyle("y", !Number.isFinite(term.y), active)}>
                         <span>Y</span>
-                        <strong>{formatThresholdNumber(term.y)}</strong>
+                        <strong>{formatRoundedNumber(term.y)}</strong>
                       </div>
                       <div style={hsTargetMetricRowStyle("wet", !Number.isFinite(term.wet), active)}>
                         <span>Wet</span>
-                        <strong>{formatComputedNumber(term.wet)}</strong>
+                        <strong>{formatRoundedNumber(term.wet)}</strong>
                       </div>
                     </div>
                     <div style={hsTargetContributionStyle(active)}>
@@ -2178,6 +2459,7 @@ function SortableHsTargetTermCard({
 }
 
 function HsWeightCard({
+  domId,
   source,
   bvValue,
   b2dValue,
@@ -2189,6 +2471,7 @@ function HsWeightCard({
   initialExpanded,
   onExpandedChange,
 }: {
+  domId?: string;
   source: HsWeightSource | null;
   bvValue: string | null;
   b2dValue: string | null;
@@ -2230,21 +2513,28 @@ function HsWeightCard({
   const selectedPointText = formatHsSelectedPoint(bv, b2d, mid);
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
 
-  const updateWeightCell = (target: HsWeightCellTarget, nextValue: string) => {
-    if (!editableSource) return;
+  const previewWeightCell = (target: HsWeightCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
     if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewHsWeightSourceTarget(current, target, trimmed) : current);
+  };
+
+  const updateWeightCell = (target: HsWeightCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
     const field = getHsWeightTargetField(editableSource, target);
-    if (!field) return;
+    if (!field) return false;
     const nextText = replaceHsWeightCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
-    if (nextText === null) return;
+    if (nextText === null) return false;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
     setEditableSource((current) => current ? updateHsWeightSourceField(current, field, trimmed) : current);
+    return true;
   };
 
   return (
-    <section style={thresholdCardStyle}>
+    <section id={domId} style={thresholdCardStyle}>
       <div style={thresholdHeaderStyle}>
         <div style={thresholdTitleStyle}>HS Weight</div>
         <div style={thresholdGroupActionsStyle}>
@@ -2295,12 +2585,17 @@ function HsWeightCard({
       </div>
       {expanded && <div style={hsWeightBodyStyle}>
         <div style={hsWeightTableWrapStyle}>
-          <HsWeightGrid
-            source={editableSource}
-            selected={selected}
-            editable={canEdit}
-            onCellCommit={updateWeightCell}
-          />
+          {editableSource ? (
+            <HsWeightGrid
+              source={editableSource}
+              selected={selected}
+              editable={canEdit}
+              onCellPreview={previewWeightCell}
+              onCellCommit={updateWeightCell}
+            />
+          ) : (
+            <div style={hsWeightPendingStyle}>loading...</div>
+          )}
         </div>
       </div>}
     </section>
@@ -2311,12 +2606,14 @@ function HsWeightGrid({
   source,
   selected,
   editable,
+  onCellPreview,
   onCellCommit,
 }: {
   source: HsWeightSource | null;
   selected: HsWeightSelection;
   editable: boolean;
-  onCellCommit?: (target: HsWeightCellTarget, value: string) => void;
+  onCellPreview?: (target: HsWeightCellTarget, value: string) => void;
+  onCellCommit?: (target: HsWeightCellTarget, value: string) => boolean | void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
@@ -2326,28 +2623,29 @@ function HsWeightGrid({
   const displayMidAxis = midAxis.length > 0 ? midAxis : [NaN];
   const midColumnCount = displayMidAxis.length;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const sheet = sheetRef.current;
     if (!viewport || !sheet) return;
 
     let frame = 0;
-    const update = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const naturalWidth = Math.max(1, sheet.offsetWidth, sheet.scrollWidth);
-        const naturalHeight = Math.max(1, sheet.offsetHeight, sheet.scrollHeight);
-        const availableWidth = Math.max(1, viewport.clientWidth);
-        const scale = availableWidth / naturalWidth;
-        setFit({
-          scale,
-          width: naturalWidth * scale,
-          height: naturalHeight * scale,
-        });
+    const measure = () => {
+      const naturalWidth = Math.max(1, sheet.offsetWidth, sheet.scrollWidth);
+      const naturalHeight = Math.max(1, sheet.offsetHeight, sheet.scrollHeight);
+      const availableWidth = Math.max(1, viewport.clientWidth);
+      const scale = availableWidth / naturalWidth;
+      setFit({
+        scale,
+        width: naturalWidth * scale,
+        height: naturalHeight * scale,
       });
     };
+    const update = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(measure);
+    };
 
-    update();
+    measure();
     const observer = new ResizeObserver(update);
     observer.observe(viewport);
     observer.observe(sheet);
@@ -2382,6 +2680,7 @@ function HsWeightGrid({
                   editable={editable && Boolean(field)}
                   title={field ? `${source?.midPath} #${midIndex}` : "Mid%"}
                   style={hsWeightMidHeaderStyle(selected.midIndexes.has(midIndex))}
+                  onPreview={(value) => onCellPreview?.({ kind: "mid", midIndex }, value)}
                   onCommit={(value) => onCellCommit?.({ kind: "mid", midIndex }, value)}
                 />
               );
@@ -2397,6 +2696,7 @@ function HsWeightGrid({
                 editable={editable && Boolean(bvField)}
                 title={bvField ? `${source?.bvPath} #${bvIndex}` : "BV"}
                 style={hsWeightBvHeaderStyle(selected.bvIndexes.has(bvIndex), drAxis.length)}
+                onPreview={(value) => onCellPreview?.({ kind: "bv", bvIndex }, value)}
                 onCommit={(value) => onCellCommit?.({ kind: "bv", bvIndex }, value)}
               />
               <div style={hsWeightB2dColumnStyle}>
@@ -2409,6 +2709,7 @@ function HsWeightGrid({
                       editable={editable && Boolean(field)}
                       title={field ? `${source?.drB2dPath} #${bvIndex}:${drIndex}` : "DR:B2D"}
                       style={hsWeightB2dCellStyle(Boolean(selected.drIndexesByBv.get(bvIndex)?.has(drIndex)))}
+                      onPreview={(value) => onCellPreview?.({ kind: "dr", bvIndex, drIndex }, value)}
                       onCommit={(value) => onCellCommit?.({ kind: "dr", bvIndex, drIndex }, value)}
                     />
                   );
@@ -2432,6 +2733,13 @@ function HsWeightGrid({
                               editable={editable && Boolean(field)}
                               title={field ? `${source?.matrixPath} #${bvIndex}:${drIndex}:${midIndex}:${channelIndex}` : channel.id}
                               style={hsWeightMiniCellStyle(channel.id, selectedCell, channelIndex)}
+                              onPreview={(nextValue) => onCellPreview?.({
+                                kind: "value",
+                                bvIndex,
+                                drIndex,
+                                midIndex,
+                                channelIndex,
+                              }, nextValue)}
                               onCommit={(nextValue) => onCellCommit?.({
                                 kind: "value",
                                 bvIndex,
@@ -2461,15 +2769,20 @@ function HsWeightEditableCell({
   editable,
   title,
   style,
+  onPreview,
   onCommit,
 }: {
   value: string;
   editable: boolean;
   title: string;
   style: CSSProperties;
-  onCommit?: (value: string) => void;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
 }) {
   const [draftValue, setDraftValue] = useState(value);
+  const cellStyle = isHsWeightZeroCellText(draftValue)
+    ? { ...style, color: HS_WEIGHT_ZERO_TEXT_COLOR }
+    : style;
 
   useEffect(() => {
     setDraftValue(value);
@@ -2477,24 +2790,39 @@ function HsWeightEditableCell({
 
   const resetDraft = () => {
     setDraftValue(value);
+    onPreview?.(value);
   };
 
-  const commitDraft = () => {
-    if (!editable) return;
+  const commitDraft = (): boolean => {
+    if (!editable) return false;
     const nextValue = draftValue.trim();
-    if (nextValue === value.trim()) return;
-    onCommit?.(nextValue);
+    if (nextValue === value.trim()) return true;
+    if (!isSourceNumberText(nextValue)) {
+      resetDraft();
+      return false;
+    }
+    const committed = onCommit?.(nextValue);
+    if (committed === false) {
+      resetDraft();
+      return false;
+    }
+    return true;
+  };
+
+  const updateDraft = (nextValue: string) => {
+    setDraftValue(nextValue);
+    onPreview?.(isSourceNumberText(nextValue.trim()) ? nextValue : value);
   };
 
   return (
-    <div style={style}>
+    <div style={cellStyle}>
       <input
         aria-label={title}
         value={draftValue}
         readOnly={!editable}
         tabIndex={editable ? 0 : -1}
-        onBlur={resetDraft}
-        onChange={(event) => setDraftValue(event.target.value)}
+        onBlur={commitDraft}
+        onChange={(event) => updateDraft(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -2513,45 +2841,216 @@ function HsWeightEditableCell({
   );
 }
 
-function HsAreaPlaceholderCard({
+function HsAreaCard({
   domId,
   title,
-  tone,
+  source,
+  bvValue,
+  axisValue,
+  axisLabel,
+  thdLabel,
+  thdValue,
+  cornerLabel,
+  sourceJumpLabel,
+  sourcePaths,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
   initialExpanded,
   onExpandedChange,
 }: {
   domId?: string;
   title: string;
-  tone: HsWeightToneId;
+  source: HsAreaSource | null;
+  bvValue: string | null;
+  axisValue: string | null;
+  axisLabel: string;
+  thdLabel: string;
+  thdValue: string | null;
+  cornerLabel: string;
+  sourceJumpLabel: string;
+  sourcePaths: string[];
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
   useEffect(() => {
     setExpanded(initialExpanded ?? true);
   }, [initialExpanded]);
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+  const bv = parseFiniteNumber(bvValue);
+  const axis = parseFiniteNumber(axisValue);
+  const interpolatedThd = editableSource ? interpolateHsAreaSource(editableSource, bv, axis) : NaN;
+  const selected = locateHsAreaSelection(editableSource, bv, axis);
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+
+  const previewAreaCell = (target: HsAreaCellTarget, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewHsAreaSourceTarget(current, target, trimmed) : current);
+  };
+
+  const updateAreaCell = (target: HsAreaCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const field = getHsAreaTargetField(editableSource, target);
+    if (!field) return false;
+    const nextText = replaceHsAreaCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateHsAreaSourceField(current, field, trimmed) : current);
+    return true;
+  };
+
   return (
-    <section id={domId} style={hsAreaPlaceholderStyle(tone)}>
+    <section id={domId} style={thresholdCardStyle}>
       <div style={thresholdHeaderStyle}>
         <div style={thresholdTitleStyle}>{title}</div>
-        <button
-          type="button"
-          title={expanded ? `Collapse ${title}` : `Expand ${title}`}
-          aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
-          onClick={() => setExpanded((current) => {
-            const next = !current;
-            onExpandedChange?.(next);
-            return next;
-          })}
-          style={sourceButtonStyle(true)}
-        >
-          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
-        </button>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            title={`Jump to ${title} source`}
+            aria-label={`Jump to ${title} source`}
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.(sourceJumpLabel, {
+              paths: sourcePaths,
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            onClick={() => setExpanded((current) => {
+              const next = !current;
+              onExpandedChange?.(next);
+              return next;
+            })}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
-      {expanded && <div style={hsAreaPlaceholderBodyStyle}>
-        <span>Data source pending</span>
+      <div style={thresholdFormulaStyle}>
+        <strong style={hsWeightSelectedPointStyle}>
+          BV {formatComputedNumber(bv)} / {axisLabel} {formatComputedNumber(axis)}
+        </strong>
+        <span style={hsWeightFormulaTextStyle}>
+          <span>{thdLabel}:</span>
+          <span style={hsWeightWetValueStyle}>{formatHsAreaReadoutValue(thdValue)}</span>
+          <span>|</span>
+          <span style={hsWeightInterpolatedValueStyle}>{formatComputedNumber(interpolatedThd)}</span>
+        </span>
+      </div>
+      {expanded && <div style={hsDarkAreaBodyStyle}>
+        {editableSource ? (
+          <HsAreaGrid
+            source={editableSource}
+            selected={selected}
+            editable={canEdit}
+            cornerLabel={cornerLabel}
+            columnLabel={axisLabel}
+            onCellPreview={previewAreaCell}
+            onCellCommit={updateAreaCell}
+          />
+        ) : (
+          <div style={hsWeightPendingStyle}>loading...</div>
+        )}
       </div>}
     </section>
+  );
+}
+
+function HsAreaGrid({
+  source,
+  selected,
+  editable,
+  cornerLabel,
+  columnLabel,
+  onCellPreview,
+  onCellCommit,
+}: {
+  source: HsAreaSource | null;
+  selected: HsAreaSelection;
+  editable: boolean;
+  cornerLabel: string;
+  columnLabel: string;
+  onCellPreview?: (target: HsAreaCellTarget, value: string) => void;
+  onCellCommit?: (target: HsAreaCellTarget, value: string) => boolean | void;
+}) {
+  const rowCount = Math.max(1, source?.rowCount ?? 1);
+  const columnCount = Math.max(1, source?.columnCount ?? 1);
+
+  return (
+    <div style={hsDarkAreaTableWrapStyle}>
+      <div style={hsDarkAreaGridStyle(columnCount)}>
+        <div style={hsDarkAreaCornerStyle}>{cornerLabel}</div>
+        {Array.from({ length: columnCount }, (_, columnIndex) => {
+          const field = source?.columnHeaderFields[columnIndex] ?? null;
+          const value = source?.columnHeaders[columnIndex] ?? NaN;
+          return (
+            <HsWeightEditableCell
+              key={`column:${columnIndex}`}
+              value={field?.value ?? formatHsAreaAxisValue(value, columnIndex, "C")}
+              editable={editable && Boolean(field)}
+              title={field ? `${source?.columnHeaderPath} #${columnIndex}` : columnLabel}
+              style={hsDarkAreaColumnHeaderStyle(selected.columnIndexes.has(columnIndex))}
+              onPreview={(nextValue) => onCellPreview?.({ kind: "columnHeader", columnIndex }, nextValue)}
+              onCommit={(nextValue) => onCellCommit?.({ kind: "columnHeader", columnIndex }, nextValue)}
+            />
+          );
+        })}
+        {Array.from({ length: rowCount }, (_, rowIndex) => {
+          const rowField = source?.rowHeaderFields[rowIndex] ?? null;
+          const rowValue = source?.rowHeaders[rowIndex] ?? NaN;
+          return (
+            <Fragment key={`row:${rowIndex}`}>
+              <HsWeightEditableCell
+                value={rowField?.value ?? formatHsAreaAxisValue(rowValue, rowIndex, "R")}
+                editable={editable && Boolean(rowField)}
+                title={rowField ? `${source?.rowHeaderPath} #${rowIndex}` : "BV"}
+                style={hsDarkAreaRowHeaderStyle(selected.rowIndexes.has(rowIndex))}
+                onPreview={(nextValue) => onCellPreview?.({ kind: "rowHeader", rowIndex }, nextValue)}
+                onCommit={(nextValue) => onCellCommit?.({ kind: "rowHeader", rowIndex }, nextValue)}
+              />
+              {Array.from({ length: columnCount }, (_, columnIndex) => {
+                const field = source?.valueFields[rowIndex]?.[columnIndex] ?? null;
+                const value = source?.values[rowIndex]?.[columnIndex] ?? NaN;
+                const active = selected.rowIndexes.has(rowIndex) && selected.columnIndexes.has(columnIndex);
+                return (
+                  <HsWeightEditableCell
+                    key={`cell:${rowIndex}:${columnIndex}`}
+                    value={field?.value ?? formatHsAreaCellValue(value)}
+                    editable={editable && Boolean(field)}
+                    title={field ? `${source?.valuePath} #${rowIndex}:${columnIndex}` : "THD"}
+                    style={hsDarkAreaDataCellStyle(active)}
+                    onPreview={(nextValue) => onCellPreview?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
+                    onCommit={(nextValue) => onCellCommit?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
+                  />
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -3531,10 +4030,103 @@ function mtwvCellIntensity(value: number, min: number, max: number): number {
   return clamp((value - min) / (max - min), 0, 1);
 }
 
+function positiveLength(value: number): number | null {
+  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.trunc(value)) : null;
+}
+
+function positiveIntegerFieldValue(fields: FieldEntry[]): number | null {
+  for (const field of numericFieldEntries(fields)) {
+    const value = positiveLength(parseFiniteNumber(field.value));
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function inferHsAreaMatrixShape(
+  fields: FieldEntry[],
+  valuePath: string,
+): { rowCount: number | null; columnCount: number | null } {
+  let maxRowIndex = -1;
+  let maxColumnIndex = -1;
+  for (const field of fields) {
+    const location = hsAreaMatrixFieldLocation(field.path, valuePath);
+    if (!location) continue;
+    maxRowIndex = Math.max(maxRowIndex, location.rowIndex);
+    maxColumnIndex = Math.max(maxColumnIndex, location.columnIndex);
+  }
+  return {
+    rowCount: maxRowIndex >= 0 ? maxRowIndex + 1 : null,
+    columnCount: maxColumnIndex >= 0 ? maxColumnIndex + 1 : null,
+  };
+}
+
+function buildHsAreaAxis(
+  fields: FieldEntry[],
+  count: number,
+): { values: number[]; fields: Array<FieldEntry | null> } {
+  return {
+    values: Array.from({ length: count }, (_, index) => parseFiniteNumber(fields[index]?.value)),
+    fields: Array.from({ length: count }, (_, index): FieldEntry | null => fields[index] ?? null),
+  };
+}
+
+function buildHsAreaMatrix(
+  fields: FieldEntry[],
+  rowCount: number,
+  columnCount: number,
+  valuePath: string,
+): { values: number[][]; fields: Array<Array<FieldEntry | null>> } {
+  const values = Array.from({ length: rowCount }, () =>
+    Array.from({ length: columnCount }, () => NaN),
+  );
+  const matrixFields: Array<Array<FieldEntry | null>> = Array.from({ length: rowCount }, () =>
+    Array.from({ length: columnCount }, (): FieldEntry | null => null),
+  );
+  let usedStructuredPath = false;
+
+  for (const field of fields) {
+    const location = hsAreaMatrixFieldLocation(field.path, valuePath);
+    if (!location) continue;
+    const { rowIndex, columnIndex } = location;
+    if (rowIndex < 0 || rowIndex >= rowCount || columnIndex < 0 || columnIndex >= columnCount) continue;
+    values[rowIndex][columnIndex] = parseFiniteNumber(field.value);
+    matrixFields[rowIndex][columnIndex] = field;
+    usedStructuredPath = true;
+  }
+
+  if (!usedStructuredPath) {
+    fields.slice(0, rowCount * columnCount).forEach((field, index) => {
+      const rowIndex = Math.floor(index / columnCount);
+      const columnIndex = index % columnCount;
+      values[rowIndex][columnIndex] = parseFiniteNumber(field.value);
+      matrixFields[rowIndex][columnIndex] = field;
+    });
+  }
+
+  return { values, fields: matrixFields };
+}
+
+function hsAreaMatrixFieldLocation(path: string, valuePath: string): { rowIndex: number; columnIndex: number } | null {
+  const indexes = childIndexesAfterPrefix(path, valuePath);
+  const directIndex = directValueIndex(path);
+  if (indexes.length >= 2) {
+    return { rowIndex: indexes[0], columnIndex: indexes[1] };
+  }
+  if (indexes.length === 1 && directIndex >= 0) {
+    return { rowIndex: indexes[0], columnIndex: directIndex };
+  }
+  return null;
+}
+
 interface HsWeightSelection {
   bvIndexes: Set<number>;
   drIndexesByBv: Map<number, Set<number>>;
   midIndexes: Set<number>;
+}
+
+interface HsAreaSelection {
+  rowIndexes: Set<number>;
+  columnIndexes: Set<number>;
 }
 
 function numericFieldEntries(fields: FieldEntry[]): FieldEntry[] {
@@ -3791,6 +4383,71 @@ function locateHsWeightSelection(source: HsWeightSource | null, bv: number, drB2
   };
 }
 
+function getHsAreaCell(source: HsAreaSource, rowIndex: number, columnIndex: number): number {
+  return source.values[rowIndex]?.[columnIndex] ?? NaN;
+}
+
+function interpolateHsAreaSource(source: HsAreaSource, bv: number, axisValue: number): number {
+  if (!Number.isFinite(bv) || !Number.isFinite(axisValue)) return NaN;
+  const rowBounds = boundsForTableAxis(bv, source.rowHeaders);
+  const columnBounds = boundsForTableAxis(axisValue, source.columnHeaders);
+  let total = 0;
+  let weightTotal = 0;
+
+  for (const rowPoint of rowBounds.points) {
+    for (const columnPoint of columnBounds.points) {
+      const value = getHsAreaCell(source, rowPoint.index, columnPoint.index);
+      if (!Number.isFinite(value)) continue;
+      const weight = rowPoint.weight * columnPoint.weight;
+      total += value * weight;
+      weightTotal += weight;
+    }
+  }
+
+  return weightTotal > 0 ? total / weightTotal : NaN;
+}
+
+function locateHsAreaSelection(source: HsAreaSource | null, bv: number, axisValue: number): HsAreaSelection {
+  if (!source) return { rowIndexes: new Set(), columnIndexes: new Set() };
+  const rowBounds = boundsForTableAxis(bv, source.rowHeaders);
+  const columnBounds = boundsForTableAxis(axisValue, source.columnHeaders);
+  return {
+    rowIndexes: new Set(rowBounds.points.map((point) => point.index)),
+    columnIndexes: new Set(columnBounds.points.map((point) => point.index)),
+  };
+}
+
+function boundsForTableAxis(value: number, axis: readonly number[]): { points: Array<{ index: number; value: number; weight: number }> } {
+  const points = axis
+    .map((axisValue, index) => ({ index, value: axisValue }))
+    .filter((point) => Number.isFinite(point.value))
+    .sort((a, b) => a.value - b.value);
+  if (points.length === 0) return { points: [] };
+  const exact = Number.isFinite(value) ? points.find((point) => point.value === value) : undefined;
+  if (exact) return { points: [{ ...exact, weight: 1 }] };
+  if (!Number.isFinite(value) || points.length === 1 || value <= points[0].value) {
+    return { points: [{ ...points[0], weight: 1 }] };
+  }
+  const last = points[points.length - 1];
+  if (value >= last.value) return { points: [{ ...last, weight: 1 }] };
+  for (let i = 1; i < points.length; i += 1) {
+    const left = points[i - 1];
+    const right = points[i];
+    if (value <= right.value) {
+      if (right.value === left.value) return { points: [{ ...left, weight: 1 }] };
+      const rightWeight = (value - left.value) / (right.value - left.value);
+      const leftWeight = 1 - rightWeight;
+      return {
+        points: [
+          { ...left, weight: leftWeight },
+          { ...right, weight: rightWeight },
+        ],
+      };
+    }
+  }
+  return { points: [{ ...last, weight: 1 }] };
+}
+
 function boundsForAxis(value: number, axis: readonly number[]): { points: Array<{ index: number; value: number; weight: number }> } {
   if (axis.length === 0) return { points: [] };
   if (!Number.isFinite(value) || axis.length === 1 || value <= axis[0]) {
@@ -3823,6 +4480,32 @@ function formatHsSelectedPoint(bv: number, b2d: number, mid: number): string {
 function formatHsWeightCell(value: number): string {
   if (!Number.isFinite(value)) return "-";
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatHsAreaReadoutValue(value: string | null): string {
+  const parsed = parseFiniteNumber(value);
+  return Number.isFinite(parsed) ? formatComputedNumber(parsed) : "-";
+}
+
+function formatHsAreaAxisValue(value: number, index: number, prefix: "R" | "C"): string {
+  return Number.isFinite(value) ? formatComputedNumber(value) : `${prefix}${index + 1}`;
+}
+
+function formatHsAreaCellValue(value: number): string {
+  return Number.isFinite(value) ? formatComputedNumber(value) : "-";
+}
+
+function isHsWeightZeroCellText(value: string): boolean {
+  const text = value.trim();
+  if (!isSourceNumberText(text)) return false;
+
+  const unsignedText = text.replace(/^[-+]/, "");
+  if (/^0x/i.test(unsignedText)) {
+    return /^0x0+$/i.test(unsignedText);
+  }
+
+  const mantissa = unsignedText.split(/[eE]/, 1)[0] ?? "";
+  return mantissa.includes("0") && /^[0.]+$/.test(mantissa);
 }
 
 function formatHsWeightInterpolatedValue(value: number): string {
@@ -4090,6 +4773,49 @@ function getHsWeightTargetField(source: HsWeightSource, target: HsWeightCellTarg
   return source.valueFields[target.bvIndex]?.[target.drIndex]?.[target.midIndex]?.[target.channelIndex] ?? null;
 }
 
+function previewHsWeightSourceTarget(source: HsWeightSource, target: HsWeightCellTarget, value: string): HsWeightSource {
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  if (target.kind === "bv") {
+    return {
+      ...source,
+      bvAxis: source.bvAxis.map((item, index) => index === target.bvIndex ? numericValue : item),
+    };
+  }
+  if (target.kind === "dr") {
+    return {
+      ...source,
+      drB2dRows: source.drB2dRows.map((row, bvIndex) =>
+        bvIndex === target.bvIndex
+          ? row.map((item, drIndex) => drIndex === target.drIndex ? numericValue : item)
+          : row,
+      ),
+    };
+  }
+  if (target.kind === "mid") {
+    return {
+      ...source,
+      midAxis: source.midAxis.map((item, index) => index === target.midIndex ? numericValue : item),
+    };
+  }
+  return {
+    ...source,
+    values: source.values.map((bvRows, bvIndex) =>
+      bvIndex === target.bvIndex
+        ? bvRows.map((drRows, drIndex) =>
+            drIndex === target.drIndex
+              ? drRows.map((midRows, midIndex) =>
+                  midIndex === target.midIndex
+                    ? midRows.map((item, channelIndex) => channelIndex === target.channelIndex ? numericValue : item)
+                    : midRows,
+                )
+              : drRows,
+          )
+        : bvRows,
+    ),
+  };
+}
+
 function updateHsWeightSourceField(source: HsWeightSource, field: FieldEntry, value: string): HsWeightSource {
   const numericValue = parseFiniteNumber(value);
   const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
@@ -4125,9 +4851,79 @@ function updateHsWeightSourceField(source: HsWeightSource, field: FieldEntry, va
   };
 }
 
+function getHsAreaTargetField(source: HsAreaSource, target: HsAreaCellTarget): FieldEntry | null {
+  if (target.kind === "rowHeader") return source.rowHeaderFields[target.rowIndex] ?? null;
+  if (target.kind === "columnHeader") return source.columnHeaderFields[target.columnIndex] ?? null;
+  return source.valueFields[target.rowIndex]?.[target.columnIndex] ?? null;
+}
+
+function previewHsAreaSourceTarget(source: HsAreaSource, target: HsAreaCellTarget, value: string): HsAreaSource {
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  if (target.kind === "rowHeader") {
+    return {
+      ...source,
+      rowHeaders: source.rowHeaders.map((item, index) => index === target.rowIndex ? numericValue : item),
+    };
+  }
+  if (target.kind === "columnHeader") {
+    return {
+      ...source,
+      columnHeaders: source.columnHeaders.map((item, index) => index === target.columnIndex ? numericValue : item),
+    };
+  }
+  return {
+    ...source,
+    values: source.values.map((row, rowIndex) =>
+      rowIndex === target.rowIndex
+        ? row.map((item, columnIndex) => columnIndex === target.columnIndex ? numericValue : item)
+        : row,
+    ),
+  };
+}
+
+function updateHsAreaSourceField(source: HsAreaSource, field: FieldEntry, value: string): HsAreaSource {
+  const numericValue = parseFiniteNumber(value);
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  const updateValue = (candidate: number, candidateField: FieldEntry | null): number =>
+    candidateField && sameFieldEntry(candidateField, field) && Number.isFinite(numericValue) ? numericValue : candidate;
+
+  return {
+    ...source,
+    rowHeaders: source.rowHeaders.map((item, index) => updateValue(item, source.rowHeaderFields[index] ?? null)),
+    rowHeaderFields: source.rowHeaderFields.map(updateField),
+    columnHeaders: source.columnHeaders.map((item, index) => updateValue(item, source.columnHeaderFields[index] ?? null)),
+    columnHeaderFields: source.columnHeaderFields.map(updateField),
+    values: source.values.map((row, rowIndex) =>
+      row.map((item, columnIndex) => updateValue(item, source.valueFields[rowIndex]?.[columnIndex] ?? null)),
+    ),
+    valueFields: source.valueFields.map((row) => row.map(updateField)),
+    fields: source.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
 function replaceHsWeightCellInSourceText(
   sourceText: string,
   source: HsWeightSource,
+  field: FieldEntry,
+  nextValue: string,
+): string | null {
+  return replaceSourceFieldInSourceText(sourceText, source.fields, field, nextValue);
+}
+
+function replaceHsAreaCellInSourceText(
+  sourceText: string,
+  source: HsAreaSource,
+  field: FieldEntry,
+  nextValue: string,
+): string | null {
+  return replaceSourceFieldInSourceText(sourceText, source.fields, field, nextValue);
+}
+
+function replaceSourceFieldInSourceText(
+  sourceText: string,
+  fields: FieldEntry[],
   field: FieldEntry,
   nextValue: string,
 ): string | null {
@@ -4137,7 +4933,7 @@ function replaceHsWeightCellInSourceText(
   const line = lines[lineIndex];
   if (line === undefined) return null;
 
-  const fieldsOnLine = source.fields
+  const fieldsOnLine = fields
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.line === field.line)
     .sort((a, b) => a.item.index - b.item.index || a.item.path.localeCompare(b.item.path) || a.index - b.index);
@@ -4274,6 +5070,10 @@ function formatComputedNumber(value: number): string {
 
 function formatThresholdNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "-";
+}
+
+function formatRoundedNumber(value: number): string {
+  return Number.isFinite(value) ? String(Math.round(value)) : "-";
 }
 
 function formatExponentCoefficient(value: number): string {
@@ -4765,7 +5565,9 @@ const HS_WEIGHT_FRAME_BORDER = `1.5px solid ${HS_WEIGHT_LINE_COLOR}`;
 const HS_WEIGHT_MAJOR_BORDER = `1px solid ${HS_WEIGHT_LINE_COLOR}`;
 const HS_WEIGHT_GRID_BORDER = `1px solid ${HS_WEIGHT_SUBTLE_LINE_COLOR}`;
 const HS_WEIGHT_MID_BORDER = "1px solid #000";
-const HS_WEIGHT_MID_TEXT_COLOR = "#000";
+const HS_WEIGHT_MID_TEXT_COLOR = "var(--hs-weight-cell-fg, var(--normal-sheet-text))";
+const HS_WEIGHT_DR_TEXT_COLOR = "var(--hs-weight-dr-fg, rgb(192, 0, 74))";
+const HS_WEIGHT_ZERO_TEXT_COLOR = "var(--hs-weight-zero-fg, rgb(183, 166, 183))";
 const HS_WEIGHT_BV_BACKGROUND = "var(--hs-weight-bv-bg)";
 const HS_WEIGHT_DR_BACKGROUND = "var(--hs-weight-dr-bg)";
 
@@ -4775,6 +5577,18 @@ const hsWeightTableWrapStyle: CSSProperties = {
   border: "none",
   borderRadius: 0,
   background: "transparent",
+};
+
+const hsWeightPendingStyle: CSSProperties = {
+  minHeight: 112,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 12,
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground2)",
 };
 
 const hsWeightScaleViewportStyle: CSSProperties = {
@@ -4932,7 +5746,7 @@ function hsWeightB2dCellStyle(active: boolean): CSSProperties {
     minHeight: 20,
     borderBottom: HS_WEIGHT_GRID_BORDER,
     background: HS_WEIGHT_DR_BACKGROUND,
-    color: active ? "var(--colorBrandForeground1)" : "var(--colorPaletteRedForeground1)",
+    color: active ? "var(--colorBrandForeground1)" : HS_WEIGHT_DR_TEXT_COLOR,
     fontWeight: 900,
   };
 }
@@ -4960,7 +5774,7 @@ const hsWeightMiniTableStyle: CSSProperties = {
   background: "var(--colorNeutralBackground1)",
 };
 
-function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean, columnIndex: number): CSSProperties {
+function hsWeightMiniCellStyle(_tone: HsWeightToneId, active: boolean, columnIndex: number): CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
@@ -4968,7 +5782,7 @@ function hsWeightMiniCellStyle(tone: HsWeightToneId, active: boolean, columnInde
     minHeight: 19,
     boxSizing: "border-box",
     borderRight: columnIndex < HS_WEIGHT_CHANNELS.length - 1 ? HS_WEIGHT_GRID_BORDER : "none",
-    color: active ? "var(--colorBrandForeground1)" : hsWeightMiniForeground(tone),
+    color: active ? "var(--colorBrandForeground1)" : HS_WEIGHT_MID_TEXT_COLOR,
     background: active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, transparent)" : "transparent",
     fontWeight: active ? 900 : 700,
   };
@@ -4980,36 +5794,101 @@ const hsWeightMiniRowDividerStyle: CSSProperties = {
   borderBottom: HS_WEIGHT_GRID_BORDER,
 };
 
-function hsAreaPlaceholderStyle(tone: HsWeightToneId): CSSProperties {
-  return {
-    ...thresholdCardStyle,
-    minHeight: 156,
-    borderColor: hsToneStroke(tone),
-    boxShadow: "none",
-  };
-}
-
-const hsAreaPlaceholderBodyStyle: CSSProperties = {
-  minHeight: 112,
+const hsDarkAreaBodyStyle: CSSProperties = {
   display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "var(--colorNeutralForeground3)",
-  fontSize: 12,
-  borderTop: "1px solid var(--colorNeutralStroke2)",
+  flexDirection: "column",
+  minWidth: 0,
+  padding: 12,
   background: "var(--colorNeutralBackground1)",
 };
 
-function hsToneStroke(tone: HsWeightToneId): string {
-  if (tone === "dark") return "color-mix(in srgb, #66a83f 58%, var(--colorNeutralStroke2))";
-  if (tone === "middle" || tone === "target") return "color-mix(in srgb, #1888d8 58%, var(--colorNeutralStroke2))";
-  return "color-mix(in srgb, #d83b7d 58%, var(--colorNeutralStroke2))";
+const hsDarkAreaTableWrapStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+function hsDarkAreaGridStyle(columnCount: number): CSSProperties {
+  const count = Math.max(1, columnCount);
+  const compact = count > 7;
+  return {
+    display: "grid",
+    gridTemplateColumns: `${compact ? "minmax(50px, 0.85fr)" : "minmax(64px, 0.9fr)"} repeat(${count}, minmax(0, 1fr))`,
+    gridAutoRows: compact ? "22px" : "24px",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflow: "hidden",
+    border: HS_WEIGHT_FRAME_BORDER,
+    borderRadius: 8,
+    background: "var(--colorNeutralBackground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: compact ? 10 : 11,
+    lineHeight: 1.1,
+  };
 }
 
-function hsWeightMiniForeground(tone: HsWeightToneId): string {
-  if (tone === "dark") return "var(--colorNeutralForeground3)";
-  if (tone === "bright") return "var(--colorPaletteRedForeground1)";
-  return "var(--colorNeutralForeground1)";
+const hsDarkAreaCornerStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "0 5px",
+  borderRight: HS_WEIGHT_MAJOR_BORDER,
+  borderBottom: HS_WEIGHT_MAJOR_BORDER,
+  background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 72%, var(--colorNeutralBackground1))",
+  color: "var(--normal-sheet-palegreen-fg)",
+  fontWeight: 900,
+};
+
+function hsDarkAreaColumnHeaderStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "0 4px",
+    borderRight: HS_WEIGHT_GRID_BORDER,
+    borderBottom: HS_WEIGHT_MAJOR_BORDER,
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+      : HS_WEIGHT_DR_BACKGROUND,
+    color: active ? "var(--colorBrandForeground1)" : HS_WEIGHT_DR_TEXT_COLOR,
+    fontWeight: 900,
+  };
+}
+
+function hsDarkAreaRowHeaderStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "0 5px",
+    borderRight: HS_WEIGHT_MAJOR_BORDER,
+    borderBottom: HS_WEIGHT_GRID_BORDER,
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+      : HS_WEIGHT_BV_BACKGROUND,
+    color: active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-palegreen-fg)",
+    fontWeight: 900,
+  };
+}
+
+function hsDarkAreaDataCellStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "0 4px",
+    borderRight: HS_WEIGHT_GRID_BORDER,
+    borderBottom: HS_WEIGHT_GRID_BORDER,
+    background: active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, transparent)" : "transparent",
+    color: active ? "var(--colorBrandForeground1)" : HS_WEIGHT_MID_TEXT_COLOR,
+    fontWeight: active ? 900 : 700,
+  };
 }
 
 const thresholdGroupStyle: CSSProperties = {
