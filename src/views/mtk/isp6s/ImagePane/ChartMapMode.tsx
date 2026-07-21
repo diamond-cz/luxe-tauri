@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import {
   DndContext, closestCenter, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -8,6 +8,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { Panel, PanelGroup } from "react-resizable-panels";
 
 import {
   cppGetFieldsAtPath,
@@ -17,6 +18,7 @@ import {
   type Isp6sSchemaRoot,
 } from "@/ipc/cppParser";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { FieldEntry } from "@/types/cpp_parser";
 
@@ -27,6 +29,11 @@ type MidChartSource = "mid" | "mid_value" | "corr_dr_midratio" | "dr_midratio_or
 type BindingPanelKind = "bv" | "mid";
 type MainTMetricCardId = "mainThd" | "mtwv" | "mainTarget";
 type HsMetricCardId = "hsTarget" | "hsWeight" | "hsBright" | "hsMiddle" | "hsDark";
+type HsTargetTermId = "BT" | "MT" | "DT";
+type HsTargetFormulaMode = "full" | "compact";
+type NsMetricCardId = "nsTarget" | "nsProb" | "nsNorT" | "nsBT" | "nsDT";
+type NsTargetTermId = "NorT" | "BT" | "DT";
+type NsAreaToneId = "NorT" | "BT";
 type HsWeightToneId = "target" | "dark" | "middle" | "bright";
 type HsWeightCellTarget =
   | { kind: "bv"; bvIndex: number }
@@ -159,15 +166,124 @@ interface BindingEntry {
   values: string[];
 }
 
+interface NsLowBndBounds {
+  low: number;
+  limit: number;
+}
+
+type NsDtCellId = "darkY" | "thd" | "limit";
+
+interface NsDtSource {
+  darkYPath: string;
+  thdPath: string;
+  limitPath: string;
+  darkYValue: number;
+  thdValue: number;
+  limitValue: number;
+  darkYField: FieldEntry | null;
+  thdField: FieldEntry | null;
+  limitField: FieldEntry | null;
+  fields: FieldEntry[];
+}
+
+interface NsProbabilityCurveSource {
+  bv: NsProbabilityCurve;
+  cdf: NsProbabilityCurve;
+  fields: FieldEntry[];
+}
+
+interface NsProbabilityCurve {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  fields: Record<NsProbabilityCurveFieldId, FieldEntry | null>;
+}
+
+type NsProbabilityCurveId = "bv" | "cdf";
+type NsProbabilityCurveFieldId = "x0" | "x1" | "y0" | "y1";
+type NsProbabilityCurveCellTarget = {
+  curveId: NsProbabilityCurveId;
+  fieldId: NsProbabilityCurveFieldId;
+};
+
+type NsNorTCellTarget =
+  | { kind: "thdTable"; row: "bv" | "thd"; index: number }
+  | { kind: "evdDefine"; row: "interval" | "pcnt"; index: number }
+  | { kind: "flatSetting"; id: NsNorTFlatSettingId }
+  | { kind: "flatProb"; fieldId: NsProbabilityCurveFieldId };
+type NsNorTFlatSettingId = "nsEn" | "nsPcnt" | "flatThd";
+
+interface NsNorTSource {
+  bvPath: string;
+  thdPath: string;
+  bvValues: number[];
+  thdValues: number[];
+  bvFields: Array<FieldEntry | null>;
+  thdFields: Array<FieldEntry | null>;
+  nsEvdDefinePath: string;
+  nsEvdIntervalValues: number[];
+  nsEvdIntervalFields: Array<FieldEntry | null>;
+  nsEvdDefineValues: number[];
+  nsEvdDefineFields: Array<FieldEntry | null>;
+  flatSettings: Record<NsNorTFlatSettingId, {
+    label: string;
+    path: string;
+    value: number;
+    field: FieldEntry | null;
+  }>;
+  flatProb: NsProbabilityCurve;
+  fields: FieldEntry[];
+}
+
+interface NsAreaComputation {
+  interpolatedThd: number;
+  flatThd: number;
+  interpolatedProb: number;
+  finalThd: number;
+}
+
+interface TouchSourceValue {
+  path: string;
+  value: number;
+  field: FieldEntry | null;
+}
+
+interface TouchTargetSource {
+  cwrLowBound: TouchSourceValue;
+  cwrHighBound: TouchSourceValue;
+  meterWeight: TouchSourceValue;
+  meterYLowBound: TouchSourceValue;
+  meterYHighBound: TouchSourceValue;
+  meterStableMax: TouchSourceValue;
+  meterStableMin: TouchSourceValue;
+  fields: FieldEntry[];
+}
+
+type TouchMeterParamId = "meterWeight" | "yLow" | "yHigh";
+type TouchMeterParamDrafts = Record<TouchMeterParamId, string>;
+
 const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT", "Touch"];
 const SOURCE_NUMBER_RE = /[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 const MAIN_T_METRIC_CARD_ORDER: MainTMetricCardId[] = ["mainThd", "mtwv", "mainTarget"];
 const HS_METRIC_CARD_ORDER: HsMetricCardId[] = ["hsTarget", "hsWeight", "hsBright", "hsMiddle", "hsDark"];
-const HS_TARGET_TERM_ORDER = ["BT", "MT", "DT"];
+const NS_METRIC_CARD_ORDER: NsMetricCardId[] = ["nsTarget", "nsProb", "nsNorT", "nsBT", "nsDT"];
+const HS_TARGET_TERM_ORDER: HsTargetTermId[] = ["BT", "MT", "DT"];
+const NS_TARGET_TERM_ORDER: NsTargetTermId[] = ["NorT", "BT", "DT"];
 const HS_TARGET_AREA_CARD_BY_ID: Record<string, HsMetricCardId> = {
   BT: "hsBright",
   MT: "hsMiddle",
   DT: "hsDark",
+};
+const NS_TARGET_AREA_CARD_BY_ID: Record<NsTargetTermId, NsMetricCardId> = {
+  NorT: "nsNorT",
+  BT: "nsBT",
+  DT: "nsDT",
+};
+const HS_TARGET_WEIGHT_TONE_BY_ID: Record<HsTargetTermId, HsWeightToneId> = {
+  BT: "bright",
+  MT: "middle",
+  DT: "dark",
 };
 const HS_TARGET_AREA_LABEL_BY_ID: Record<string, string> = {
   BT: "HS Bright Area 卡片",
@@ -176,8 +292,104 @@ const HS_TARGET_AREA_LABEL_BY_ID: Record<string, string> = {
 };
 const MAIN_TARGET_CWV_KEY = "AE_TAG_FACE_20_CWV";
 const HS_TARGET_CWV_KEY = "AE_TAG_CWV";
+const NS_PROB_KEY = "AE_TAG_NS_PROB";
+const NS_STS_CDF_KEY = "AE_TAG_NS_STS_CDF";
+const NS_STS_BV_PROB_KEY = "AE_TAG_NS_STS_BVPROB";
+const NS_STS_CDF_PROB_KEY = "AE_TAG_NS_STS_CDFPROB";
+const NS_EVD_KEY = "AE_TAG_NS_EVD";
+const NS_LOWBND_THD_PATH = "[0][3][1].30" as const;
+const NS_LOWBND_THD_LIMIT_PATH = "[0][3][1].31" as const;
+const NS_DT_DARK_Y_PATH = "[0][3][1].29" as const;
+const NS_NORT_EVD_DARKEST_PATH = "[0][3][1].5" as const;
+const NS_NORT_EVD_BRIGHTEST_PATH = "[0][3][1].6" as const;
+const NS_NORT_NS_EN_PATH = "[0][3][1].23" as const;
+const NS_NORT_NS_PCNT_PATH = "[0][3][1].24" as const;
+const NS_NORT_FLAT_THD_PATH = "[0][3][1].26" as const;
+const NS_NORT_FLAT_PROB_X0_PATH = "[0][3][1].34" as const;
+const NS_NORT_FLAT_PROB_Y0_PATH = "[0][3][1].35" as const;
+const NS_NORT_FLAT_PROB_X1_PATH = "[0][3][1].36" as const;
+const NS_NORT_FLAT_PROB_Y1_PATH = "[0][3][1].37" as const;
+const NS_NORT_BV_PATH = "[0][3][1][54]" as const;
+const NS_NORT_THD_PATH = "[0][3][1][56]" as const;
+const NS_BT_THD_PATH = "[0][3][1][55]" as const;
+const NS_BT_NS_PCNT_PATH = "[0][3][1].27" as const;
+const NS_BT_SKY_PROB_X0_PATH = "[0][3][1].43" as const;
+const NS_BT_SKY_PROB_Y0_PATH = "[0][3][1].44" as const;
+const NS_BT_SKY_PROB_X1_PATH = "[0][3][1].45" as const;
+const NS_BT_SKY_PROB_Y1_PATH = "[0][3][1].46" as const;
+const NS_BV_PROB_X0_PATH = "[0][3][1].38" as const;
+const NS_BV_PROB_Y0_PATH = "[0][3][1].39" as const;
+const NS_BV_PROB_X1_PATH = "[0][3][1].40" as const;
+const NS_BV_PROB_Y1_PATH = "[0][3][1].41" as const;
+const NS_CDF_PROB_X0_PATH = "[0][3][1][12].0" as const;
+const NS_CDF_PROB_X1_PATH = "[0][3][1][12].1" as const;
+const NS_CDF_PROB_Y0_PATH = "[0][3][1][13].0" as const;
+const NS_CDF_PROB_Y1_PATH = "[0][3][1][13].1" as const;
+const NS_PROBABILITY_SOURCE_PATHS = [
+  NS_BV_PROB_X0_PATH,
+  NS_BV_PROB_Y0_PATH,
+  NS_BV_PROB_X1_PATH,
+  NS_BV_PROB_Y1_PATH,
+  NS_CDF_PROB_X0_PATH,
+  NS_CDF_PROB_X1_PATH,
+  NS_CDF_PROB_Y0_PATH,
+  NS_CDF_PROB_Y1_PATH,
+] as const;
+const NS_PROBABILITY_SOURCE_KEYWORDS = [
+  NS_PROB_KEY,
+  NS_STS_BV_PROB_KEY,
+  NS_STS_CDF_PROB_KEY,
+  NS_STS_CDF_KEY,
+] as const;
+const NS_PROBABILITY_CURVE_FIELD_ORDER: NsProbabilityCurveFieldId[] = ["x0", "x1", "y0", "y1"];
 const MTWV_VALUE_KEY = "AE_TAG_MTV6_MAINT_Y";
 const MTWV_WEIGHT_TABLE_PATH = "[0][3][1][20]" as const;
+const FACE_CWV_KEYS = ["AE_TAG_FACE_20_CWV", "AE_TAG_CWV"] as const;
+const FACE_FBT_TH_KEYS = ["AE_TAG_FBT_TH", "AE_TAG_FBT_FDTH"] as const;
+const FACE_FBT_FDY_KEY = "AE_TAG_FBT_FDY";
+const FACE_PROB_KEYS = ["AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE"] as const;
+const FACE_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
+const FACE_PURE_AE_CWR_STABLE_KEY = "AE_TAG_PURE_AE_CWR_STABLE";
+const NS_TARGET_INPUTS: Array<{
+  id: NsTargetTermId;
+  label: string;
+  targetLabel: string;
+  targetValueKey?: string;
+  thdLabel: string;
+  yLabel: string;
+  thdKeys: string[];
+  yKeys: string[];
+}> = [
+  {
+    id: "NorT",
+    label: "NorT",
+    targetLabel: "Normal_target",
+    thdLabel: "NS_OE_THD",
+    yLabel: "NS_Y",
+    thdKeys: ["NS_OE_THD", "AE_TAG_NS_NORMAL_FINAL_THD"],
+    yKeys: ["NS_Y", "AE_TAG_NS_NORMAL_Y"],
+  },
+  {
+    id: "BT",
+    label: "BT",
+    targetLabel: "Bright_Tone_target",
+    targetValueKey: "AE_TAG_NS_BT_TARGET",
+    thdLabel: "NS_BrightTone_THD",
+    yLabel: "NS_BrightTone_Y",
+    thdKeys: ["NS_BrightTone_THD", "AE_TAG_NS_BT_FINAL_THD"],
+    yKeys: ["NS_BrightTone_Y", "AE_TAG_NS_BT_Y"],
+  },
+  {
+    id: "DT",
+    label: "DT",
+    targetLabel: "LOWBND_target",
+    targetValueKey: "AE_TAG_NS_DT_TARGET",
+    thdLabel: "NS_LOWBND_THD",
+    yLabel: "NS_LOWBND_Y",
+    thdKeys: ["NS_LOWBND_THD", "AE_TAG_NS_DT_THD"],
+    yKeys: ["NS_LOWBND_Y", "AE_TAG_NS_DT_Y"],
+  },
+];
 const HS_WEIGHT_CHANNELS: Array<{ id: HsWeightToneId }> = [
   { id: "target" },
   { id: "dark" },
@@ -338,6 +550,70 @@ const MTWV_SOURCE_SPEC: CardSourceSpec = {
   jump_to: "first",
   highlight: "ranges",
 };
+const TOUCH_CWR_LOW_BOUND_PATH = "[0][2][1].21" as const;
+const TOUCH_CWR_HIGH_BOUND_PATH = "[0][2][1].22" as const;
+const TOUCH_METER_WEIGHT_PATH = "[0][2][1].23" as const;
+const TOUCH_METER_TARGET_LOW_PATH = "[0][2][1].24" as const;
+const TOUCH_METER_TARGET_HIGH_PATH = "[0][2][1].25" as const;
+const TOUCH_METER_STABLE_MAX_PATH = "[0][2][1].26" as const;
+const TOUCH_METER_STABLE_MIN_PATH = "[0][2][1].27" as const;
+const TOUCH_FINAL_TARGET_SOURCE_PATHS = [
+  TOUCH_CWR_LOW_BOUND_PATH,
+  TOUCH_CWR_HIGH_BOUND_PATH,
+  TOUCH_METER_WEIGHT_PATH,
+  TOUCH_METER_TARGET_LOW_PATH,
+  TOUCH_METER_TARGET_HIGH_PATH,
+] as const;
+const TOUCH_STABLE_SOURCE_PATHS = [
+  TOUCH_METER_STABLE_MAX_PATH,
+  TOUCH_METER_STABLE_MIN_PATH,
+] as const;
+const ABL_SOURCE_SEGMENT_1_PATHS = [
+  "[0][3][1].7",
+  "[0][3][1].8",
+  "[0][3][1].9",
+  "[0][3][1].10",
+  "[0][3][1].11",
+  "[0][3][1].12",
+  "[0][3][1].13",
+  "[0][3][1].14",
+  "[0][3][1].15",
+  "[0][3][1].16",
+  "[0][3][1].17",
+  "[0][3][1].18",
+  "[0][3][1].19",
+  "[0][3][1].20",
+  "[0][3][1].21",
+  "[0][3][1].22",
+  "[0][3][1][1]",
+  "[0][3][1][2]",
+] as const;
+const ABL_SOURCE_SEGMENT_2_PATHS = [
+  "[0][3][1].56",
+  "[0][3][1][16]",
+  "[0][3][1][17]",
+  "[0][3][1][18]",
+  "[0][3][1][19]",
+] as const;
+const ABL_SOURCE_SEGMENTS = [
+  {
+    id: "segment1",
+    title: "ABL 源码段 1",
+    subtitle: "paths [0][3][1].7~.22 / [1] / [2]",
+    paths: ABL_SOURCE_SEGMENT_1_PATHS,
+  },
+  {
+    id: "segment2",
+    title: "ABL 源码段 2",
+    subtitle: "paths [0][3][1].56 / [16]~[19]",
+    paths: ABL_SOURCE_SEGMENT_2_PATHS,
+  },
+] as const;
+const TOUCH_METER_TARGET_BV_LOW = 0;
+const TOUCH_METER_TARGET_BV_HIGH = 4000;
+const TOUCH_METERING_Y_KEY = "AE_TAG_METERING_Y";
+const TOUCH_AE_TARGET_KEY = "AE_TAG_AE_TARGET";
+const TOUCH_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
 const MAIN_TARGET_THRESHOLD_ROWS: Array<{ label: MainTargetThresholdRow["label"]; path: string }> = [
   { label: "BV",   path: MAIN_TARGET_THRESHOLD_PATHS[0] },
   { label: "Base", path: MAIN_TARGET_THRESHOLD_PATHS[1] },
@@ -365,11 +641,56 @@ export function ChartMapMode({
   const [mainTargetMidCurve, setMainTargetMidCurve] = useState<MidCurveSource | null>(null);
   const [mainTargetB2dCurve, setMainTargetB2dCurve] = useState<B2dCurveSource | null>(null);
   const [mainTargetB2dCorrCurve, setMainTargetB2dCorrCurve] = useState<B2dCorrCurveSource | null>(null);
+  const [touchTargetSource, setTouchTargetSource] = useState<{ identity: string | null; source: TouchTargetSource | null }>({
+    identity: null,
+    source: null,
+  });
+  const [nsLowBndBounds, setNsLowBndBounds] = useState<{ identity: string | null; bounds: NsLowBndBounds | null }>({
+    identity: null,
+    bounds: null,
+  });
+  const [nsDtSource, setNsDtSource] = useState<{ identity: string | null; source: NsDtSource | null }>({
+    identity: null,
+    source: null,
+  });
+  const [nsProbabilitySource, setNsProbabilitySource] = useState<{
+    identity: string | null;
+    source: NsProbabilityCurveSource | null;
+  }>({
+    identity: null,
+    source: null,
+  });
+  const [nsNorTSource, setNsNorTSource] = useState<{
+    identity: string | null;
+    source: NsNorTSource | null;
+  }>({
+    identity: null,
+    source: null,
+  });
+  const [nsBTSource, setNsBTSource] = useState<{
+    identity: string | null;
+    source: NsNorTSource | null;
+  }>({
+    identity: null,
+    source: null,
+  });
   const [hsWeightSource, setHsWeightSource] = useState<HsWeightSource | null>(null);
   const [hsBrightAreaSource, setHsBrightAreaSource] = useState<HsAreaSource | null>(null);
   const [hsMiddleAreaSource, setHsMiddleAreaSource] = useState<HsAreaSource | null>(null);
   const [hsDarkAreaSource, setHsDarkAreaSource] = useState<HsAreaSource | null>(null);
   const [hsSourceIdentity, setHsSourceIdentity] = useState<string | null>(null);
+  const [liveHsAreaThdValues, setLiveHsAreaThdValues] = useState<{
+    identity: string | null;
+    values: Partial<Record<HsTargetTermId, number>>;
+  }>({ identity: null, values: {} });
+  const [liveHsWeightWetValues, setLiveHsWeightWetValues] = useState<{
+    identity: string | null;
+    values: Partial<Record<HsWeightToneId, number>>;
+  }>({ identity: null, values: {} });
+  const [liveNsAreaComputations, setLiveNsAreaComputations] = useState<{
+    identity: string | null;
+    values: Partial<Record<NsAreaToneId, NsAreaComputation>>;
+  }>({ identity: null, values: {} });
   const [mainThdValue, setMainThdValue] = useState(NaN);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -401,9 +722,15 @@ export function ChartMapMode({
     [filePath, sourceRevision],
   );
   const currentHsWeightSource = hsSourceIdentity === sourceIdentity ? hsWeightSource : null;
+  const currentNsLowBndBounds = nsLowBndBounds.identity === sourceIdentity ? nsLowBndBounds.bounds : null;
+  const currentNsDtSource = nsDtSource.identity === sourceIdentity ? nsDtSource.source : null;
+  const currentNsProbabilitySource = nsProbabilitySource.identity === sourceIdentity ? nsProbabilitySource.source : null;
+  const currentNsNorTSource = nsNorTSource.identity === sourceIdentity ? nsNorTSource.source : null;
+  const currentNsBTSource = nsBTSource.identity === sourceIdentity ? nsBTSource.source : null;
   const currentHsBrightAreaSource = hsSourceIdentity === sourceIdentity ? hsBrightAreaSource : null;
   const currentHsMiddleAreaSource = hsSourceIdentity === sourceIdentity ? hsMiddleAreaSource : null;
   const currentHsDarkAreaSource = hsSourceIdentity === sourceIdentity ? hsDarkAreaSource : null;
+  const currentTouchTargetSource = touchTargetSource.identity === sourceIdentity ? touchTargetSource.source : null;
   const imageBvValue = useMemo(
     () => readTomlValue(tomlData, schema.Image?.BV ?? "AE_TAG_REALBVX1000"),
     [schema.Image, tomlData],
@@ -416,10 +743,110 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, MAIN_TARGET_CWV_KEY),
     [tomlData],
   );
+  const touchCwvValue = useMemo(
+    () => readTomlValue(tomlData, HS_TARGET_CWV_KEY) ?? imageCwvValue,
+    [imageCwvValue, tomlData],
+  );
+  const touchMeterYValue = useMemo(
+    () => readTomlValue(tomlData, TOUCH_METERING_Y_KEY),
+    [tomlData],
+  );
+  const touchAeTargetValue = useMemo(
+    () => readTomlValue(tomlData, TOUCH_AE_TARGET_KEY),
+    [tomlData],
+  );
+  const touchNormalTargetValue = useMemo(
+    () => readTomlValue(tomlData, TOUCH_NORMAL_TARGET_KEY),
+    [tomlData],
+  );
+  const faceCwvValue = useMemo(
+    () => readFirstTomlValue(tomlData, FACE_CWV_KEYS),
+    [tomlData],
+  );
+  const faceFbtThValue = useMemo(
+    () => readFirstTomlValue(tomlData, FACE_FBT_TH_KEYS),
+    [tomlData],
+  );
+  const faceFbtFdyValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_FDY_KEY),
+    [tomlData],
+  );
+  const faceProbValue = useMemo(
+    () => readFirstTomlValue(tomlData, FACE_PROB_KEYS),
+    [tomlData],
+  );
+  const faceNormalTargetValue = useMemo(
+    () => readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
+    [tomlData],
+  );
+  const facePureAeCwrStableValue = useMemo(
+    () => readTomlValue(tomlData, FACE_PURE_AE_CWR_STABLE_KEY),
+    [tomlData],
+  );
   const hsCwvValue = useMemo(
     () => readTomlValue(tomlData, HS_TARGET_CWV_KEY) ?? imageCwvValue,
     [imageCwvValue, tomlData],
   );
+  const nsCwvValue = useMemo(
+    () => readTomlValue(tomlData, HS_TARGET_CWV_KEY) ?? imageCwvValue,
+    [imageCwvValue, tomlData],
+  );
+  const nsProbValue = useMemo(
+    () => readTomlValue(tomlData, NS_PROB_KEY),
+    [tomlData],
+  );
+  const nsCdfValue = useMemo(
+    () => readTomlValue(tomlData, NS_STS_CDF_KEY),
+    [tomlData],
+  );
+  const nsBvProbValue = useMemo(
+    () => readTomlValue(tomlData, NS_STS_BV_PROB_KEY),
+    [tomlData],
+  );
+  const nsCdfProbValue = useMemo(
+    () => readTomlValue(tomlData, NS_STS_CDF_PROB_KEY),
+    [tomlData],
+  );
+  const nsEvdValue = useMemo(
+    () => readTomlValue(tomlData, NS_EVD_KEY),
+    [tomlData],
+  );
+  const nsNormalFinalThdValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_NS_NORMAL_FINAL_THD"),
+    [tomlData],
+  );
+  const nsBTFinalThdValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_NS_BT_FINAL_THD"),
+    [tomlData],
+  );
+  const nsDtImageThdValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_NS_DT_THD"),
+    [tomlData],
+  );
+  const nsDtImageLimitValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_NS_DT_LIMIT"),
+    [tomlData],
+  );
+  const nsTargetInputs = useMemo(
+    () => NS_TARGET_INPUTS.map((input) => ({
+      ...input,
+      thd: readFirstTomlValue(tomlData, input.thdKeys),
+      y: readFirstTomlValue(tomlData, input.yKeys),
+      targetValue: input.targetValueKey ? readTomlValue(tomlData, input.targetValueKey) : null,
+    })),
+    [tomlData],
+  );
+  const baseNsAreaComputations = useMemo<Record<NsAreaToneId, NsAreaComputation>>(() => {
+    const bv = parseFiniteNumber(imageBvValue);
+    return {
+      NorT: calculateNsAreaComputation(currentNsNorTSource, bv, parseFiniteNumber(nsEvdValue)),
+      BT: calculateNsAreaComputation(currentNsBTSource, bv, bv),
+    };
+  }, [currentNsBTSource, currentNsNorTSource, imageBvValue, nsEvdValue]);
+  const nsAreaComputations = useMemo<Record<NsAreaToneId, NsAreaComputation>>(() => ({
+    ...baseNsAreaComputations,
+    ...(liveNsAreaComputations.identity === sourceIdentity ? liveNsAreaComputations.values : {}),
+  }), [baseNsAreaComputations, liveNsAreaComputations, sourceIdentity]);
   const hsTargetInputs = useMemo(
     () => HS_TARGET_INPUTS.map((input) => ({
       ...input,
@@ -464,6 +891,74 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, HS_BRIGHT_EVD_KEY),
     [tomlData],
   );
+  const baseHsAreaThdValues = useMemo<Partial<Record<HsTargetTermId, number>>>(() => {
+    const bv = parseFiniteNumber(imageBvValue);
+    return {
+      BT: currentHsBrightAreaSource ? interpolateHsAreaSource(currentHsBrightAreaSource, bv, parseFiniteNumber(evdValue)) : NaN,
+      MT: currentHsMiddleAreaSource ? interpolateHsAreaSource(currentHsMiddleAreaSource, bv, parseFiniteNumber(b2mValue)) : NaN,
+      DT: currentHsDarkAreaSource ? interpolateHsAreaSource(currentHsDarkAreaSource, bv, parseFiniteNumber(b2dValue)) : NaN,
+    };
+  }, [b2dValue, b2mValue, currentHsBrightAreaSource, currentHsDarkAreaSource, currentHsMiddleAreaSource, evdValue, imageBvValue]);
+  const baseHsWeightWetValues = useMemo<Partial<Record<HsWeightToneId, number>>>(() => {
+    const bv = parseFiniteNumber(imageBvValue);
+    const b2d = parseFiniteNumber(b2dValue);
+    const mid = parseFiniteNumber(midratioValue);
+    return {
+      bright: currentHsWeightSource
+        ? interpolateHsWeightSource(currentHsWeightSource, hsWeightChannelIndex("bright"), bv, b2d, mid)
+        : NaN,
+      middle: currentHsWeightSource
+        ? interpolateHsWeightSource(currentHsWeightSource, hsWeightChannelIndex("middle"), bv, b2d, mid)
+        : NaN,
+      dark: currentHsWeightSource
+        ? interpolateHsWeightSource(currentHsWeightSource, hsWeightChannelIndex("dark"), bv, b2d, mid)
+        : NaN,
+    };
+  }, [b2dValue, currentHsWeightSource, imageBvValue, midratioValue]);
+  const hsTargetAreaThdValues = useMemo(
+    () => mergeLiveHsValues(baseHsAreaThdValues, liveHsAreaThdValues.identity === sourceIdentity ? liveHsAreaThdValues.values : {}),
+    [baseHsAreaThdValues, liveHsAreaThdValues, sourceIdentity],
+  );
+  const hsTargetWeightWetValues = useMemo(
+    () => mergeLiveHsValues(baseHsWeightWetValues, liveHsWeightWetValues.identity === sourceIdentity ? liveHsWeightWetValues.values : {}),
+    [baseHsWeightWetValues, liveHsWeightWetValues, sourceIdentity],
+  );
+  const updateLiveHsAreaThdValue = useCallback((id: HsTargetTermId, value: number) => {
+    setLiveHsAreaThdValues((current) => {
+      const identity = sourceIdentity;
+      const values = current.identity === identity ? current.values : {};
+      if (current.identity === identity && Object.is(values[id], value)) return current;
+      return { identity, values: { ...values, [id]: value } };
+    });
+  }, [sourceIdentity]);
+  const updateLiveNsAreaComputation = useCallback((id: NsAreaToneId, computation: NsAreaComputation) => {
+    setLiveNsAreaComputations((current) => {
+      const identity = sourceIdentity;
+      const values = current.identity === identity ? current.values : {};
+      const previous = values[id];
+      if (current.identity === identity && sameNsAreaComputation(previous, computation)) return current;
+      return { identity, values: { ...values, [id]: computation } };
+    });
+  }, [sourceIdentity]);
+  const updateLiveHsWeightWetValues = useCallback((values: Partial<Record<HsWeightToneId, number>>) => {
+    setLiveHsWeightWetValues((current) => {
+      const identity = sourceIdentity;
+      const nextValues = { ...values };
+      if (current.identity === identity && sameHsValueMap(current.values, nextValues)) return current;
+      return { identity, values: nextValues };
+    });
+  }, [sourceIdentity]);
+  const updateLiveHsBrightThdValue = useCallback((value: number) => updateLiveHsAreaThdValue("BT", value), [updateLiveHsAreaThdValue]);
+  const updateLiveHsMiddleThdValue = useCallback((value: number) => updateLiveHsAreaThdValue("MT", value), [updateLiveHsAreaThdValue]);
+  const updateLiveHsDarkThdValue = useCallback((value: number) => updateLiveHsAreaThdValue("DT", value), [updateLiveHsAreaThdValue]);
+  const updateLiveNsNorTComputation = useCallback(
+    (computation: NsAreaComputation) => updateLiveNsAreaComputation("NorT", computation),
+    [updateLiveNsAreaComputation],
+  );
+  const updateLiveNsBTComputation = useCallback(
+    (computation: NsAreaComputation) => updateLiveNsAreaComputation("BT", computation),
+    [updateLiveNsAreaComputation],
+  );
   const mainTCardOrder = useMemo(
     () => sanitiseMainTMetricOrder(visual.chart_main_t_card_order),
     [visual.chart_main_t_card_order],
@@ -479,6 +974,14 @@ export function ChartMapMode({
   const hsCardCollapsedIds = useMemo(
     () => sanitiseHsMetricCollapsed(visual.chart_hs_card_collapsed),
     [visual.chart_hs_card_collapsed],
+  );
+  const nsCardOrder = useMemo(
+    () => sanitiseNsMetricOrder(visual.chart_ns_card_order),
+    [visual.chart_ns_card_order],
+  );
+  const nsCardCollapsedIds = useMemo(
+    () => sanitiseNsMetricCollapsed(visual.chart_ns_card_collapsed),
+    [visual.chart_ns_card_collapsed],
   );
   const visibleMainTCardOrder = useMemo(
     () => mainTCardOrder.filter((cardId) =>
@@ -510,6 +1013,12 @@ export function ChartMapMode({
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
+      setTouchTargetSource({ identity: null, source: null });
+      setNsLowBndBounds({ identity: null, bounds: null });
+      setNsDtSource({ identity: null, source: null });
+      setNsProbabilitySource({ identity: null, source: null });
+      setNsNorTSource({ identity: null, source: null });
+      setNsBTSource({ identity: null, source: null });
       setHsWeightSource(null);
       setHsBrightAreaSource(null);
       setHsMiddleAreaSource(null);
@@ -519,13 +1028,23 @@ export function ChartMapMode({
       setMessage("请先导入 AE.cpp 参数文件");
       return;
     }
-    if (!spec) {
+    if (!spec && tab !== "ABL") {
       setSections([]);
       setMainTargetThreshold(null);
       setMainTargetMtwv(null);
       setMainTargetMidCurve(null);
       setMainTargetB2dCurve(null);
       setMainTargetB2dCorrCurve(null);
+      if (tab === "Touch") {
+        setTouchTargetSource({ identity: null, source: null });
+      }
+      if (tab === "NS") {
+        setNsLowBndBounds({ identity: null, bounds: null });
+        setNsDtSource({ identity: null, source: null });
+        setNsProbabilitySource({ identity: null, source: null });
+        setNsNorTSource({ identity: null, source: null });
+        setNsBTSource({ identity: null, source: null });
+      }
       if (tab === "HS") {
         setHsWeightSource(null);
         setHsBrightAreaSource(null);
@@ -545,6 +1064,12 @@ export function ChartMapMode({
       let midCurve: MidCurveSource | null = null;
       let b2dCurve: B2dCurveSource | null = null;
       let b2dCorrCurve: B2dCorrCurveSource | null = null;
+      let touchTarget: TouchTargetSource | null = null;
+      let nsBounds: NsLowBndBounds | null = null;
+      let nsDt: NsDtSource | null = null;
+      let nsProbability: NsProbabilityCurveSource | null = null;
+      let nsNorT: NsNorTSource | null = null;
+      let nsBT: NsNorTSource | null = null;
       let hsWeight: HsWeightSource | null = null;
       let hsBrightArea: HsAreaSource | null = null;
       let hsMiddleArea: HsAreaSource | null = null;
@@ -558,6 +1083,15 @@ export function ChartMapMode({
           loadMtwvWeightTable(filePath),
         ]);
       }
+      if (tab === "NS") {
+        [nsBounds, nsProbability, nsNorT, nsBT] = await Promise.all([
+          loadNsLowBndBounds(filePath),
+          loadNsProbabilityCurveSource(filePath),
+          loadNsNorTSource(filePath),
+          loadNsBTSource(filePath),
+        ]);
+        nsDt = await loadNsDtSource(filePath);
+      }
       if (tab === "HS") {
         [hsWeight, hsBrightArea, hsMiddleArea, hsDarkArea] = await Promise.all([
           loadHsWeightSource(filePath),
@@ -566,14 +1100,22 @@ export function ChartMapMode({
           loadHsDarkAreaSource(filePath),
         ]);
       }
-      const hit = await cppResolveCardSource(filePath, spec);
-      const fields: FieldEntry[] = [];
-      for (const [start, end] of hit.ranges) {
-        const chunk = await cppGetFieldsInRange(filePath, start, end);
-        fields.push(...chunk);
+      if (tab === "Touch") {
+        touchTarget = await loadTouchTargetSource(filePath);
       }
-      const excludedPaths = tab === "MainT" ? [...MAIN_TARGET_THRESHOLD_PATHS, MTWV_WEIGHT_TABLE_PATH] : [];
-      const nextSections = tab === "MainT" ? [] : buildSections(tab, hit.ranges, dedupeFields(fields), excludedPaths);
+      let nextSections: ChartSection[] = [];
+      if (tab === "ABL") {
+        nextSections = await loadAblSections(filePath);
+      } else {
+        const hit = await cppResolveCardSource(filePath, spec!);
+        const fields: FieldEntry[] = [];
+        for (const [start, end] of hit.ranges) {
+          const chunk = await cppGetFieldsInRange(filePath, start, end);
+          fields.push(...chunk);
+        }
+        const excludedPaths = tab === "MainT" ? [...MAIN_TARGET_THRESHOLD_PATHS, MTWV_WEIGHT_TABLE_PATH] : [];
+        nextSections = tab === "MainT" || tab === "Touch" ? [] : buildSections(tab, hit.ranges, dedupeFields(fields), excludedPaths);
+      }
       if (!cancelled) {
         setSections(nextSections);
         setMainTargetThreshold(threshold);
@@ -581,6 +1123,16 @@ export function ChartMapMode({
         setMainTargetMidCurve(midCurve);
         setMainTargetB2dCurve(b2dCurve);
         setMainTargetB2dCorrCurve(b2dCorrCurve);
+        if (tab === "Touch") {
+          setTouchTargetSource({ identity: sourceIdentity, source: touchTarget });
+        }
+        if (tab === "NS") {
+          setNsLowBndBounds({ identity: sourceIdentity, bounds: nsBounds });
+          setNsDtSource({ identity: sourceIdentity, source: nsDt });
+          setNsProbabilitySource({ identity: sourceIdentity, source: nsProbability });
+          setNsNorTSource({ identity: sourceIdentity, source: nsNorT });
+          setNsBTSource({ identity: sourceIdentity, source: nsBT });
+        }
         if (tab === "HS") {
           setHsWeightSource(hsWeight);
           setHsBrightAreaSource(hsBrightArea);
@@ -588,7 +1140,7 @@ export function ChartMapMode({
           setHsDarkAreaSource(hsDarkArea);
           setHsSourceIdentity(sourceIdentity);
         }
-        setMessage(nextSections.length === 0 && !threshold && tab !== "HS" ? "当前源码范围内没有可展示字段" : null);
+        setMessage(nextSections.length === 0 && !threshold && tab !== "HS" && tab !== "Touch" ? "当前源码范围内没有可展示字段" : null);
         setLoading(false);
       }
     })().catch((err) => {
@@ -599,6 +1151,16 @@ export function ChartMapMode({
         setMainTargetMidCurve(null);
         setMainTargetB2dCurve(null);
         setMainTargetB2dCorrCurve(null);
+        if (tab === "Touch") {
+          setTouchTargetSource({ identity: null, source: null });
+        }
+        if (tab === "NS") {
+          setNsLowBndBounds({ identity: null, bounds: null });
+          setNsDtSource({ identity: null, source: null });
+          setNsProbabilitySource({ identity: null, source: null });
+          setNsNorTSource({ identity: null, source: null });
+          setNsBTSource({ identity: null, source: null });
+        }
         if (tab === "HS") {
           setHsWeightSource(null);
           setHsBrightAreaSource(null);
@@ -679,6 +1241,36 @@ export function ChartMapMode({
     const newIndex = hsCardOrder.indexOf(String(over.id) as HsMetricCardId);
     if (oldIndex < 0 || newIndex < 0) return;
     patchVis({ chart_hs_card_order: arrayMove(hsCardOrder, oldIndex, newIndex) });
+  };
+
+  const setNsCardExpanded = (cardId: NsMetricCardId, expanded: boolean) => {
+    const collapsed = new Set(nsCardCollapsedIds);
+    if (expanded) {
+      collapsed.delete(cardId);
+    } else {
+      collapsed.add(cardId);
+    }
+    patchVis({ chart_ns_card_collapsed: NS_METRIC_CARD_ORDER.filter((id) => collapsed.has(id)) });
+  };
+
+  const jumpToNsAreaCard = (termId: NsTargetTermId) => {
+    const targetCardId = NS_TARGET_AREA_CARD_BY_ID[termId];
+    setNsCardExpanded(targetCardId, true);
+    window.requestAnimationFrame(() => {
+      document.getElementById(nsMetricCardDomId(targetCardId))?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const onNsCardDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = nsCardOrder.indexOf(String(active.id) as NsMetricCardId);
+    const newIndex = nsCardOrder.indexOf(String(over.id) as NsMetricCardId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    patchVis({ chart_ns_card_order: arrayMove(nsCardOrder, oldIndex, newIndex) });
   };
 
   const renderMainTMetricCard = (cardId: MainTMetricCardId) => {
@@ -763,6 +1355,8 @@ export function ChartMapMode({
         <HsTargetCard
           cwvValue={hsCwvValue}
           inputs={hsTargetInputs}
+          thdValues={hsTargetAreaThdValues}
+          wetValues={hsTargetWeightWetValues}
           onAreaJump={jumpToHsAreaCard}
           initialExpanded={!collapsed}
           onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
@@ -781,6 +1375,7 @@ export function ChartMapMode({
           sourceDraftText={sourceDraftText}
           onSourceDraftTextChange={onSourceDraftTextChange}
           onSourceJump={onSourceJump}
+          onInterpolatedChange={updateLiveHsWeightWetValues}
           initialExpanded={!collapsed}
           onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
         />,
@@ -804,6 +1399,7 @@ export function ChartMapMode({
           sourceDraftText={sourceDraftText}
           onSourceDraftTextChange={onSourceDraftTextChange}
           onSourceJump={onSourceJump}
+          onInterpolatedChange={updateLiveHsBrightThdValue}
           initialExpanded={!collapsed}
           onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
         />,
@@ -827,6 +1423,7 @@ export function ChartMapMode({
           sourceDraftText={sourceDraftText}
           onSourceDraftTextChange={onSourceDraftTextChange}
           onSourceJump={onSourceJump}
+          onInterpolatedChange={updateLiveHsMiddleThdValue}
           initialExpanded={!collapsed}
           onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
         />,
@@ -850,6 +1447,7 @@ export function ChartMapMode({
           sourceDraftText={sourceDraftText}
           onSourceDraftTextChange={onSourceDraftTextChange}
           onSourceJump={onSourceJump}
+          onInterpolatedChange={updateLiveHsDarkThdValue}
           initialExpanded={!collapsed}
           onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
         />,
@@ -858,10 +1456,138 @@ export function ChartMapMode({
     return null;
   };
 
+  const renderNsMetricCard = (cardId: NsMetricCardId) => {
+    const collapsed = nsCardCollapsedIds.includes(cardId);
+    const sortableWrapper = (children: ReactNode) => (
+      <SortableMetricCard key={cardId} id={cardId} disabled={!collapsed}>
+        {children}
+      </SortableMetricCard>
+    );
+
+    if (cardId === "nsTarget") {
+      return sortableWrapper(
+        <NightSceneTargetCard
+          cwvValue={nsCwvValue}
+          inputs={nsTargetInputs}
+          lowBndBounds={currentNsLowBndBounds}
+          areaComputations={nsAreaComputations}
+          onAreaJump={jumpToNsAreaCard}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setNsCardExpanded(cardId, expanded)}
+        />
+      );
+    }
+    if (cardId === "nsProb") {
+      return sortableWrapper(
+        <NsProbabilityCard
+          probValue={nsProbValue}
+          bvProbValue={nsBvProbValue}
+          cdfProbValue={nsCdfProbValue}
+          bvValue={imageBvValue}
+          cdfValue={nsCdfValue}
+          source={currentNsProbabilitySource}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setNsCardExpanded(cardId, expanded)}
+        />
+      );
+    }
+    if (cardId === "nsNorT") {
+      return sortableWrapper(
+        <NsNorTAreaCard
+          domId={nsMetricCardDomId(cardId)}
+          source={currentNsNorTSource}
+          bvValue={imageBvValue}
+          nsEvdValue={nsEvdValue}
+          nsNormalFinalThdValue={nsNormalFinalThdValue}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          onComputationChange={updateLiveNsNorTComputation}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setNsCardExpanded(cardId, expanded)}
+        />
+      );
+    }
+    if (cardId === "nsBT") {
+      return sortableWrapper(
+        <NsNorTAreaCard
+          domId={nsMetricCardDomId(cardId)}
+          tone="bt"
+          source={currentNsBTSource}
+          bvValue={imageBvValue}
+          nsEvdValue={nsEvdValue}
+          nsNormalFinalThdValue={nsBTFinalThdValue}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          onComputationChange={updateLiveNsBTComputation}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setNsCardExpanded(cardId, expanded)}
+        />
+      );
+    }
+    if (cardId === "nsDT") {
+      return sortableWrapper(
+        <NsDtAreaCard
+          domId={nsMetricCardDomId(cardId)}
+          source={currentNsDtSource}
+          imageThdValue={nsDtImageThdValue}
+          imageLimitValue={nsDtImageLimitValue}
+          sourceDraftText={sourceDraftText}
+          onSourceDraftTextChange={onSourceDraftTextChange}
+          onSourceJump={onSourceJump}
+          initialExpanded={!collapsed}
+          onExpandedChange={(expanded) => setNsCardExpanded(cardId, expanded)}
+        />
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="flex h-full w-full flex-col" style={canvasStyle}>
       <style>
-        {".chart-map-scrollbar-hidden::-webkit-scrollbar{display:none;}"}
+        {`
+          .chart-map-scrollbar-hidden::-webkit-scrollbar { display: none; }
+          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]),
+          .chart-map-scrollbar-hidden button[aria-label^="Collapse"],
+          .chart-map-scrollbar-hidden button[aria-label^="Expand"] {
+            transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+          }
+          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]):hover:not(:disabled),
+          .chart-map-scrollbar-hidden button[aria-label^="Collapse"]:hover:not(:disabled),
+          .chart-map-scrollbar-hidden button[aria-label^="Expand"]:hover:not(:disabled) {
+            transform: translateY(-1px) scale(1.06);
+            border-color: var(--colorBrandStroke1);
+            background: color-mix(in srgb, var(--colorBrandBackground2) 66%, var(--colorNeutralBackground1));
+            box-shadow: 0 4px 10px color-mix(in srgb, var(--colorBrandForeground1) 24%, transparent);
+          }
+          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]):active:not(:disabled),
+          .chart-map-scrollbar-hidden button[aria-label^="Collapse"]:active:not(:disabled),
+          .chart-map-scrollbar-hidden button[aria-label^="Expand"]:active:not(:disabled) {
+            transform: translateY(0) scale(0.97);
+          }
+          .chart-map-abl-row:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--colorBrandBackground2) 22%, var(--colorNeutralBackground1));
+            box-shadow: inset 3px 0 0 var(--colorBrandForeground1);
+          }
+          .chart-map-target-term-card {
+            transition: transform 160ms ease, filter 160ms ease;
+          }
+          .chart-map-target-term-card:hover {
+            transform: translateY(-3px);
+            filter: drop-shadow(0 8px 12px color-mix(in srgb, var(--colorNeutralForeground1) 18%, transparent));
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]),
+            .chart-map-scrollbar-hidden button[aria-label^="Collapse"],
+            .chart-map-scrollbar-hidden button[aria-label^="Expand"],
+            .chart-map-target-term-card { transition: none; }
+          }
+        `}
       </style>
       <div className="shrink-0 overflow-x-auto px-3 pt-3" style={tabStripWrapStyle}>
         <div className="flex min-w-max items-end gap-0.5">
@@ -910,7 +1636,49 @@ export function ChartMapMode({
             </DndContext>
           )}
 
-          {tab !== "HS" && sections.map((section) => (
+          {tab === "NS" && (
+            <DndContext
+              sensors={mainTCardSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onNsCardDragEnd}
+            >
+              <SortableContext items={nsCardOrder} strategy={verticalListSortingStrategy}>
+                {nsCardOrder.map(renderNsMetricCard)}
+              </SortableContext>
+            </DndContext>
+          )}
+
+          {tab === "Touch" && (
+            <TouchTabContent
+              source={currentTouchTargetSource}
+              bvValue={imageBvValue}
+              cwvValue={touchCwvValue}
+              meterYValue={touchMeterYValue}
+              aeTargetValue={touchAeTargetValue}
+              normalTargetValue={touchNormalTargetValue}
+              onSourceJump={onSourceJump}
+            />
+          )}
+
+          {tab === "ABL" && (
+            <AblTabContent
+              sections={sections}
+              onSourceJump={onSourceJump}
+            />
+          )}
+
+          {tab === "Face" && (
+            <FaceTabContent
+              cwvValue={faceCwvValue}
+              fbtThValue={faceFbtThValue}
+              fdyValue={faceFbtFdyValue}
+              faceProbValue={faceProbValue}
+              normalTargetValue={faceNormalTargetValue}
+              stableValue={facePureAeCwrStableValue}
+            />
+          )}
+
+          {tab !== "HS" && tab !== "NS" && tab !== "Touch" && tab !== "ABL" && tab !== "Face" && sections.map((section) => (
             <section key={section.id} style={sourceSectionStyle}>
               <div style={sourceSectionHeaderStyle}>
                 <span style={sourceSectionTitleStyle}>{section.title}</span>
@@ -953,7 +1721,7 @@ export function ChartMapMode({
             </section>
           ))}
 
-          {!loading && message && (
+          {!loading && message && tab !== "NS" && (
             <div className="rounded-md border px-3 py-2 text-xs"
                  style={{
                    borderColor: "var(--colorNeutralStroke2)",
@@ -994,6 +1762,342 @@ async function loadMtwvWeightTable(
   return {
     path,
     rows: buildMtwvRows(path, fields),
+  };
+}
+
+async function loadNsLowBndBounds(filePath: string): Promise<NsLowBndBounds> {
+  const [lowFields, limitFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, NS_LOWBND_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_LOWBND_THD_LIMIT_PATH),
+  ]);
+  return {
+    low: firstNumericFieldEntryValue(lowFields),
+    limit: firstNumericFieldEntryValue(limitFields),
+  };
+}
+
+async function loadNsDtSource(filePath: string): Promise<NsDtSource> {
+  const [darkYFields, thdFields, limitFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, NS_DT_DARK_Y_PATH),
+    loadFieldEntriesAtPath(filePath, NS_LOWBND_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_LOWBND_THD_LIMIT_PATH),
+  ]);
+  const darkYField = firstNumericFieldEntry(darkYFields);
+  const thdField = firstNumericFieldEntry(thdFields);
+  const limitField = firstNumericFieldEntry(limitFields);
+  return {
+    darkYPath: NS_DT_DARK_Y_PATH,
+    thdPath: NS_LOWBND_THD_PATH,
+    limitPath: NS_LOWBND_THD_LIMIT_PATH,
+    darkYValue: parseFiniteNumber(darkYField?.value),
+    thdValue: parseFiniteNumber(thdField?.value),
+    limitValue: parseFiniteNumber(limitField?.value),
+    darkYField,
+    thdField,
+    limitField,
+    fields: [...darkYFields, ...thdFields, ...limitFields].sort(compareFieldEntries),
+  };
+}
+
+async function loadTouchTargetSource(filePath: string): Promise<TouchTargetSource> {
+  const [
+    cwrLowBoundFields,
+    cwrHighBoundFields,
+    meterWeightFields,
+    meterYLowBoundFields,
+    meterYHighBoundFields,
+    meterStableMaxFields,
+    meterStableMinFields,
+  ] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, TOUCH_CWR_LOW_BOUND_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_CWR_HIGH_BOUND_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_METER_WEIGHT_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_METER_TARGET_LOW_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_METER_TARGET_HIGH_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_METER_STABLE_MAX_PATH),
+    loadFieldEntriesAtPath(filePath, TOUCH_METER_STABLE_MIN_PATH),
+  ]);
+  const sourceValue = (path: string, fields: FieldEntry[]): TouchSourceValue => {
+    const field = firstNumericFieldEntry(fields);
+    return {
+      path,
+      value: parseFiniteNumber(field?.value),
+      field,
+    };
+  };
+  return {
+    cwrLowBound: sourceValue(TOUCH_CWR_LOW_BOUND_PATH, cwrLowBoundFields),
+    cwrHighBound: sourceValue(TOUCH_CWR_HIGH_BOUND_PATH, cwrHighBoundFields),
+    meterWeight: sourceValue(TOUCH_METER_WEIGHT_PATH, meterWeightFields),
+    meterYLowBound: sourceValue(TOUCH_METER_TARGET_LOW_PATH, meterYLowBoundFields),
+    meterYHighBound: sourceValue(TOUCH_METER_TARGET_HIGH_PATH, meterYHighBoundFields),
+    meterStableMax: sourceValue(TOUCH_METER_STABLE_MAX_PATH, meterStableMaxFields),
+    meterStableMin: sourceValue(TOUCH_METER_STABLE_MIN_PATH, meterStableMinFields),
+    fields: [
+      ...cwrLowBoundFields,
+      ...cwrHighBoundFields,
+      ...meterWeightFields,
+      ...meterYLowBoundFields,
+      ...meterYHighBoundFields,
+      ...meterStableMaxFields,
+      ...meterStableMinFields,
+    ].sort(compareFieldEntries),
+  };
+}
+
+async function loadNsProbabilityCurveSource(filePath: string): Promise<NsProbabilityCurveSource> {
+  const [
+    bvX0Fields,
+    bvY0Fields,
+    bvX1Fields,
+    bvY1Fields,
+    cdfX0Fields,
+    cdfX1Fields,
+    cdfY0Fields,
+    cdfY1Fields,
+  ] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, NS_BV_PROB_X0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BV_PROB_Y0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BV_PROB_X1_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BV_PROB_Y1_PATH),
+    loadFieldEntriesAtPath(filePath, NS_CDF_PROB_X0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_CDF_PROB_X1_PATH),
+    loadFieldEntriesAtPath(filePath, NS_CDF_PROB_Y0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_CDF_PROB_Y1_PATH),
+  ]);
+  const bvX0Field = firstNumericFieldEntry(bvX0Fields);
+  const bvY0Field = firstNumericFieldEntry(bvY0Fields);
+  const bvX1Field = firstNumericFieldEntry(bvX1Fields);
+  const bvY1Field = firstNumericFieldEntry(bvY1Fields);
+  const cdfX0Field = firstNumericFieldEntry(cdfX0Fields);
+  const cdfX1Field = firstNumericFieldEntry(cdfX1Fields);
+  const cdfY0Field = firstNumericFieldEntry(cdfY0Fields);
+  const cdfY1Field = firstNumericFieldEntry(cdfY1Fields);
+  return {
+    bv: {
+      x0: parseFiniteNumber(bvX0Field?.value),
+      x1: parseFiniteNumber(bvX1Field?.value),
+      y0: parseFiniteNumber(bvY0Field?.value),
+      y1: parseFiniteNumber(bvY1Field?.value),
+      fields: {
+        x0: bvX0Field,
+        x1: bvX1Field,
+        y0: bvY0Field,
+        y1: bvY1Field,
+      },
+    },
+    cdf: {
+      x0: parseFiniteNumber(cdfX0Field?.value),
+      x1: parseFiniteNumber(cdfX1Field?.value),
+      y0: parseFiniteNumber(cdfY0Field?.value),
+      y1: parseFiniteNumber(cdfY1Field?.value),
+      fields: {
+        x0: cdfX0Field,
+        x1: cdfX1Field,
+        y0: cdfY0Field,
+        y1: cdfY1Field,
+      },
+    },
+    fields: [
+      bvX0Field,
+      bvY0Field,
+      bvX1Field,
+      bvY1Field,
+      cdfX0Field,
+      cdfX1Field,
+      cdfY0Field,
+      cdfY1Field,
+    ].filter((field): field is FieldEntry => Boolean(field)),
+  };
+}
+
+async function loadNsNorTSource(filePath: string): Promise<NsNorTSource> {
+  const [
+    bvFields,
+    thdFields,
+    evdDarkestFields,
+    evdBrightestFields,
+    nsEnFields,
+    nsPcntFields,
+    flatThdFields,
+    flatProbX0Fields,
+    flatProbY0Fields,
+    flatProbX1Fields,
+    flatProbY1Fields,
+  ] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, NS_NORT_BV_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_EVD_DARKEST_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_EVD_BRIGHTEST_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_NS_EN_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_NS_PCNT_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_PROB_X0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_PROB_Y0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_PROB_X1_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_PROB_Y1_PATH),
+  ]);
+  const numericBvFields = numericFieldEntries(bvFields);
+  const numericThdFields = numericFieldEntries(thdFields);
+  const columnCount = Math.max(numericBvFields.length, numericThdFields.length, 1);
+  const flatProbX0Field = firstNumericFieldEntry(flatProbX0Fields);
+  const flatProbY0Field = firstNumericFieldEntry(flatProbY0Fields);
+  const flatProbX1Field = firstNumericFieldEntry(flatProbX1Fields);
+  const flatProbY1Field = firstNumericFieldEntry(flatProbY1Fields);
+  const evdDarkestField = firstNumericFieldEntry(evdDarkestFields);
+  const evdBrightestField = firstNumericFieldEntry(evdBrightestFields);
+  const numericNsEnFields = numericFieldEntries(nsEnFields);
+  const nsEnField = numericNsEnFields[0] ?? null;
+  const nsPcntField = firstNumericFieldEntry(nsPcntFields);
+  const flatThdField = firstNumericFieldEntry(flatThdFields);
+
+  return {
+    bvPath: NS_NORT_BV_PATH,
+    thdPath: NS_NORT_THD_PATH,
+    bvValues: Array.from({ length: columnCount }, (_, index) => parseFiniteNumber(numericBvFields[index]?.value)),
+    thdValues: Array.from({ length: columnCount }, (_, index) => parseFiniteNumber(numericThdFields[index]?.value)),
+    bvFields: Array.from({ length: columnCount }, (_, index) => numericBvFields[index] ?? null),
+    thdFields: Array.from({ length: columnCount }, (_, index) => numericThdFields[index] ?? null),
+    nsEvdDefinePath: NS_NORT_NS_EN_PATH,
+    nsEvdIntervalValues: [
+      parseFiniteNumber(evdDarkestField?.value),
+      parseFiniteNumber(evdBrightestField?.value),
+    ],
+    nsEvdIntervalFields: [evdDarkestField, evdBrightestField],
+    nsEvdDefineValues: Array.from({ length: 2 }, (_, index) => parseFiniteNumber(numericNsEnFields[index]?.value)),
+    nsEvdDefineFields: Array.from({ length: 2 }, (_, index) => numericNsEnFields[index] ?? null),
+    flatSettings: {
+      nsEn: {
+        label: "ns_en",
+        path: NS_NORT_NS_EN_PATH,
+        value: parseFiniteNumber(nsEnField?.value),
+        field: nsEnField,
+      },
+      nsPcnt: {
+        label: "ns_pcnt",
+        path: NS_NORT_NS_PCNT_PATH,
+        value: parseFiniteNumber(nsPcntField?.value),
+        field: nsPcntField,
+      },
+      flatThd: {
+        label: "ns_flat_thd",
+        path: NS_NORT_FLAT_THD_PATH,
+        value: parseFiniteNumber(flatThdField?.value),
+        field: flatThdField,
+      },
+    },
+    flatProb: {
+      x0: parseFiniteNumber(flatProbX0Field?.value),
+      x1: parseFiniteNumber(flatProbX1Field?.value),
+      y0: parseFiniteNumber(flatProbY0Field?.value),
+      y1: parseFiniteNumber(flatProbY1Field?.value),
+      fields: {
+        x0: flatProbX0Field,
+        x1: flatProbX1Field,
+        y0: flatProbY0Field,
+        y1: flatProbY1Field,
+      },
+    },
+    fields: [
+      ...bvFields,
+      ...thdFields,
+      evdDarkestField,
+      evdBrightestField,
+      nsEnField,
+      nsPcntField,
+      flatThdField,
+      flatProbX0Field,
+      flatProbY0Field,
+      flatProbX1Field,
+      flatProbY1Field,
+    ].filter((field): field is FieldEntry => Boolean(field)).sort(compareFieldEntries),
+  };
+}
+
+async function loadNsBTSource(filePath: string): Promise<NsNorTSource> {
+  const [
+    bvFields,
+    thdFields,
+    nsPcntFields,
+    flatThdFields,
+    skyProbX0Fields,
+    skyProbY0Fields,
+    skyProbX1Fields,
+    skyProbY1Fields,
+  ] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, NS_NORT_BV_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_NS_PCNT_PATH),
+    loadFieldEntriesAtPath(filePath, NS_NORT_FLAT_THD_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_SKY_PROB_X0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_SKY_PROB_Y0_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_SKY_PROB_X1_PATH),
+    loadFieldEntriesAtPath(filePath, NS_BT_SKY_PROB_Y1_PATH),
+  ]);
+  const numericBvFields = numericFieldEntries(bvFields);
+  const numericThdFields = numericFieldEntries(thdFields);
+  const columnCount = Math.max(numericBvFields.length, numericThdFields.length, 1);
+  const nsPcntField = firstNumericFieldEntry(nsPcntFields);
+  const flatThdField = firstNumericFieldEntry(flatThdFields);
+  const skyProbX0Field = firstNumericFieldEntry(skyProbX0Fields);
+  const skyProbY0Field = firstNumericFieldEntry(skyProbY0Fields);
+  const skyProbX1Field = firstNumericFieldEntry(skyProbX1Fields);
+  const skyProbY1Field = firstNumericFieldEntry(skyProbY1Fields);
+
+  return {
+    bvPath: NS_NORT_BV_PATH,
+    thdPath: NS_BT_THD_PATH,
+    bvValues: Array.from({ length: columnCount }, (_, index) => parseFiniteNumber(numericBvFields[index]?.value)),
+    thdValues: Array.from({ length: columnCount }, (_, index) => parseFiniteNumber(numericThdFields[index]?.value)),
+    bvFields: Array.from({ length: columnCount }, (_, index) => numericBvFields[index] ?? null),
+    thdFields: Array.from({ length: columnCount }, (_, index) => numericThdFields[index] ?? null),
+    nsEvdDefinePath: "",
+    nsEvdIntervalValues: [],
+    nsEvdIntervalFields: [],
+    nsEvdDefineValues: [],
+    nsEvdDefineFields: [],
+    flatSettings: {
+      nsEn: {
+        label: "ns_en",
+        path: "",
+        value: NaN,
+        field: null,
+      },
+      nsPcnt: {
+        label: "ns_pcnt",
+        path: NS_BT_NS_PCNT_PATH,
+        value: parseFiniteNumber(nsPcntField?.value),
+        field: nsPcntField,
+      },
+      flatThd: {
+        label: "ns_flat_thd",
+        path: NS_NORT_FLAT_THD_PATH,
+        value: parseFiniteNumber(flatThdField?.value),
+        field: flatThdField,
+      },
+    },
+    flatProb: {
+      x0: parseFiniteNumber(skyProbX0Field?.value),
+      x1: parseFiniteNumber(skyProbX1Field?.value),
+      y0: parseFiniteNumber(skyProbY0Field?.value),
+      y1: parseFiniteNumber(skyProbY1Field?.value),
+      fields: {
+        x0: skyProbX0Field,
+        x1: skyProbX1Field,
+        y0: skyProbY0Field,
+        y1: skyProbY1Field,
+      },
+    },
+    fields: [
+      ...bvFields,
+      ...thdFields,
+      nsPcntField,
+      flatThdField,
+      skyProbX0Field,
+      skyProbY0Field,
+      skyProbX1Field,
+      skyProbY1Field,
+    ].filter((field): field is FieldEntry => Boolean(field)).sort(compareFieldEntries),
   };
 }
 
@@ -1136,6 +2240,40 @@ async function loadFieldValuesAtPath(filePath: string, path: string, fallback: s
   return fields.length > 0 ? fields.map((field) => field.value) : fallback;
 }
 
+async function loadAblSections(filePath: string): Promise<ChartSection[]> {
+  const sections: ChartSection[] = [];
+  for (const segment of ABL_SOURCE_SEGMENTS) {
+    const pathEntries = await Promise.all(
+      segment.paths.map(async (path) => ({
+        path,
+        fields: await loadFieldEntriesAtPath(filePath, path),
+      })),
+    );
+    const rows = pathEntries.flatMap(({ path, fields }) => {
+      if (fields.length > 0) {
+        return groupRows(dedupeFields(fields)).map((row) => ({
+          ...row,
+          id: `${segment.id}:${row.id}`,
+        }));
+      }
+      return [{
+        id: `${segment.id}:missing:${path}`,
+        line: 0,
+        label: path,
+        path,
+        values: ["-"],
+      }];
+    });
+    sections.push({
+      id: `ABL:${segment.id}`,
+      title: segment.title,
+      subtitle: segment.subtitle,
+      rows,
+    });
+  }
+  return sections;
+}
+
 function coerceTab(value: string | undefined): ChartTabId | null {
   return CHART_TABS.includes(value as ChartTabId) ? (value as ChartTabId) : null;
 }
@@ -1172,8 +2310,28 @@ function sanitiseHsMetricCollapsed(collapsed: string[] | undefined): HsMetricCar
     .filter((id): id is HsMetricCardId => known.has(id as HsMetricCardId));
 }
 
+function sanitiseNsMetricOrder(order: string[] | undefined): NsMetricCardId[] {
+  const known = new Set<NsMetricCardId>(NS_METRIC_CARD_ORDER);
+  const cleaned = (order ?? [])
+    .filter((id): id is NsMetricCardId => known.has(id as NsMetricCardId));
+  for (const id of NS_METRIC_CARD_ORDER) {
+    if (!cleaned.includes(id)) cleaned.push(id);
+  }
+  return cleaned;
+}
+
+function sanitiseNsMetricCollapsed(collapsed: string[] | undefined): NsMetricCardId[] {
+  const known = new Set<NsMetricCardId>(NS_METRIC_CARD_ORDER);
+  return (collapsed ?? [])
+    .filter((id): id is NsMetricCardId => known.has(id as NsMetricCardId));
+}
+
 function hsMetricCardDomId(cardId: HsMetricCardId): string {
   return `chart-hs-card-${cardId}`;
+}
+
+function nsMetricCardDomId(cardId: NsMetricCardId): string {
+  return `chart-ns-card-${cardId}`;
 }
 
 function hsMetricCardIdForFocusLabel(label: string | undefined | null): HsMetricCardId | null {
@@ -1184,6 +2342,106 @@ function hsMetricCardIdForFocusLabel(label: string | undefined | null): HsMetric
   if (normalized === "hs.middle area" || normalized.startsWith("hs.middle area.")) return "hsMiddle";
   if (normalized === "hs.bright area" || normalized.startsWith("hs.bright area.")) return "hsBright";
   return null;
+}
+
+function coerceHsTargetTermId(value: string): HsTargetTermId | null {
+  return HS_TARGET_TERM_ORDER.includes(value as HsTargetTermId) ? (value as HsTargetTermId) : null;
+}
+
+function hsWeightChannelIndex(id: HsWeightToneId): number {
+  return HS_WEIGHT_CHANNELS.findIndex((channel) => channel.id === id);
+}
+
+function mergeLiveHsValues<T extends string>(
+  baseValues: Partial<Record<T, number>>,
+  liveValues: Partial<Record<T, number>>,
+): Partial<Record<T, number>> {
+  return { ...baseValues, ...liveValues };
+}
+
+function sameHsValueMap<T extends string>(
+  left: Partial<Record<T, number>>,
+  right: Partial<Record<T, number>>,
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    const typedKey = key as T;
+    if (!Object.is(left[typedKey], right[typedKey])) return false;
+  }
+  return true;
+}
+
+function hasFiniteNsLowBndBounds(bounds: NsLowBndBounds | null): bounds is NsLowBndBounds {
+  return Boolean(bounds && Number.isFinite(bounds.low) && Number.isFinite(bounds.limit));
+}
+
+function clampNsLowBndTarget(value: number, bounds: NsLowBndBounds | null): number {
+  if (!Number.isFinite(value) || !hasFiniteNsLowBndBounds(bounds)) return NaN;
+  const min = Math.min(bounds.low, bounds.limit);
+  const max = Math.max(bounds.low, bounds.limit);
+  return clamp(value, min, max);
+}
+
+function isFiniteNsProbabilityCurve(curve: NsProbabilityCurve): boolean {
+  return Number.isFinite(curve.x0)
+    && Number.isFinite(curve.x1)
+    && Number.isFinite(curve.y0)
+    && Number.isFinite(curve.y1)
+    && curve.x0 !== curve.x1;
+}
+
+function nsProbabilityCurveEndpoints(curve: NsProbabilityCurve): {
+  left: { x: number; y: number; label: "X0" | "X1"; yLabel: "Y0" | "Y1" };
+  right: { x: number; y: number; label: "X0" | "X1"; yLabel: "Y0" | "Y1" };
+} {
+  const point0 = { x: curve.x0, y: curve.y0, label: "X0" as const, yLabel: "Y0" as const };
+  const point1 = { x: curve.x1, y: curve.y1, label: "X1" as const, yLabel: "Y1" as const };
+  return point0.x <= point1.x
+    ? { left: point0, right: point1 }
+    : { left: point1, right: point0 };
+}
+
+function interpolateNsProbabilityCurve(curve: NsProbabilityCurve, xValue: number): number {
+  if (!Number.isFinite(xValue) || !isFiniteNsProbabilityCurve(curve)) return NaN;
+  const { left, right } = nsProbabilityCurveEndpoints(curve);
+
+  if (xValue <= left.x) return left.y;
+  if (xValue >= right.x) return right.y;
+  const ratio = (xValue - left.x) / (right.x - left.x);
+  return left.y + ratio * (right.y - left.y);
+}
+
+function calculateNsAreaComputation(
+  source: NsNorTSource | null,
+  bv: number,
+  probabilityInput: number,
+): NsAreaComputation {
+  const interpolatedThd = source ? interpolateNumericCurve(bv, source.bvValues, source.thdValues) : NaN;
+  const flatThd = source?.flatSettings.flatThd.value ?? NaN;
+  const interpolatedProb = source && isFiniteNsProbabilityCurve(source.flatProb)
+    ? interpolateNsProbabilityCurve(source.flatProb, probabilityInput)
+    : NaN;
+  const probabilityRatio = normaliseNsProbability(interpolatedProb);
+  const finalThd = Number.isFinite(interpolatedThd) && Number.isFinite(flatThd) && Number.isFinite(probabilityRatio)
+    ? interpolatedThd - (interpolatedThd - flatThd) * probabilityRatio
+    : NaN;
+  return { interpolatedThd, flatThd, interpolatedProb, finalThd };
+}
+
+function sameNsAreaComputation(
+  left: NsAreaComputation | undefined,
+  right: NsAreaComputation,
+): boolean {
+  return Boolean(left
+    && Object.is(left.interpolatedThd, right.interpolatedThd)
+    && Object.is(left.flatThd, right.flatThd)
+    && Object.is(left.interpolatedProb, right.interpolatedProb)
+    && Object.is(left.finalThd, right.finalThd));
+}
+
+function cssPixelValue(value: string | null | undefined): number {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function coerceMidChartMode(value: string | undefined): MidChartMode {
@@ -2075,38 +3333,36 @@ function MtwvCard({
               </div>
             </div>
             <div style={mtwvTableWrapStyle}>
-              <div style={mtwvTableSurfaceStyle}>
-                <div style={mtwvHeatmapGridStyle(maxColumns)}>
-                  <div title={editableSource.path} style={mtwvHeatmapCornerStyle}>
-                    {editableSource.rows.length}x{maxColumns}
-                  </div>
-                  {Array.from({ length: maxColumns }, (_, index) => (
-                    <div key={`c:${index}`} style={mtwvHeatmapHeaderStyle}>C{index + 1}</div>
-                  ))}
-                  {editableSource.rows.map((row, rowIndex) => (
-                    <Fragment key={row.id}>
-                      <div title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvHeatmapRowHeaderStyle}>
-                        R{rowIndex + 1}
-                      </div>
-                      {Array.from({ length: maxColumns }, (_, cellIndex) => {
-                        const rawValue = row.values[cellIndex] ?? "";
-                        const numericValue = parseFiniteNumber(rawValue);
-                        const editable = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[cellIndex]);
-                        const intensity = mtwvCellIntensity(numericValue, mtwvStats.min, mtwvStats.max);
-                        return (
-                          <MtwvHeatmapCell
-                            key={`${row.id}:${cellIndex}`}
-                            value={rawValue}
-                            intensity={intensity}
-                            editable={editable}
-                            title={row.line > 0 ? `${row.path} L${row.line} #${cellIndex}` : row.path}
-                            onCommit={(nextValue) => updateWeightCell(row.id, cellIndex, nextValue)}
-                          />
-                        );
-                      })}
-                    </Fragment>
-                  ))}
+              <div style={mtwvHeatmapGridStyle(maxColumns)}>
+                <div title={editableSource.path} style={mtwvHeatmapCornerStyle}>
+                  {editableSource.rows.length}x{maxColumns}
                 </div>
+                {Array.from({ length: maxColumns }, (_, index) => (
+                  <div key={`c:${index}`} style={mtwvHeatmapHeaderStyle}>C{index + 1}</div>
+                ))}
+                {editableSource.rows.map((row, rowIndex) => (
+                  <Fragment key={row.id}>
+                    <div title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvHeatmapRowHeaderStyle}>
+                      R{rowIndex + 1}
+                    </div>
+                    {Array.from({ length: maxColumns }, (_, cellIndex) => {
+                      const rawValue = row.values[cellIndex] ?? "";
+                      const numericValue = parseFiniteNumber(rawValue);
+                      const editable = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[cellIndex]);
+                      const intensity = mtwvCellIntensity(numericValue, mtwvStats.min, mtwvStats.max);
+                      return (
+                        <MtwvHeatmapCell
+                          key={`${row.id}:${cellIndex}`}
+                          value={rawValue}
+                          intensity={intensity}
+                          editable={editable}
+                          title={row.line > 0 ? `${row.path} L${row.line} #${cellIndex}` : row.path}
+                          onCommit={(nextValue) => updateWeightCell(row.id, cellIndex, nextValue)}
+                        />
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </div>
             </div>
           </section>
@@ -2267,9 +3523,2105 @@ function MainTargetCard({
   );
 }
 
+function NightSceneTargetCard({
+  cwvValue,
+  inputs,
+  lowBndBounds,
+  areaComputations,
+  onAreaJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  cwvValue: string | null;
+  lowBndBounds: NsLowBndBounds | null;
+  areaComputations: Record<NsAreaToneId, NsAreaComputation>;
+  inputs: Array<(typeof NS_TARGET_INPUTS)[number] & {
+    thd: string | null;
+    y: string | null;
+    targetValue: string | null;
+  }>;
+  onAreaJump?: (termId: NsTargetTermId) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [termOrder, setTermOrder] = useState<NsTargetTermId[]>(NS_TARGET_TERM_ORDER);
+  const termSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+  const cwvNumber = parseFiniteNumber(cwvValue);
+  const termsById = new Map(inputs.map((input) => [input.id, input]));
+  const orderedInputs = termOrder
+    .map((id) => termsById.get(id))
+    .filter((input): input is typeof inputs[number] => Boolean(input));
+  for (const input of inputs) {
+    if (!termOrder.includes(input.id)) orderedInputs.push(input);
+  }
+  const terms = orderedInputs.map((input) => {
+    const thd = parseFiniteNumber(input.thd);
+    const y = parseFiniteNumber(input.y);
+    const areaComputation = input.id === "NorT"
+      ? areaComputations.NorT
+      : input.id === "BT"
+        ? areaComputations.BT
+        : null;
+    const calculationThd = areaComputation?.finalThd ?? thd;
+    const keywordTarget = Number.isFinite(cwvNumber) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0
+      ? cwvNumber * thd / y
+      : NaN;
+    const target = Number.isFinite(cwvNumber) && Number.isFinite(calculationThd) && Number.isFinite(y) && y !== 0
+      ? cwvNumber * calculationThd / y
+      : NaN;
+    const clampedTarget = input.id === "DT" ? clampNsLowBndTarget(target, lowBndBounds) : target;
+    const clamped = Number.isFinite(target) && Number.isFinite(clampedTarget) && target !== clampedTarget;
+    const missing = [
+      Number.isFinite(cwvNumber) ? null : "CWV",
+      Number.isFinite(calculationThd) ? null : input.id === "NorT" ? "NS_OE_THD" : input.id === "BT" ? "NS_BT_THD" : input.thdLabel,
+      Number.isFinite(y) ? null : input.yLabel,
+      input.id === "DT" && !hasFiniteNsLowBndBounds(lowBndBounds) ? "LOWBND_Range" : null,
+    ].filter((item): item is string => Boolean(item));
+    const targetLabelText = input.id === "NorT"
+      ? formatRoundedNumber(keywordTarget)
+      : formatComputedNumber(parseFiniteNumber(input.targetValue));
+    return {
+      ...input,
+      thd,
+      y,
+      calculationThd,
+      areaComputation,
+      rawTarget: target,
+      target: clampedTarget,
+      clamped,
+      missing,
+      targetLabelText,
+    };
+  });
+  const maxTarget = terms.reduce((max, term) =>
+    Number.isFinite(term.target) ? Math.max(max, term.target) : max,
+  -Infinity);
+  const targetValue = Number.isFinite(maxTarget) ? maxTarget : NaN;
+  const formula = "NS Target = max(Normal_target, Bright_Tone_target, LOWBND_target) =";
+  const termIds = terms.map((term) => term.id);
+  const firstTermId = terms[0]?.id ?? null;
+  const onTermDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = termOrder.indexOf(String(active.id) as NsTargetTermId);
+    const newIndex = termOrder.indexOf(String(over.id) as NsTargetTermId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    setTermOrder((current) => arrayMove(current, oldIndex, newIndex));
+  };
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Night Scene Target</div>
+        <button
+          type="button"
+          aria-label={expanded ? "Collapse Night Scene Target" : "Expand Night Scene Target"}
+          onClick={() => setExpanded((current) => {
+            const next = !current;
+            onExpandedChange?.(next);
+            return next;
+          })}
+          style={sourceButtonStyle(true)}
+        >
+          {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+        </button>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <span>{formula}</span>
+        <strong style={thresholdResultStyle}>{formatOneDecimalNumber(targetValue)}</strong>
+      </div>
+      {expanded && <div style={hsTargetBodyStyle}>
+        <DndContext
+          sensors={termSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onTermDragEnd}
+        >
+          <SortableContext items={termIds} strategy={rectSortingStrategy}>
+            <div style={hsTargetTermGridStyle}>
+              {terms.map((term) => {
+                const hasMissing = term.missing.length > 0;
+                const active = Number.isFinite(term.target) && Number.isFinite(targetValue) && term.target === targetValue;
+                const status = hasMissing ? `Missing ${term.missing.join("/")}` : active ? "Max" : "Inactive";
+                const jumpLabel = term.id === "NorT" ? "NS NorT Area" : term.id === "BT" ? "NS BT Area" : "NS DT Area";
+                const jumpHint = term.id === firstTermId ? `右键跳转到 ${jumpLabel}，按住左键拖拽调整位置` : "";
+                return (
+                <SortableHsTargetTermCard key={term.id} id={term.id}>
+                  <div
+                    title={jumpHint}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onAreaJump?.(term.id);
+                    }}
+                    style={hsTargetTermCardStyle(hasMissing, active)}
+                  >
+                <div style={hsTargetTermHeaderStyle}>
+                  <span style={hsTargetTermTitleStyle}>
+                    {term.label}: <span style={hsTargetTermTitleValueStyle}>{term.targetLabelText}</span>
+                  </span>
+                  <span style={hsTargetStatusBadgeStyle(hasMissing, active)}>{status}</span>
+                </div>
+                <div style={hsTargetTermEquationStyle}>
+                  <span style={hsTargetTermFormulaStyle}>
+                    {term.id === "DT"
+                      ? `CLAMP(CWV*${term.thdLabel}/${term.yLabel})`
+                      : term.id === "BT"
+                        ? "CWV*NS_BT_THD/NS_BT_Y"
+                        : "CWV*NS_OE_THD/NS_Y"}
+                  </span>
+                  <strong style={hsTargetTermValueStyle}>{formatOneDecimalNumber(term.target)}</strong>
+                </div>
+                {term.id === "DT" && (
+                  <div style={nsLowBndRangeStyle(term.clamped)}>
+                    [{formatOneDecimalNumber(lowBndBounds?.low ?? NaN)}, {formatOneDecimalNumber(lowBndBounds?.limit ?? NaN)}]
+                    {term.clamped ? ` raw ${formatOneDecimalNumber(term.rawTarget)}` : ""}
+                  </div>
+                )}
+                {term.id === "NorT" && (
+                  <div
+                    title=""
+                    style={nsTargetDerivedThdStyle}
+                  >
+                    NS_OE_THD: {formatOneDecimalNumber(term.areaComputation?.interpolatedThd ?? NaN)} -&gt; {formatOneDecimalNumber(term.areaComputation?.finalThd ?? NaN)}
+                  </div>
+                )}
+                {term.id === "BT" && (
+                  <div
+                    title=""
+                    style={nsTargetDerivedThdStyle}
+                  >
+                    NS_BT_THD: {formatOneDecimalNumber(term.areaComputation?.interpolatedThd ?? NaN)} -&gt; {formatOneDecimalNumber(term.areaComputation?.finalThd ?? NaN)}
+                  </div>
+                )}
+                <div style={nsTargetMetricRowsStyle}>
+                  <div style={hsTargetMetricRowStyle("cwv", !Number.isFinite(cwvNumber), active)}>
+                    <span>CWV</span>
+                    <strong>{formatRoundedNumber(cwvNumber)}</strong>
+                  </div>
+                  <div style={hsTargetMetricRowStyle("thd", !Number.isFinite(term.thd), active)}>
+                    <span>THD</span>
+                    <strong>{formatRoundedNumber(term.thd)}</strong>
+                  </div>
+                  <div style={hsTargetMetricRowStyle("y", !Number.isFinite(term.y), active)}>
+                    <span>Y</span>
+                    <strong>{formatRoundedNumber(term.y)}</strong>
+                  </div>
+                </div>
+                  </div>
+                </SortableHsTargetTermCard>
+              );
+            })}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </div>}
+    </section>
+  );
+}
+
+function NsProbabilityCard({
+  probValue,
+  bvProbValue,
+  cdfProbValue,
+  bvValue,
+  cdfValue,
+  source,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  probValue: string | null;
+  bvProbValue: string | null;
+  cdfProbValue: string | null;
+  bvValue: string | null;
+  cdfValue: string | null;
+  source: NsProbabilityCurveSource | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+  const bv = parseFiniteNumber(bvValue);
+  const cdf = parseFiniteNumber(cdfValue);
+  const sourceProb = parseFiniteNumber(probValue);
+  const sourceBvProb = parseFiniteNumber(bvProbValue);
+  const sourceCdfProb = parseFiniteNumber(cdfProbValue);
+  const bvProb = editableSource ? interpolateNsProbabilityCurve(editableSource.bv, bv) : NaN;
+  const cdfProb = editableSource ? interpolateNsProbabilityCurve(editableSource.cdf, cdf) : NaN;
+  const computedProb = Number.isFinite(bvProb) && Number.isFinite(cdfProb)
+    ? bvProb * cdfProb / 1024
+    : NaN;
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+
+  const previewCurveCell = (target: NsProbabilityCurveCellTarget, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewNsProbabilitySourceTarget(current, target, trimmed) : current);
+  };
+
+  const updateCurveCell = (target: NsProbabilityCurveCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const field = getNsProbabilityTargetField(editableSource, target);
+    if (!field) return false;
+    const nextText = replaceNsProbabilityCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateNsProbabilitySourceField(current, field, trimmed) : current);
+    return true;
+  };
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>NS Probability</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            aria-label="Jump to NS Probability source"
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.("NS.Probability", {
+              keywords: [...NS_PROBABILITY_SOURCE_KEYWORDS],
+              paths: [...NS_PROBABILITY_SOURCE_PATHS],
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? "Collapse NS Probability" : "Expand NS Probability"}
+            onClick={() => setExpanded((current) => {
+              const next = !current;
+              onExpandedChange?.(next);
+              return next;
+            })}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div style={thresholdFormulaStyle}>
+        <strong style={hsWeightSelectedPointStyle}>
+          BV {formatComputedNumber(bv)} / CDF {formatComputedNumber(cdf)}
+        </strong>
+        <span style={nsProbabilityFormulaTextStyle}>
+          <span>NS Prob:</span>
+          <span style={hsWeightWetValueStyle}>{formatComputedNumber(sourceProb)}</span>
+          <span>|[BV_P:</span>
+          <span style={hsWeightWetValueStyle}>{formatComputedNumber(sourceBvProb)}</span>
+          <span>|</span>
+          <span style={hsWeightInterpolatedValueStyle}>{formatOneDecimalNumber(bvProb)}</span>
+          <span>,CDF_P:</span>
+          <span style={hsWeightWetValueStyle}>{formatComputedNumber(sourceCdfProb)}</span>
+          <span>|</span>
+          <span style={hsWeightInterpolatedValueStyle}>{formatOneDecimalNumber(cdfProb)}</span>
+          <span>]|</span>
+          <span style={hsWeightInterpolatedValueStyle}>{formatOneDecimalNumber(computedProb)}</span>
+        </span>
+      </div>
+      {expanded && <div style={nsProbabilityBodyStyle}>
+        <div style={nsProbabilityChartGridStyle}>
+          <div style={nsProbabilityChartCardStyle}>
+            <div style={nsNorTPanelHeaderStyle}>
+              <span>BV Prob</span>
+              <strong>{formatOneDecimalNumber(bvProb)}</strong>
+            </div>
+            <NsProbabilityCurveChart
+              title="BV Prob"
+              xAxisLabel="BV"
+              currentLabel="BV"
+              currentValue={bv}
+              curveId="bv"
+              curve={editableSource?.bv ?? null}
+              editable={canEdit}
+              editorRowLabels={["bv", "prob"]}
+              onCellPreview={previewCurveCell}
+              onCellCommit={updateCurveCell}
+              onSourceJump={onSourceJump}
+            />
+          </div>
+          <div style={nsProbabilityChartCardStyle}>
+            <div style={nsNorTPanelHeaderStyle}>
+              <span>CDF Prob</span>
+              <strong>{formatOneDecimalNumber(cdfProb)}</strong>
+            </div>
+            <NsProbabilityCurveChart
+              title="CDF Prob"
+              xAxisLabel="CDF"
+              currentLabel="CDF"
+              currentValue={cdf}
+              curveId="cdf"
+              curve={editableSource?.cdf ?? null}
+              editable={canEdit}
+              editorRowLabels={["cdf", "prob"]}
+              onCellPreview={previewCurveCell}
+              onCellCommit={updateCurveCell}
+              onSourceJump={onSourceJump}
+            />
+          </div>
+        </div>
+      </div>}
+    </section>
+  );
+}
+
+function NsProbabilityCurveChart({
+  title,
+  xAxisLabel,
+  currentLabel,
+  currentValue,
+  curveId,
+  curve,
+  editable,
+  editorRowLabels,
+  showPercentage = false,
+  sourceJumpLabelPrefix = "NS.Probability",
+  onCellPreview,
+  onCellCommit,
+  onSourceJump,
+}: {
+  title: string;
+  xAxisLabel: string;
+  currentLabel: string;
+  currentValue: number;
+  curveId: NsProbabilityCurveId;
+  curve: NsProbabilityCurve | null;
+  editable: boolean;
+  editorRowLabels: readonly [string, string];
+  showPercentage?: boolean;
+  sourceJumpLabelPrefix?: string;
+  onCellPreview?: (target: NsProbabilityCurveCellTarget, value: string) => void;
+  onCellCommit?: (target: NsProbabilityCurveCellTarget, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const chart = { width: 430, height: 200, left: 56, right: 28, top: 34, bottom: 40 };
+  const plotW = chart.width - chart.left - chart.right;
+  const plotH = chart.height - chart.top - chart.bottom;
+  const activeCurve = curve && isFiniteNsProbabilityCurve(curve) ? curve : null;
+  const endpoints = activeCurve ? nsProbabilityCurveEndpoints(activeCurve) : null;
+  const currentYValue = activeCurve ? interpolateNsProbabilityCurve(activeCurve, currentValue) : NaN;
+  const xValues = activeCurve ? [activeCurve.x0, activeCurve.x1, currentValue].filter(Number.isFinite) : [];
+  const yValues = activeCurve ? [activeCurve.y0, activeCurve.y1, currentYValue, 1024].filter(Number.isFinite) : [1024];
+  const rawXMin = xValues.length > 0 ? Math.min(...xValues) : 0;
+  const rawXMax = xValues.length > 0 ? Math.max(...xValues) : 1024;
+  const xPadRatio = curveId === "cdf" ? 0.12 : 0.28;
+  const xPad = Math.max(1, (rawXMax - rawXMin) * xPadRatio);
+  const xMin = rawXMin === rawXMax ? rawXMin - 1 : rawXMin - xPad;
+  const xMax = rawXMin === rawXMax ? rawXMax + 1 : rawXMax + xPad;
+  const yMin = 0;
+  const rawYMax = Math.max(1, ...yValues, yMin);
+  const yMax = rawYMax * 1.2;
+  const axisY = chart.top + plotH;
+  const xToPx = (value: number) => chart.left + ((value - xMin) / (xMax - xMin)) * plotW;
+  const yToPx = (value: number) => chart.top + (1 - (value - yMin) / (yMax - yMin)) * plotH;
+  const yPointToPx = (value: number) => yToPx(clamp(value, yMin, yMax));
+  const currentY = yPointToPx(currentYValue);
+  const currentReadoutLabel = showPercentage
+    ? formatNsProbabilityReadout(currentYValue)
+    : `P:${formatProbabilityReadoutNumber(currentYValue)}`;
+  const currentReadoutWidth = Math.max(62, currentReadoutLabel.length * 7.5);
+  const currentReadoutHeight = 14;
+  const currentX = xToPx(clamp(currentValue, xMin, xMax));
+  const currentReadoutTopX = clamp(currentX, chart.left + currentReadoutWidth / 2, chart.width - currentReadoutWidth / 2);
+  const pointCollisionBounds = endpoints
+    ? [
+        { x: currentX, y: currentY },
+        { x: xToPx(endpoints.left.x), y: yPointToPx(endpoints.left.y) },
+        { x: xToPx(endpoints.right.x), y: yPointToPx(endpoints.right.y) },
+      ].map((point) => ({
+        left: point.x - 8,
+        right: point.x + 8,
+        top: point.y - 8,
+        bottom: point.y + 8,
+      }))
+    : [];
+  const editorBounds = {
+    left: chart.width - 4 - 108,
+    right: chart.width - 4,
+    top: 4,
+    bottom: 4 + 44,
+  };
+  const aboveReadoutOffsets = [22, 34, 46, 58];
+  const aboveReadoutPlacement = aboveReadoutOffsets
+    .map((offset) => {
+      const y = currentY - offset;
+      const bounds = nsProbabilityReadoutBounds(
+        currentReadoutTopX,
+        y,
+        "middle",
+        currentReadoutWidth,
+        currentReadoutHeight,
+      );
+      return {
+        y,
+        bounds,
+        overlapsEditor: rectsOverlap(bounds, editorBounds),
+        overlapsPoint: pointCollisionBounds.some((pointBounds) => rectsOverlap(bounds, pointBounds)),
+      };
+    })
+    .find((placement) => placement.bounds.top >= chart.top - 10
+      && placement.bounds.bottom <= axisY - 8
+      && !placement.overlapsEditor
+      && !placement.overlapsPoint);
+  const currentReadoutTopY = aboveReadoutPlacement?.y ?? currentY - 12;
+  const canPlaceReadoutAbove = Boolean(aboveReadoutPlacement);
+  const sideReadoutY = clamp(currentY - 12, chart.top + 16, axisY - 18);
+  const sideReadoutRightBounds = nsProbabilityReadoutBounds(
+    currentX + 12,
+    sideReadoutY,
+    "start",
+    currentReadoutWidth,
+    currentReadoutHeight,
+  );
+  const sideReadoutOverlapsEditor = rectsOverlap(sideReadoutRightBounds, editorBounds);
+  const canPlaceReadoutRight = currentX + 14 + currentReadoutWidth <= chart.width - 8 && !sideReadoutOverlapsEditor;
+  const currentReadoutAnchor: "middle" | "start" | "end" = canPlaceReadoutAbove
+    ? "middle"
+    : canPlaceReadoutRight ? "start" : "end";
+  const currentReadoutX = canPlaceReadoutAbove
+    ? currentReadoutTopX
+    : clamp(currentX + (canPlaceReadoutRight ? 12 : -12), chart.left + 8, chart.width - 8);
+  const currentReadoutY = canPlaceReadoutAbove
+    ? currentReadoutTopY
+    : sideReadoutY;
+  const curvePath = endpoints
+    ? [
+        [xMin, endpoints.left.y],
+        [endpoints.left.x, endpoints.left.y],
+        [endpoints.right.x, endpoints.right.y],
+        [xMax, endpoints.right.y],
+      ].map(([x, y], index) => `${index === 0 ? "M" : "L"} ${xToPx(x)} ${yPointToPx(y)}`).join(" ")
+    : "";
+
+  return (
+    <div style={nsProbabilityChartPanelStyle}>
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label={`${title} chart`}>
+        <text x={12} y={18} textAnchor="start" style={chartTitleTextStyle}>{title}</text>
+        <line x1={chart.left} y1={axisY} x2={chart.left} y2={chart.top + 8} style={b2dAxisLineStyle} />
+        <line x1={chart.left} y1={axisY} x2={chart.left + plotW + 10} y2={axisY} style={b2dAxisLineStyle} />
+        <path d={`M ${chart.left} ${chart.top + 2} L ${chart.left - 4} ${chart.top + 10} L ${chart.left + 4} ${chart.top + 10} Z`} style={b2dArrowStyle} />
+        <path d={`M ${chart.left + plotW + 15} ${axisY} L ${chart.left + plotW + 7} ${axisY - 4} L ${chart.left + plotW + 7} ${axisY + 4} Z`} style={b2dArrowStyle} />
+        {activeCurve && endpoints ? (
+          <>
+            <line x1={chart.left} y1={yPointToPx(endpoints.left.y)} x2={xToPx(endpoints.left.x)} y2={yPointToPx(endpoints.left.y)} style={nsProbabilityBoundaryLineStyle} />
+            <line x1={xToPx(endpoints.left.x)} y1={yPointToPx(endpoints.left.y)} x2={xToPx(endpoints.left.x)} y2={axisY} style={nsProbabilityBoundaryLineStyle} />
+            <line x1={chart.left} y1={yPointToPx(endpoints.right.y)} x2={xToPx(endpoints.right.x)} y2={yPointToPx(endpoints.right.y)} style={nsProbabilityBoundaryLineStyle} />
+            <line x1={xToPx(endpoints.right.x)} y1={yPointToPx(endpoints.right.y)} x2={xToPx(endpoints.right.x)} y2={axisY} style={nsProbabilityBoundaryLineStyle} />
+            <path d={curvePath} style={nsProbabilityCurveStyle} />
+            <circle cx={xToPx(endpoints.left.x)} cy={yPointToPx(endpoints.left.y)} r={3.2} style={nsProbabilityEndpointPointStyle} />
+            <circle cx={xToPx(endpoints.right.x)} cy={yPointToPx(endpoints.right.y)} r={3.2} style={nsProbabilityEndpointPointStyle} />
+            {Number.isFinite(currentValue) && Number.isFinite(currentYValue) && (
+              <>
+                <line x1={chart.left} y1={currentY} x2={currentX} y2={currentY} style={nsProbabilityCurrentGuideLineStyle} />
+                <line x1={currentX} y1={currentY} x2={currentX} y2={axisY} style={nsProbabilityCurrentGuideLineStyle} />
+                <circle cx={currentX} cy={currentY} r={3.6} style={nsProbabilityCurrentPointStyle} />
+                <text x={currentX} y={axisY + 25} textAnchor="middle" style={nsProbabilityCurrentValueTextStyle}>
+                  {currentLabel}:{formatComputedNumber(currentValue)}
+                </text>
+                <text x={currentReadoutX} y={currentReadoutY} textAnchor={currentReadoutAnchor} style={nsProbabilityCurrentValueTextStyle}>
+                  {currentReadoutLabel}
+                </text>
+              </>
+            )}
+            <text x={xToPx(activeCurve.x0)} y={axisY + 13} textAnchor="middle" style={chartAxisTextStyle}>{formatComputedNumber(activeCurve.x0)}</text>
+            <text x={xToPx(activeCurve.x1)} y={axisY + 13} textAnchor="middle" style={chartAxisTextStyle}>{formatComputedNumber(activeCurve.x1)}</text>
+          </>
+        ) : (
+          <text x={chart.left + plotW / 2} y={chart.top + plotH / 2} textAnchor="middle" style={chartAxisTextStyle}>
+            Data source pending
+          </text>
+        )}
+        <text x={chart.width - 12} y={axisY - 7} textAnchor="end" style={b2dXAxisLabelStyle}>{xAxisLabel}</text>
+      </svg>
+      {curve && (
+        <NsProbabilityCurveValueGrid
+          curveId={curveId}
+          curve={curve}
+          editable={editable}
+          rowLabels={editorRowLabels}
+          sourceJumpLabelPrefix={sourceJumpLabelPrefix}
+          onCellPreview={onCellPreview}
+          onCellCommit={onCellCommit}
+          onSourceJump={onSourceJump}
+        />
+      )}
+    </div>
+  );
+}
+
+function NsProbabilityCurveValueGrid({
+  curveId,
+  curve,
+  editable,
+  rowLabels,
+  sourceJumpLabelPrefix,
+  onCellPreview,
+  onCellCommit,
+  onSourceJump,
+}: {
+  curveId: NsProbabilityCurveId;
+  curve: NsProbabilityCurve;
+  editable: boolean;
+  rowLabels: readonly [string, string];
+  sourceJumpLabelPrefix: string;
+  onCellPreview?: (target: NsProbabilityCurveCellTarget, value: string) => void;
+  onCellCommit?: (target: NsProbabilityCurveCellTarget, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const rows: Array<{ label: string; fields: NsProbabilityCurveFieldId[] }> = [
+    { label: rowLabels[0], fields: ["x0", "x1"] },
+    { label: rowLabels[1], fields: ["y0", "y1"] },
+  ];
+  return (
+    <div style={nsProbabilityCurveEditorStyle}>
+      {rows.map((row) => (
+        <Fragment key={row.label}>
+          <div style={nsProbabilityCurveEditorLabelStyle}>{row.label}</div>
+          {row.fields.map((fieldId) => {
+            const field = curve.fields[fieldId];
+            const value = field?.value ?? formatInputNumber(curve[fieldId]);
+            return (
+              <NsProbabilityEditableValueCell
+                key={fieldId}
+                value={value}
+                editable={editable && Boolean(field)}
+                ariaLabel={field ? `${curveId}.${fieldId}.${field.path}` : `${curveId}.${fieldId}`}
+                onPreview={(nextValue) => onCellPreview?.({ curveId, fieldId }, nextValue)}
+                onCommit={(nextValue) => onCellCommit?.({ curveId, fieldId }, nextValue)}
+                onSourceJump={field && onSourceJump
+                  ? () => onSourceJump(`${sourceJumpLabelPrefix}.${fieldId}`, {
+                      paths: [field.path],
+                      jump_to: "first",
+                      highlight: "ranges",
+                    })
+                  : undefined}
+              />
+            );
+          })}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+interface EditableTableCellStyleState {
+  editable: boolean;
+  active: boolean;
+  focused: boolean;
+  draftValue: string;
+}
+
+interface EditableNumberTableCellProps {
+  value: string;
+  editable: boolean;
+  active?: boolean;
+  ariaLabel: string;
+  frameStyle: (state: EditableTableCellStyleState) => CSSProperties;
+  inputStyle: (state: EditableTableCellStyleState) => CSSProperties;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}
+
+function EditableNumberTableCell({
+  value,
+  editable,
+  active = false,
+  ariaLabel,
+  frameStyle,
+  inputStyle,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: EditableNumberTableCellProps) {
+  const [draftValue, setDraftValue] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const state = { editable, active, focused, draftValue };
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  const resetDraft = () => {
+    setDraftValue(value);
+    onPreview?.(value);
+  };
+
+  const commitDraft = (): boolean => {
+    if (!editable) return false;
+    const nextValue = draftValue.trim();
+    if (nextValue === value.trim()) return true;
+    if (!isSourceNumberText(nextValue)) {
+      resetDraft();
+      return false;
+    }
+    const committed = onCommit?.(nextValue);
+    if (committed === false) {
+      resetDraft();
+      return false;
+    }
+    return true;
+  };
+
+  const updateDraft = (nextValue: string) => {
+    setDraftValue(nextValue);
+    onPreview?.(isSourceNumberText(nextValue.trim()) ? nextValue : value);
+  };
+
+  return (
+    <div style={frameStyle(state)}>
+      <input
+        aria-label={ariaLabel}
+        value={draftValue}
+        readOnly={!editable}
+        tabIndex={editable ? 0 : -1}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          commitDraft();
+        }}
+        onChange={(event) => updateDraft(event.target.value)}
+        onContextMenu={(event) => {
+          if (!onSourceJump) return;
+          event.preventDefault();
+          onSourceJump();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            resetDraft();
+            event.currentTarget.blur();
+          }
+        }}
+        inputMode="decimal"
+        style={inputStyle(state)}
+      />
+    </div>
+  );
+}
+
+function NsProbabilityEditableValueCell({
+  value,
+  editable,
+  ariaLabel,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: {
+  value: string;
+  editable: boolean;
+  ariaLabel: string;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}) {
+  return (
+    <EditableNumberTableCell
+      value={value}
+      editable={editable}
+      ariaLabel={ariaLabel}
+      frameStyle={({ editable: cellEditable, focused }) => nsProbabilityCurveEditorCellStyle(cellEditable, focused)}
+      inputStyle={({ editable: cellEditable }) => nsProbabilityCurveEditorInputStyle(cellEditable)}
+      onPreview={onPreview}
+      onCommit={onCommit}
+      onSourceJump={onSourceJump}
+    />
+  );
+}
+
+function NsNorTAreaCard({
+  domId,
+  tone = "normal",
+  source,
+  bvValue,
+  nsEvdValue,
+  nsNormalFinalThdValue,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+  onComputationChange,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  domId?: string;
+  tone?: "normal" | "bt";
+  source: NsNorTSource | null;
+  bvValue: string | null;
+  nsEvdValue: string | null;
+  nsNormalFinalThdValue: string | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onComputationChange?: (computation: NsAreaComputation) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+
+  const isBt = tone === "bt";
+  const bv = parseFiniteNumber(bvValue);
+  const nsEvd = parseFiniteNumber(nsEvdValue);
+  const sourceFinalThd = parseFiniteNumber(nsNormalFinalThdValue);
+  const computation = calculateNsAreaComputation(editableSource, bv, isBt ? bv : nsEvd);
+  const {
+    interpolatedThd,
+    flatThd,
+    interpolatedProb,
+    finalThd: computedFinalThd,
+  } = computation;
+  useEffect(() => {
+    onComputationChange?.({ interpolatedThd, flatThd, interpolatedProb, finalThd: computedFinalThd });
+  }, [computedFinalThd, flatThd, interpolatedProb, interpolatedThd, onComputationChange]);
+  const nsEvdDefine = editableSource && !isBt
+    ? {
+        intervalDarkest: {
+          value: editableSource.nsEvdIntervalValues[0] ?? NaN,
+          field: editableSource.nsEvdIntervalFields[0] ?? null,
+        },
+        intervalBrightest: {
+          value: editableSource.nsEvdIntervalValues[1] ?? NaN,
+          field: editableSource.nsEvdIntervalFields[1] ?? null,
+        },
+        darkest: {
+          value: editableSource.nsEvdDefineValues[0] ?? NaN,
+          field: editableSource.nsEvdDefineFields[0] ?? null,
+        },
+        brightest: {
+          value: editableSource.nsEvdDefineValues[1] ?? NaN,
+          field: editableSource.nsEvdDefineFields[1] ?? null,
+        },
+      }
+    : null;
+  const nsPcntSetting = editableSource?.flatSettings.nsPcnt ?? null;
+  const flatThdSetting = editableSource?.flatSettings.flatThd ?? null;
+  const probabilityInput = isBt ? bv : nsEvd;
+  const areaTitle = isBt ? "NS BT Area" : "NS NorT Area";
+  const sourceLabel = isBt ? "NS.BT" : "NS.NorT";
+  const sourceJumpTitle = isBt ? "Jump to NS BT Area source" : "Jump to NS NorT Area source";
+  const readoutLabel = isBt ? "NS_BT_THD" : "NS_OE_THD";
+  const thdPanelTitle = isBt ? "NS_BrightTone_THD" : "NS_Normal_THD";
+  const thdTableTitle = isBt ? "NS BrightTone THD" : "NS Normal THD";
+  const thdSourceJumpLabel = isBt ? "NS.BT.NS_BrightTone_THD" : "NS.NorT.NS_Normal_THD";
+  const meteringTitle = isBt ? "NS BrightTone Y Metering%" : "NS Normal Y Metering%";
+  const meteringSourceJumpLabel = isBt ? "NS.BT.ns_pcnt" : "NS.NorT.ns_pcnt";
+  const flatThdSourceJumpLabel = isBt ? "NS.BT.ns_flat_thd" : "NS.NorT.ns_flat_thd";
+  const probTitle = isBt ? "NS_SKY_BV_Prob" : "NS_Flat_Prob";
+  const probXAxisLabel = isBt ? "BV" : "NS_EVD";
+  const probRowLabels = isBt ? (["bv", "prob"] as const) : (["ns_evd", "prob"] as const);
+  const formulaTitle = isBt
+    ? `NS_BT_THD = NS_BrightTone_THD - (NS_BrightTone_THD - u4FlatThd) x NS_Sky_Prob = ${formatOneDecimalNumber(interpolatedThd)} - (${formatOneDecimalNumber(interpolatedThd)} - ${formatOneDecimalNumber(flatThd)}) x ${formatNsProbabilityPercent(interpolatedProb)} = ${formatOneDecimalNumber(computedFinalThd)}`
+    : `NS_OE_THD = NS_Normal_THD - (NS_Normal_THD - u4FlatThd) x NS_Flat_Prob = ${formatOneDecimalNumber(interpolatedThd)} - (${formatOneDecimalNumber(interpolatedThd)} - ${formatOneDecimalNumber(flatThd)}) x ${formatNsProbabilityPercent(interpolatedProb)} = ${formatOneDecimalNumber(computedFinalThd)}`;
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+  const activeThdIndexes = editableSource ? locateLinearInterpolationIndexes(bv, editableSource.bvValues) : new Set<number>();
+  const sourcePaths = editableSource?.fields.length
+    ? Array.from(new Set(editableSource.fields.map((field) => field.path)))
+    : isBt
+      ? [
+          NS_NORT_BV_PATH,
+          NS_BT_THD_PATH,
+          NS_BT_NS_PCNT_PATH,
+          NS_NORT_FLAT_THD_PATH,
+          NS_BT_SKY_PROB_X0_PATH,
+          NS_BT_SKY_PROB_Y0_PATH,
+          NS_BT_SKY_PROB_X1_PATH,
+          NS_BT_SKY_PROB_Y1_PATH,
+        ]
+      : [
+          NS_NORT_BV_PATH,
+          NS_NORT_THD_PATH,
+          NS_NORT_NS_PCNT_PATH,
+          NS_NORT_FLAT_THD_PATH,
+          NS_NORT_FLAT_PROB_X0_PATH,
+          NS_NORT_FLAT_PROB_Y0_PATH,
+          NS_NORT_FLAT_PROB_X1_PATH,
+          NS_NORT_FLAT_PROB_Y1_PATH,
+        ];
+
+  const previewCell = (target: NsNorTCellTarget, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewNsNorTSourceTarget(current, target, trimmed) : current);
+  };
+
+  const updateCell = (target: NsNorTCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const field = getNsNorTTargetField(editableSource, target);
+    if (!field) return false;
+    const nextText = replaceNsNorTCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateNsNorTSourceTarget(current, target, field, trimmed) : current);
+    return true;
+  };
+
+  return (
+    <section id={domId} style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>{areaTitle}</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            aria-label={sourceJumpTitle}
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.(sourceLabel, {
+              paths: sourcePaths,
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? `Collapse ${areaTitle}` : `Expand ${areaTitle}`}
+            onClick={() => setExpanded((current) => {
+              const next = !current;
+              onExpandedChange?.(next);
+              return next;
+            })}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div style={nsNorTSummaryStyle}>
+        <strong style={hsWeightSelectedPointStyle}>
+          {isBt
+            ? `BV ${formatComputedNumber(bv)}`
+            : `BV ${formatComputedNumber(bv)} / NS_EVD ${formatComputedNumber(nsEvd)}`}
+        </strong>
+        <span style={nsNorTOeReadoutStyle}>
+          <span>{readoutLabel}:</span>
+          <span style={hsWeightWetValueStyle}>{formatComputedNumber(sourceFinalThd)}</span>
+          <span>|</span>
+          <HoverTooltip content={formulaTitle} positioning="above-center" wrap maxWidth={640} inline>
+            <span style={hsWeightInterpolatedValueStyle}>{formatOneDecimalNumber(computedFinalThd)}</span>
+          </HoverTooltip>
+        </span>
+      </div>
+      {expanded && (
+        editableSource ? (
+          <PanelGroup direction="horizontal" autoSaveId={isBt ? "isp6s-ns-bt-split" : "isp6s-ns-nort-split"} className="flex h-full w-full min-w-0 items-stretch">
+            <Panel defaultSize={76} minSize={56} className="min-w-0">
+              <div style={nsNorTPanelStyle}>
+                <div style={nsNorTPanelHeaderStyle}>
+                  <span>{thdPanelTitle}</span>
+                  <strong>{formatOneDecimalNumber(interpolatedThd)}</strong>
+                </div>
+                <div style={nsNorTTableWrapStyle}>
+                  <div style={nsNorTCurveGridStyle(editableSource.bvValues.length)}>
+                    <div style={nsNorTCurveTitleCellStyle(editableSource.bvValues.length)}>{thdTableTitle}</div>
+                    <div style={nsNorTRowHeaderStyle(false)}>BV</div>
+                    {editableSource.bvValues.map((value, index) => (
+                      <NsNorTEditableCell
+                        key={`bv:${index}`}
+                        value={formatInputNumber(value)}
+                        editable={canEdit && Boolean(editableSource.bvFields[index])}
+                        active={activeThdIndexes.has(index)}
+                        variant="curve"
+                        ariaLabel={`${editableSource.bvPath}.${index}`}
+                        onPreview={(nextValue) => previewCell({ kind: "thdTable", row: "bv", index }, nextValue)}
+                        onCommit={(nextValue) => updateCell({ kind: "thdTable", row: "bv", index }, nextValue)}
+                        onSourceJump={editableSource.bvFields[index] && onSourceJump
+                          ? () => onSourceJump(isBt ? "NS.BT.BV" : "NS.NorT.BV", {
+                              paths: [editableSource.bvFields[index]?.path ?? editableSource.bvPath],
+                              jump_to: "first",
+                              highlight: "ranges",
+                            })
+                          : undefined}
+                      />
+                    ))}
+                    <div style={nsNorTRowHeaderStyle(true)}>THD</div>
+                    {editableSource.thdValues.map((value, index) => (
+                      <NsNorTEditableCell
+                        key={`thd:${index}`}
+                        value={formatInputNumber(value)}
+                        editable={canEdit && Boolean(editableSource.thdFields[index])}
+                        active={activeThdIndexes.has(index)}
+                        variant="curve"
+                        ariaLabel={`${editableSource.thdPath}.${index}`}
+                        onPreview={(nextValue) => previewCell({ kind: "thdTable", row: "thd", index }, nextValue)}
+                        onCommit={(nextValue) => updateCell({ kind: "thdTable", row: "thd", index }, nextValue)}
+                        onSourceJump={editableSource.thdFields[index] && onSourceJump
+                          ? () => onSourceJump(thdSourceJumpLabel, {
+                              paths: [editableSource.thdFields[index]?.path ?? editableSource.thdPath],
+                              jump_to: "first",
+                              highlight: "ranges",
+                            })
+                          : undefined}
+                      />
+                    ))}
+                  </div>
+                  {(flatThdSetting || nsPcntSetting || nsEvdDefine) && (
+                    <div style={isBt ? nsBtParamTablesStyle : nsNorTParamTablesStyle}>
+                      <div style={isBt ? nsBtParamStackStyle : nsNorTParamStackStyle}>
+                        {flatThdSetting && (
+                          <NsNorTParamTable
+                            title="NS Flat THD"
+                            label="Flat THD"
+                            value={formatInputNumber(flatThdSetting.value)}
+                            editable={canEdit && Boolean(flatThdSetting.field)}
+                            valueAriaLabel={flatThdSetting.path}
+                            minWidth={0}
+                            onPreview={(nextValue) => previewCell({ kind: "flatSetting", id: "flatThd" }, nextValue)}
+                            onCommit={(nextValue) => updateCell({ kind: "flatSetting", id: "flatThd" }, nextValue)}
+                            onSourceJump={flatThdSetting.field && onSourceJump
+                              ? () => onSourceJump(flatThdSourceJumpLabel, {
+                                  paths: [flatThdSetting.field?.path ?? flatThdSetting.path],
+                                  jump_to: "first",
+                                  highlight: "ranges",
+                                })
+                              : undefined}
+                          />
+                        )}
+                        {nsPcntSetting && (
+                          <NsNorTParamTable
+                            title={meteringTitle}
+                            label="Pcnt%"
+                            value={formatInputNumber(nsPcntSetting.value)}
+                            editable={canEdit && Boolean(nsPcntSetting.field)}
+                            valueAriaLabel={nsPcntSetting.path}
+                            minWidth={0}
+                            onPreview={(nextValue) => previewCell({ kind: "flatSetting", id: "nsPcnt" }, nextValue)}
+                            onCommit={(nextValue) => updateCell({ kind: "flatSetting", id: "nsPcnt" }, nextValue)}
+                            onSourceJump={nsPcntSetting.field && onSourceJump
+                              ? () => onSourceJump(meteringSourceJumpLabel, {
+                                  paths: [nsPcntSetting.field?.path ?? nsPcntSetting.path],
+                                  jump_to: "first",
+                                  highlight: "ranges",
+                                })
+                              : undefined}
+                          />
+                        )}
+                      </div>
+                      {nsEvdDefine && (
+                        <NsNorTEvdDefineTable
+                          intervalDarkestValue={formatInputNumber(nsEvdDefine.intervalDarkest.value)}
+                          intervalBrightestValue={formatInputNumber(nsEvdDefine.intervalBrightest.value)}
+                          intervalDarkestEditable={canEdit && Boolean(nsEvdDefine.intervalDarkest.field)}
+                          intervalBrightestEditable={canEdit && Boolean(nsEvdDefine.intervalBrightest.field)}
+                          intervalDarkestAriaLabel={NS_NORT_EVD_DARKEST_PATH}
+                          intervalBrightestAriaLabel={NS_NORT_EVD_BRIGHTEST_PATH}
+                          onIntervalDarkestPreview={(nextValue) => previewCell({ kind: "evdDefine", row: "interval", index: 0 }, nextValue)}
+                          onIntervalDarkestCommit={(nextValue) => updateCell({ kind: "evdDefine", row: "interval", index: 0 }, nextValue)}
+                          onIntervalBrightestPreview={(nextValue) => previewCell({ kind: "evdDefine", row: "interval", index: 1 }, nextValue)}
+                          onIntervalBrightestCommit={(nextValue) => updateCell({ kind: "evdDefine", row: "interval", index: 1 }, nextValue)}
+                          onIntervalDarkestSourceJump={nsEvdDefine.intervalDarkest.field && onSourceJump
+                            ? () => onSourceJump("NS.NorT.ns_evd_interval.darkest", {
+                                paths: [nsEvdDefine.intervalDarkest.field?.path ?? NS_NORT_EVD_DARKEST_PATH],
+                                jump_to: "first",
+                                highlight: "ranges",
+                              })
+                            : undefined}
+                          onIntervalBrightestSourceJump={nsEvdDefine.intervalBrightest.field && onSourceJump
+                            ? () => onSourceJump("NS.NorT.ns_evd_interval.brightest", {
+                                paths: [nsEvdDefine.intervalBrightest.field?.path ?? NS_NORT_EVD_BRIGHTEST_PATH],
+                                jump_to: "first",
+                                highlight: "ranges",
+                              })
+                            : undefined}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Panel>
+            <ResizeHandle direction="horizontal" size={8} />
+            <Panel defaultSize={24} minSize={20} className="min-w-0">
+              <div style={nsProbabilityChartCardStyle}>
+                <div style={nsNorTPanelHeaderStyle}>
+                  <span>{probTitle}</span>
+                  <strong>{formatNsProbabilityReadout(interpolatedProb)}</strong>
+                </div>
+                <NsProbabilityCurveChart
+                  title={probTitle}
+                  xAxisLabel={probXAxisLabel}
+                  currentLabel={probXAxisLabel}
+                  currentValue={probabilityInput}
+                  curveId="bv"
+                  curve={editableSource.flatProb}
+                  editable={canEdit}
+                  editorRowLabels={probRowLabels}
+                  showPercentage
+                  sourceJumpLabelPrefix={isBt ? "NS.BT.NS_SKY_BV_Prob" : "NS.NorT.NS_Flat_Prob"}
+                  onCellPreview={(target, nextValue) => previewCell({ kind: "flatProb", fieldId: target.fieldId }, nextValue)}
+                  onCellCommit={(target, nextValue) => updateCell({ kind: "flatProb", fieldId: target.fieldId }, nextValue)}
+                  onSourceJump={onSourceJump}
+                />
+              </div>
+            </Panel>
+          </PanelGroup>
+        ) : (
+          <div style={nsAreaPlaceholderBodyStyle} aria-hidden="true" />
+        )
+      )}
+    </section>
+  );
+}
+
+function NsNorTEditableCell({
+  value,
+  editable,
+  active,
+  variant = "flat",
+  ariaLabel,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: {
+  value: string;
+  editable: boolean;
+  active: boolean;
+  variant?: "curve" | "flat";
+  ariaLabel: string;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}) {
+  return (
+    <EditableNumberTableCell
+      value={value}
+      editable={editable}
+      active={active}
+      ariaLabel={ariaLabel}
+      frameStyle={({ editable: cellEditable, active: cellActive, focused }) => nsNorTCellFrameStyle(cellEditable, cellActive, focused, variant)}
+      inputStyle={({ editable: cellEditable, active: cellActive }) => nsNorTCellInputStyle(cellEditable, cellActive, variant)}
+      onPreview={onPreview}
+      onCommit={onCommit}
+      onSourceJump={onSourceJump}
+    />
+  );
+}
+
+function NsDtAreaCard({
+  domId,
+  source,
+  imageThdValue,
+  imageLimitValue,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  onSourceJump,
+  initialExpanded,
+  onExpandedChange,
+}: {
+  domId?: string;
+  source: NsDtSource | null;
+  imageThdValue: string | null;
+  imageLimitValue: string | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  initialExpanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(initialExpanded ?? true);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+  useEffect(() => {
+    setExpanded(initialExpanded ?? true);
+  }, [initialExpanded]);
+
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+  const sourceValues = editableSource ?? source;
+  const sourcePaths = sourceValues?.fields.length
+    ? Array.from(new Set(sourceValues.fields.map((field) => field.path)))
+    : [NS_DT_DARK_Y_PATH, NS_LOWBND_THD_PATH, NS_LOWBND_THD_LIMIT_PATH];
+
+  const getSourceValue = (id: NsDtCellId): number => {
+    if (!sourceValues) return NaN;
+    if (id === "darkY") return sourceValues.darkYValue;
+    if (id === "thd") return sourceValues.thdValue;
+    return sourceValues.limitValue;
+  };
+
+  const getSourceField = (id: NsDtCellId): FieldEntry | null => {
+    if (!sourceValues) return null;
+    if (id === "darkY") return sourceValues.darkYField;
+    if (id === "thd") return sourceValues.thdField;
+    return sourceValues.limitField;
+  };
+
+  const updateLocalSource = (current: NsDtSource, id: NsDtCellId, value: number, field: FieldEntry | null): NsDtSource => ({
+    ...current,
+    ...(id === "darkY" ? { darkYValue: value, darkYField: field } : {}),
+    ...(id === "thd" ? { thdValue: value, thdField: field } : {}),
+    ...(id === "limit" ? { limitValue: value, limitField: field } : {}),
+    fields: current.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value: String(value) } : item),
+  });
+
+  const previewCell = (id: NsDtCellId, nextValue: string) => {
+    const value = parseFiniteNumber(nextValue);
+    if (!Number.isFinite(value)) return;
+    setEditableSource((current) => {
+      const field = getSourceField(id);
+      return current ? updateLocalSource(current, id, value, field) : current;
+    });
+  };
+
+  const updateCell = (id: NsDtCellId, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const value = parseFiniteNumber(nextValue);
+    const field = getSourceField(id);
+    if (!Number.isFinite(value) || !field) return false;
+    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, nextValue.trim());
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateLocalSource(current, id, value, field) : current);
+    return true;
+  };
+
+  const sourceJump = (id: NsDtCellId) => {
+    const field = getSourceField(id);
+    const path = field?.path ?? (id === "darkY" ? NS_DT_DARK_Y_PATH : id === "thd" ? NS_LOWBND_THD_PATH : NS_LOWBND_THD_LIMIT_PATH);
+    onSourceJump?.(`NS.DT.${id}`, {
+      paths: [path],
+      jump_to: "first",
+      highlight: "ranges",
+    });
+  };
+
+  const sourceThd = formatComputedNumber(sourceValues?.thdValue ?? NaN);
+  const sourceLimit = formatComputedNumber(sourceValues?.limitValue ?? NaN);
+  const imageThd = formatComputedNumber(parseFiniteNumber(imageThdValue));
+  const imageLimit = formatComputedNumber(parseFiniteNumber(imageLimitValue));
+
+  return (
+    <section id={domId} style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>NS DT Area</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            aria-label="Jump to NS DT Area source"
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.("NS.DT", {
+              paths: sourcePaths,
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? "Collapse NS DT Area" : "Expand NS DT Area"}
+            onClick={() => setExpanded((current) => {
+              const next = !current;
+              onExpandedChange?.(next);
+              return next;
+            })}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div style={nsNorTSummaryStyle}>
+        <strong style={hsWeightSelectedPointStyle}>
+          参数: THD {sourceThd} / Limit {sourceLimit}
+        </strong>
+        <span style={nsNorTOeReadoutStyle}>
+          <span>图片: THD</span>
+          <span style={hsWeightWetValueStyle}>{imageThd}</span>
+          <span>|</span>
+          <span>Limit</span>
+          <span style={hsWeightInterpolatedValueStyle}>{imageLimit}</span>
+        </span>
+      </div>
+      {expanded && (
+        <PanelGroup direction="horizontal" autoSaveId="isp6s-ns-dt-split" className="flex h-full w-full min-w-0 items-stretch">
+          <Panel defaultSize={58} minSize={36} className="min-w-0">
+            <div style={nsDtPanelStyle}>
+              <div style={nsNorTPanelHeaderStyle}>
+                <span>NS_LOWBND_THD</span>
+                <strong>{formatComputedNumber(getSourceValue("thd"))}</strong>
+              </div>
+              <div style={nsDtTableStackStyle}>
+                <NsNorTParamTable
+                  title="NS DarkY Metering%"
+                  label="Pcnt%"
+                  value={formatInputNumber(getSourceValue("darkY"))}
+                  editable={canEdit && Boolean(getSourceField("darkY"))}
+                  valueAriaLabel={NS_DT_DARK_Y_PATH}
+                  minWidth={0}
+                  onPreview={(value) => previewCell("darkY", value)}
+                  onCommit={(value) => updateCell("darkY", value)}
+                  onSourceJump={onSourceJump ? () => sourceJump("darkY") : undefined}
+                />
+                <NsNorTParamTable
+                  title="NS Dark THD"
+                  label="Dark THD"
+                  value={formatInputNumber(getSourceValue("thd"))}
+                  editable={canEdit && Boolean(getSourceField("thd"))}
+                  valueAriaLabel={NS_LOWBND_THD_PATH}
+                  minWidth={0}
+                  onPreview={(value) => previewCell("thd", value)}
+                  onCommit={(value) => updateCell("thd", value)}
+                  onSourceJump={onSourceJump ? () => sourceJump("thd") : undefined}
+                />
+                <NsNorTParamTable
+                  title="NS Dark Limit"
+                  label="Up Limit"
+                  value={formatInputNumber(getSourceValue("limit"))}
+                  editable={canEdit && Boolean(getSourceField("limit"))}
+                  valueAriaLabel={NS_LOWBND_THD_LIMIT_PATH}
+                  minWidth={0}
+                  onPreview={(value) => previewCell("limit", value)}
+                  onCommit={(value) => updateCell("limit", value)}
+                  onSourceJump={onSourceJump ? () => sourceJump("limit") : undefined}
+                />
+              </div>
+            </div>
+          </Panel>
+          <ResizeHandle direction="horizontal" size={8} />
+          <Panel defaultSize={42} minSize={28} className="min-w-0">
+            <div style={nsProbabilityChartCardStyle}>
+              <div style={nsNorTPanelHeaderStyle}>
+                <span>NS Y Metering%</span>
+                <strong>{formatNsDtPcntPercent(getSourceValue("darkY"))}</strong>
+              </div>
+              <NsDtLowBndChart
+                darkY={getSourceValue("darkY")}
+                thd={getSourceValue("thd")}
+                limit={getSourceValue("limit")}
+              />
+            </div>
+          </Panel>
+        </PanelGroup>
+      )}
+    </section>
+  );
+}
+
+function NsDtLowBndChart({
+  darkY,
+  thd,
+  limit,
+}: {
+  darkY: number;
+  thd: number;
+  limit: number;
+}) {
+  const chart = { width: 650, height: 208, left: 32, right: 28, top: 20, bottom: 36 };
+  const plotW = chart.width - chart.left - chart.right;
+  const axisY = chart.height - chart.bottom;
+  const yTop = chart.top;
+  const maxValue = Math.max(1, ...[darkY, thd, limit].filter(Number.isFinite));
+  const darkYRatio = Number.isFinite(darkY) ? clamp(darkY / maxValue, 0, 1) : 0;
+  const darkYX = chart.left + clamp(0.14 + darkYRatio * 0.28, 0.14, 0.46) * plotW;
+  const greenRightX = clamp(chart.left + 0.52 * plotW, darkYX + 110, chart.left + 0.62 * plotW);
+  const curveEndX = chart.left + plotW - 12;
+  const rightPeakX = chart.left + plotW - 76;
+  const rightValleyX = chart.left + plotW - 150;
+  const curvePath = [
+    `M ${chart.left} ${axisY}`,
+    `C ${chart.left + 48} ${axisY - 92}, ${chart.left + 120} ${axisY - 124}, ${chart.left + 170} ${axisY - 96}`,
+    `C ${chart.left + 234} ${axisY - 60}, ${chart.left + 260} ${axisY - 4}, ${chart.left + 336} ${axisY - 1}`,
+    `C ${chart.left + 410} ${axisY - 2}, ${rightValleyX - 34} ${axisY - 28}, ${rightValleyX} ${axisY - 36}`,
+    `C ${rightValleyX + 22} ${axisY - 42}, ${rightPeakX - 12} ${axisY - 32}, ${rightPeakX} ${axisY - 32}`,
+    `C ${curveEndX - 42} ${axisY - 32}, ${curveEndX - 12} ${axisY - 24}, ${curveEndX} ${axisY - 8}`,
+  ].join(" ");
+
+  return (
+    <div style={nsDtChartPanelStyle}>
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label="NS LOWBND preview chart">
+        <defs>
+          <linearGradient id="ns-dt-lowbnd-zone" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#dff7cf" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#eaf7df" stopOpacity="0.74" />
+          </linearGradient>
+        </defs>
+        <rect x={chart.left - 18} y={chart.top - 14} width={plotW + 34} height={chart.height - 20} rx={8} style={nsDtChartOuterFrameStyle} />
+        <rect x={chart.left} y={yTop} width={greenRightX - chart.left} height={axisY - yTop} style={nsDtChartZoneStyle} />
+        <line x1={chart.left} y1={axisY} x2={chart.left} y2={yTop - 10} style={nsDtAxisLineStyle} />
+        <line x1={chart.left} y1={axisY} x2={chart.left + plotW - 12} y2={axisY} style={nsDtAxisLineStyle} />
+        <path d={`M ${chart.left} ${yTop - 14} L ${chart.left - 5} ${yTop - 4} L ${chart.left + 5} ${yTop - 4} Z`} style={nsDtAxisArrowStyle} />
+        <path d={`M ${chart.left + plotW - 3} ${axisY} L ${chart.left + plotW - 15} ${axisY - 5} L ${chart.left + plotW - 15} ${axisY + 5} Z`} style={nsDtAxisArrowStyle} />
+        <path d={curvePath} style={nsDtDistributionCurveStyle} />
+        <line x1={darkYX} y1={yTop} x2={darkYX} y2={axisY} style={nsDtDarkYLineStyle} />
+        <path d={`M ${chart.left} ${axisY + 8} C ${chart.left + 18} ${axisY + 17}, ${darkYX - 18} ${axisY + 17}, ${darkYX} ${axisY + 8}`} style={nsDtDarkBracketCurveStyle} />
+        <text x={chart.left + 10} y={chart.top + 12} textAnchor="start" style={nsDtAxisLabelStyle}>
+          Pixels #
+        </text>
+        <text x={darkYX - 8} y={chart.top + 10} textAnchor="end" style={nsDtGreenLabelStyle}>
+          Dark Y
+        </text>
+        <text x={chart.left + plotW - 2} y={axisY + 12} textAnchor="start" style={nsDtAxisLabelStyle}>
+          Y
+        </text>
+        <text x={(chart.left + darkYX) / 2} y={axisY + 26} textAnchor="middle" style={nsDtAxisLabelStyle}>
+          {formatNsDtPcntPercent(darkY)}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+function AblTabContent({
+  sections,
+  onSourceJump,
+}: {
+  sections: ChartSection[];
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  return (
+    <div style={ablGridStyle}>
+      {sections.map((section) => {
+        const paths = Array.from(new Set(section.rows.map((row) => row.path)));
+        const lines = section.rows.map((row) => row.line).filter((line) => line > 0);
+        const lineRange: [number, number] | null = lines.length > 0
+          ? [Math.min(...lines), Math.max(...lines)]
+          : null;
+        const hasJump = Boolean(onSourceJump && paths.length > 0);
+        return (
+          <section key={section.id} style={ablCardStyle}>
+            <div style={ablHeaderStyle}>
+              <div style={ablHeaderTitleWrapStyle}>
+                <span style={sourceSectionTitleStyle}>{section.title}</span>
+                {section.subtitle && <span style={sourceSectionSubtitleStyle}>{section.subtitle}</span>}
+              </div>
+              <button
+                type="button"
+                aria-label={`Jump to ${section.title} source`}
+                disabled={!hasJump}
+                onClick={() => onSourceJump?.(section.title, lineRange
+                  ? {
+                      line_ranges: [lineRange],
+                      jump_to: "first",
+                      highlight: "ranges",
+                    }
+                  : {
+                      paths,
+                      jump_to: "first",
+                      highlight: "ranges",
+                    })}
+                style={groupSourceButtonStyle(hasJump)}
+              >
+                <Code24Regular className="h-4 w-4" />
+              </button>
+            </div>
+            <div style={ablRowsStyle}>
+              {section.rows.map((row) => {
+                const rowJump = Boolean(onSourceJump && row.line > 0);
+                const displayLabel = formatAblRowLabel(row.label);
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="chart-map-abl-row"
+                    data-abl-row="true"
+                    aria-label={`Jump to ${row.path}`}
+                    disabled={!rowJump}
+                    onClick={() => {
+                      if (!rowJump) return;
+                      onSourceJump?.(`${section.title}.${displayLabel}`, {
+                        line_ranges: [[row.line, row.line]],
+                        jump_to: "first",
+                        highlight: "ranges",
+                      });
+                    }}
+                    style={ablRowButtonStyle(rowJump)}
+                  >
+                    <div style={ablRowLabelStyle}>
+                      <span>{displayLabel}</span>
+                    </div>
+                    <div style={ablValueListStyle}>
+                      {row.values.map((value, idx) => (
+                        <span key={`${row.id}:${idx}`} style={ablValueBoxStyle}>
+                          {value}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatAblRowLabel(label: string): string {
+  const match = label.match(/\babl_[A-Za-z0-9_]+(?:\[[^\]]+\])?/i);
+  return (match?.[0] ?? label).replace(/[;,]+$/, "").trim();
+}
+
+function FaceTabContent({
+  cwvValue,
+  fbtThValue,
+  fdyValue,
+  faceProbValue,
+  normalTargetValue,
+  stableValue,
+}: {
+  cwvValue: string | null;
+  fbtThValue: string | null;
+  fdyValue: string | null;
+  faceProbValue: string | null;
+  normalTargetValue: string | null;
+  stableValue: string | null;
+}) {
+  const cwv = parseFiniteNumber(cwvValue);
+  const fbtTh = parseFiniteNumber(fbtThValue);
+  const fdy = parseFiniteNumber(fdyValue);
+  const faceProb = parseFiniteNumber(faceProbValue);
+  const normalTarget = parseFiniteNumber(normalTargetValue);
+  const stable = parseFiniteNumber(stableValue);
+  const fbtTarget = Number.isFinite(cwv) && Number.isFinite(fbtTh) && Number.isFinite(fdy) && fdy !== 0
+    ? cwv * (fbtTh / fdy)
+    : NaN;
+  const backSceneTarget = Number.isFinite(fbtTarget) && Number.isFinite(faceProb) && Number.isFinite(normalTarget)
+    ? (fbtTarget * faceProb + normalTarget * (1024 - faceProb)) / 1024
+    : NaN;
+
+  return (
+    <div style={faceTabGridStyle}>
+      <section style={thresholdCardStyle}>
+        <div style={thresholdHeaderStyle}>
+          <div style={thresholdTitleStyle}>Back Scene Target</div>
+        </div>
+        <div style={faceFormulaRowStyle}>
+          <span>Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
+          <strong style={faceFormulaResultStyle}>
+            {formatComputedNumber(stable)} | {formatOneDecimalNumber(backSceneTarget)}
+          </strong>
+        </div>
+        <div style={faceMetricGridStyle}>
+          <FaceMetricCard
+            title="FBT target"
+            value={formatOneDecimalNumber(fbtTarget)}
+            formula="CWV * (FBT_TH / FDY)"
+            detail={`CWV ${formatComputedNumber(cwv)} / FBT_TH ${formatComputedNumber(fbtTh)} / FDY ${formatComputedNumber(fdy)}`}
+          />
+          <FaceMetricCard
+            title="FaceProb"
+            value={formatComputedNumber(faceProb)}
+            formula={FACE_PROB_KEYS.join(" / ")}
+            detail="Back scene 权重，1024 base"
+          />
+          <FaceMetricCard
+            title="Normal Target"
+            value={formatComputedNumber(normalTarget)}
+            formula={FACE_NORMAL_TARGET_KEY}
+            detail="Normal AE target"
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FaceMetricCard({
+  title,
+  value,
+  formula,
+  detail,
+}: {
+  title: string;
+  value: string;
+  formula: string;
+  detail: string;
+}) {
+  return (
+    <div style={faceMetricCardStyle}>
+      <div style={faceMetricHeaderStyle}>
+        <span>{title}</span>
+        <strong>{value}</strong>
+      </div>
+      <div style={faceMetricFormulaStyle}>{formula}</div>
+      <div style={faceMetricDetailStyle}>{detail}</div>
+    </div>
+  );
+}
+
+function TouchTabContent({
+  source,
+  bvValue,
+  cwvValue,
+  meterYValue,
+  aeTargetValue,
+  normalTargetValue,
+  onSourceJump,
+}: {
+  source: TouchTargetSource | null;
+  bvValue: string | null;
+  cwvValue: string | null;
+  meterYValue: string | null;
+  aeTargetValue: string | null;
+  normalTargetValue: string | null;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  return (
+    <div style={touchTabGridStyle}>
+      <TouchTargetCard
+        source={source}
+        bvValue={bvValue}
+        cwvValue={cwvValue}
+        meterYValue={meterYValue}
+        aeTargetValue={aeTargetValue}
+        normalTargetValue={normalTargetValue}
+        onSourceJump={onSourceJump}
+      />
+      <TouchStableCard
+        source={source}
+        meterYValue={meterYValue}
+        onSourceJump={onSourceJump}
+      />
+    </div>
+  );
+}
+
+function TouchTargetCard({
+  source,
+  bvValue,
+  cwvValue,
+  meterYValue,
+  aeTargetValue,
+  normalTargetValue,
+  onSourceJump,
+}: {
+  source: TouchTargetSource | null;
+  bvValue: string | null;
+  cwvValue: string | null;
+  meterYValue: string | null;
+  aeTargetValue: string | null;
+  normalTargetValue: string | null;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [meterParamDrafts, setMeterParamDrafts] = useState<TouchMeterParamDrafts>({
+    meterWeight: "",
+    yLow: "",
+    yHigh: "",
+  });
+  useEffect(() => {
+    setMeterParamDrafts({
+      meterWeight: formatInputNumber(source?.meterWeight.value ?? NaN),
+      yLow: formatInputNumber(source?.meterYLowBound.value ?? NaN),
+      yHigh: formatInputNumber(source?.meterYHighBound.value ?? NaN),
+    });
+  }, [source?.meterWeight.value, source?.meterYLowBound.value, source?.meterYHighBound.value]);
+  const bv = parseFiniteNumber(bvValue);
+  const cwv = parseFiniteNumber(cwvValue);
+  const meterY = parseFiniteNumber(meterYValue);
+  const aeTarget = parseFiniteNumber(aeTargetValue);
+  const normalTarget = parseFiniteNumber(normalTargetValue);
+  const meterWeight = parseFiniteNumber(meterParamDrafts.meterWeight);
+  const meterYLowBound = parseFiniteNumber(meterParamDrafts.yLow);
+  const meterYHighBound = parseFiniteNumber(meterParamDrafts.yHigh);
+  const meterWeightSource: TouchSourceValue = {
+    path: source?.meterWeight.path ?? TOUCH_METER_WEIGHT_PATH,
+    value: meterWeight,
+    field: source?.meterWeight.field ?? null,
+  };
+  const meterYLowSource: TouchSourceValue = {
+    path: source?.meterYLowBound.path ?? TOUCH_METER_TARGET_LOW_PATH,
+    value: meterYLowBound,
+    field: source?.meterYLowBound.field ?? null,
+  };
+  const meterYHighSource: TouchSourceValue = {
+    path: source?.meterYHighBound.path ?? TOUCH_METER_TARGET_HIGH_PATH,
+    value: meterYHighBound,
+    field: source?.meterYHighBound.field ?? null,
+  };
+  const updateMeterParamDraft = (id: TouchMeterParamId, value: string) => {
+    setMeterParamDrafts((current) => ({ ...current, [id]: value }));
+  };
+  const meterTarget = interpolateTouchMeterTarget(bv, meterYLowBound, meterYHighBound);
+  const rawTouchTarget = Number.isFinite(cwv) && Number.isFinite(meterTarget) && Number.isFinite(meterY) && meterY !== 0
+    ? cwv * meterTarget / meterY
+    : NaN;
+  const lowLimit = source && Number.isFinite(aeTarget) && Number.isFinite(source.cwrLowBound.value)
+    ? aeTarget * source.cwrLowBound.value / 1024
+    : NaN;
+  const highLimit = source && Number.isFinite(aeTarget) && Number.isFinite(source.cwrHighBound.value)
+    ? aeTarget * source.cwrHighBound.value / 1024
+    : NaN;
+  const boundedTouchTarget = Number.isFinite(rawTouchTarget) && Number.isFinite(lowLimit) && Number.isFinite(highLimit)
+    ? clamp(rawTouchTarget, Math.min(lowLimit, highLimit), Math.max(lowLimit, highLimit))
+    : NaN;
+  const finalTarget = Number.isFinite(normalTarget) && Number.isFinite(boundedTouchTarget) && Number.isFinite(meterWeight)
+    ? ((1024 - meterWeight) * normalTarget + meterWeight * boundedTouchTarget) / 1024
+    : NaN;
+  const panelCardStyle: CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1 1 auto",
+    height: "auto",
+    minWidth: 0,
+    minHeight: 0,
+    border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+    borderRadius: 8,
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+    overflow: "hidden",
+    background: "var(--colorNeutralBackground1)",
+  };
+
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Final Target</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            aria-label="Jump to Touch Final Target source"
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.("Touch.FinalTarget", {
+              paths: [...TOUCH_FINAL_TARGET_SOURCE_PATHS],
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? "Collapse Touch Final Target" : "Expand Touch Final Target"}
+            onClick={() => setExpanded((current) => !current)}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div style={touchFormulaStyle}>
+        <span>Final Target = ((1024 - u4MeterWeight) * Normal_Target + u4MeterWeight * Touch_Target) / 1024</span>
+        <strong style={thresholdResultStyle}>{formatOneDecimalNumber(finalTarget)}</strong>
+      </div>
+      {expanded && <div style={touchTargetBodyStyle}>
+        <PanelGroup direction="horizontal" autoSaveId="isp6s-touch-target-split" className="flex w-full min-w-0 items-stretch">
+          <Panel defaultSize={46} minSize={30} className="flex min-w-0">
+            <div style={panelCardStyle}>
+              <div style={nsNorTPanelHeaderStyle}>
+                <span>Meter Target</span>
+                <strong>{formatOneDecimalNumber(meterTarget)}</strong>
+              </div>
+              <TouchMeterTargetChart
+                bv={bv}
+                meterWeight={meterWeightSource}
+                yLow={meterYLowSource}
+                yHigh={meterYHighSource}
+                drafts={meterParamDrafts}
+                onDraftChange={updateMeterParamDraft}
+                meterTarget={meterTarget}
+                onSourceJump={onSourceJump}
+              />
+            </div>
+          </Panel>
+          <ResizeHandle direction="horizontal" size={8} />
+          <Panel defaultSize={54} minSize={34} className="flex min-w-0">
+            <div style={panelCardStyle}>
+              <div style={nsNorTPanelHeaderStyle}>
+                <span>Touch Target</span>
+                <strong>{formatOneDecimalNumber(boundedTouchTarget)}</strong>
+              </div>
+              <div style={touchCalcTableWrapStyle}>
+                <TouchCalcRow
+                  label="Touch_Target"
+                  formula="CWV x Meter Target / MeterY"
+                  value={rawTouchTarget}
+                  detail={`${formatComputedNumber(cwv)} x ${formatOneDecimalNumber(meterTarget)} / ${formatComputedNumber(meterY)}`}
+                />
+                <TouchCalcRow
+                  label="Limit"
+                  formula={[
+                    "下限值: AE_Target * u4CwrLowBound / 1024",
+                    "上限值: AE_Target * u4CwrHighBound / 1024",
+                  ]}
+                  value={boundedTouchTarget}
+                  detail={`${formatOneDecimalNumber(lowLimit)}~${formatOneDecimalNumber(highLimit)} | raw ${formatOneDecimalNumber(rawTouchTarget)}`}
+                />
+                <TouchCalcRow
+                  label="Final Target"
+                  formula="((1024 - u4MeterWeight) * Normal_Target + u4MeterWeight * Touch_Target) / 1024"
+                  value={finalTarget}
+                  detail={`(1024 - ${formatComputedNumber(meterWeight)}) x ${formatComputedNumber(normalTarget)} + ${formatComputedNumber(meterWeight)} x ${formatOneDecimalNumber(boundedTouchTarget)}`}
+                />
+              </div>
+            </div>
+          </Panel>
+        </PanelGroup>
+      </div>}
+    </section>
+  );
+}
+
+function TouchStableCard({
+  source,
+  meterYValue,
+  onSourceJump,
+}: {
+  source: TouchTargetSource | null;
+  meterYValue: string | null;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const meterY = parseFiniteNumber(meterYValue);
+  const stableMin = source?.meterStableMin.value ?? NaN;
+  const stableMax = source?.meterStableMax.value ?? NaN;
+  return (
+    <section style={thresholdCardStyle}>
+      <div style={thresholdHeaderStyle}>
+        <div style={thresholdTitleStyle}>Touch Stable</div>
+        <div style={thresholdGroupActionsStyle}>
+          <button
+            type="button"
+            aria-label="Jump to Touch Stable source"
+            disabled={!onSourceJump}
+            onClick={() => onSourceJump?.("Touch.Stable", {
+              paths: [...TOUCH_STABLE_SOURCE_PATHS],
+              jump_to: "first",
+              highlight: "ranges",
+            })}
+            style={groupSourceButtonStyle(Boolean(onSourceJump))}
+          >
+            <Code24Regular className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={expanded ? "Collapse Touch Stable" : "Expand Touch Stable"}
+            onClick={() => setExpanded((current) => !current)}
+            style={sourceButtonStyle(true)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      {expanded && <div style={touchStableBodyStyle}>
+        <div style={touchStableExplainStyle}>
+          <div style={touchStableLeadStyle}>触摸稳定判定用于判断触摸区域亮度是否已经发生明显变化。</div>
+          <div style={touchStableBulletStyle}>
+            <strong>稳定基准:</strong>
+            <span>Touch AE 刚收敛到目标时，将当时的 MeterY 记录为 Metering Stable Value。</span>
+          </div>
+          <div style={touchStableBulletStyle}>
+            <strong>放弃条件:</strong>
+            <span>若后续当前 MeterY 与稳定基准差异过大，则放弃 Touch 区域，最终目标回退为 Normal Target。</span>
+          </div>
+          <div style={touchStableFormulaBoxStyle}>
+            <span>Metering Ratio = 100 x cur_MeterY / Metering Stable Value</span>
+          </div>
+        </div>
+        <div style={touchStableParamPanelStyle}>
+          <div style={touchStableParamGridStyle}>
+            <TouchStableParam label="cur_MeterY" value={formatComputedNumber(meterY)} hint={TOUCH_METERING_Y_KEY} />
+            <TouchStableParam label="StableY" value="收敛时 MeterY" hint="Metering Stable Value" />
+            <TouchStableParam label="u4MeteringStableMin" value={formatComputedNumber(stableMin)} hint={TOUCH_METER_STABLE_MIN_PATH} />
+            <TouchStableParam label="u4MeteringStableMax" value={formatComputedNumber(stableMax)} hint={TOUCH_METER_STABLE_MAX_PATH} />
+          </div>
+          <div style={touchStableTableStyle}>
+            <div style={touchStableTableHeadStyle}>Touch Stable</div>
+            <div style={touchStableTableHeadStyle}>Converge To Normal Target</div>
+            <div style={touchStableTableCellStyle}>Low Bound ({formatComputedNumber(stableMin)})</div>
+            <div style={touchStableTableCellStyle}>Metering Ratio &lt; u4MeteringStableMin</div>
+            <div style={touchStableTableCellStyle}>High Bound ({formatComputedNumber(stableMax)})</div>
+            <div style={touchStableTableCellStyle}>Metering Ratio &gt; u4MeteringStableMax</div>
+          </div>
+        </div>
+      </div>}
+    </section>
+  );
+}
+
+function TouchStableParam({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div style={touchStableParamStyle}>
+      <div style={touchStableParamLabelStyle}>{label}</div>
+      <strong style={touchStableParamValueStyle}>{value}</strong>
+      <div style={touchStableParamHintStyle}>{hint}</div>
+    </div>
+  );
+}
+
+function TouchCalcRow({
+  label,
+  formula,
+  value,
+  detail,
+}: {
+  label: string;
+  formula?: string | string[];
+  value: number;
+  detail?: string;
+}) {
+  const formulaLines = Array.isArray(formula) ? formula : formula ? [formula] : [];
+  return (
+    <div style={touchCalcRowStyle}>
+      <div style={touchCalcHeaderStyle}>
+        <div style={touchCalcLabelStyle}>{label}</div>
+        {detail && <div style={touchCalcHeaderDetailStyle}>{detail}</div>}
+        <strong style={touchCalcValueStyle}>{formatOneDecimalNumber(value)}</strong>
+      </div>
+      {formulaLines.length > 0 && (
+        <div style={touchCalcFormulaTextStyle}>
+          {formulaLines.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TouchMeterTargetChart({
+  bv,
+  meterWeight,
+  yLow,
+  yHigh,
+  drafts,
+  onDraftChange,
+  meterTarget,
+  onSourceJump,
+}: {
+  bv: number;
+  meterWeight: TouchSourceValue | null;
+  yLow: TouchSourceValue | null;
+  yHigh: TouchSourceValue | null;
+  drafts: TouchMeterParamDrafts;
+  onDraftChange: (id: TouchMeterParamId, value: string) => void;
+  meterTarget: number;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const chart = { width: 660, height: 360, left: 70, right: 46, top: 42, bottom: 48 };
+  const axisW = chart.width - chart.left - chart.right;
+  const highXRatio = 0.72;
+  const extensionXRatio = 0.93;
+  const plotH = chart.height - chart.top - chart.bottom;
+  const axisY = chart.top + plotH;
+  const yLowValue = yLow?.value ?? NaN;
+  const yHighValue = yHigh?.value ?? NaN;
+  const yValues = [yLowValue, yHighValue, meterTarget].filter(Number.isFinite);
+  const yMin = Math.min(...(yValues.length ? yValues : [0]));
+  const yMax = Math.max(...(yValues.length ? yValues : [1]));
+  const yRange = Math.max(1, yMax - yMin);
+  const y0 = yMin - yRange * 0.55;
+  const y1 = yMax + yRange * 0.48;
+  const highX = chart.left + axisW * highXRatio;
+  const extensionX = chart.left + axisW * extensionXRatio;
+  const xToPx = (value: number) => {
+    if (!Number.isFinite(value)) return chart.left;
+    if (value <= TOUCH_METER_TARGET_BV_HIGH) {
+      return chart.left + clamp(value / TOUCH_METER_TARGET_BV_HIGH, 0, 1) * (highX - chart.left);
+    }
+    const extensionRatio = clamp((value - TOUCH_METER_TARGET_BV_HIGH) / TOUCH_METER_TARGET_BV_HIGH, 0, 1);
+    return highX + extensionRatio * (extensionX - highX);
+  };
+  const yToPx = (value: number) => chart.top + (1 - (value - y0) / (y1 - y0)) * plotH;
+  const canDrawMeterCurve = Number.isFinite(yLowValue) && Number.isFinite(yHighValue);
+  const lowY = yToPx(yLowValue);
+  const highY = yToPx(yHighValue);
+  const bvX = xToPx(Number.isFinite(bv) ? bv : TOUCH_METER_TARGET_BV_LOW);
+  const currentY = yToPx(meterTarget);
+  const zeroX = xToPx(TOUCH_METER_TARGET_BV_LOW);
+  const linePath = canDrawMeterCurve
+    ? `M ${zeroX} ${lowY} L ${highX} ${highY} C ${highX + 34} ${highY} ${extensionX - 28} ${highY} ${extensionX} ${highY}`
+    : "";
+  const currentLabelX = Math.min(bvX + 12, chart.width - chart.right - 118);
+  const currentValueText = `${formatComputedNumber(bv)} / ${formatOneDecimalNumber(meterTarget)}`;
+
+  return (
+    <div style={touchChartWrapStyle}>
+      <TouchMeterTargetParamGrid
+        meterWeight={meterWeight}
+        yLow={yLow}
+        yHigh={yHigh}
+        drafts={drafts}
+        onDraftChange={onDraftChange}
+        onSourceJump={onSourceJump}
+      />
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={touchChartSvgStyle} role="img" aria-label="Meter Target chart">
+        <line x1={chart.left} y1={axisY} x2={chart.left} y2={chart.top - 6} style={touchAxisStyle} />
+        <line x1={chart.left} y1={axisY} x2={chart.left + axisW + 8} y2={axisY} style={touchAxisStyle} />
+        <path d={`M ${chart.left} ${chart.top - 13} L ${chart.left - 5} ${chart.top - 4} L ${chart.left + 5} ${chart.top - 4} Z`} style={touchAxisArrowStyle} />
+        <path d={`M ${chart.left + axisW + 14} ${axisY} L ${chart.left + axisW + 4} ${axisY - 5} L ${chart.left + axisW + 4} ${axisY + 5} Z`} style={touchAxisArrowStyle} />
+        <text x={chart.left - 4} y={chart.top - 26} textAnchor="middle" style={touchChartAxisLabelStyle}>Meter Target</text>
+        <text x={chart.left + axisW + 22} y={axisY + 7} textAnchor="start" style={touchChartAxisLabelStyle}>BV</text>
+        {canDrawMeterCurve && (
+          <>
+            <line x1={chart.left} y1={highY} x2={highX} y2={highY} style={touchChartGuideStyle} />
+            <line x1={zeroX} y1={lowY} x2={zeroX} y2={axisY} style={touchChartGuideStyle} />
+            <line x1={highX} y1={highY} x2={highX} y2={axisY} style={touchChartGuideStyle} />
+            <path d={linePath} style={touchMeterTargetLineStyle} />
+          </>
+        )}
+        {canDrawMeterCurve && Number.isFinite(bv) && Number.isFinite(meterTarget) && (
+          <>
+            <line x1={chart.left} y1={currentY} x2={bvX} y2={currentY} style={touchChartCurrentGuideStyle} />
+            <line x1={bvX} y1={currentY} x2={bvX} y2={axisY} style={touchChartCurrentGuideStyle} />
+            <circle cx={bvX} cy={currentY} r={3.6} style={nsProbabilityCurrentPointStyle} />
+            <text x={currentLabelX} y={currentY - 18} textAnchor="start" style={touchChartCurrentLabelStyle}>
+              BV/Y {currentValueText}
+            </text>
+            <text x={bvX} y={axisY + 42} textAnchor="middle" style={touchChartCurrentAxisTextStyle}>BV {formatComputedNumber(bv)}</text>
+          </>
+        )}
+        {canDrawMeterCurve && (
+          <>
+            <text x={chart.left - 10} y={highY - 4} textAnchor="end" style={touchChartSmallLabelStyle}>{formatComputedNumber(yHighValue)}</text>
+            <text x={chart.left - 10} y={lowY - 4} textAnchor="end" style={touchChartSmallLabelStyle}>{formatComputedNumber(yLowValue)}</text>
+          </>
+        )}
+        <text x={zeroX} y={axisY + 24} textAnchor="middle" style={touchChartAxisTextStyle}>0</text>
+        <text x={highX} y={axisY + 24} textAnchor="middle" style={touchChartAxisTextStyle}>4000</text>
+      </svg>
+    </div>
+  );
+}
+
+function TouchMeterTargetParamGrid({
+  meterWeight,
+  yLow,
+  yHigh,
+  drafts,
+  onDraftChange,
+  onSourceJump,
+}: {
+  meterWeight: TouchSourceValue | null;
+  yLow: TouchSourceValue | null;
+  yHigh: TouchSourceValue | null;
+  drafts: TouchMeterParamDrafts;
+  onDraftChange: (id: TouchMeterParamId, value: string) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const jumpToSource = (label: string, source: TouchSourceValue | null) => (event: MouseEvent<HTMLInputElement>) => {
+    if (!onSourceJump || !source?.path) return;
+    event.preventDefault();
+    onSourceJump(label, {
+      paths: [source.path],
+      jump_to: "first",
+      highlight: "ranges",
+    });
+  };
+
+  return (
+    <div style={touchMeterParamGridStyle}>
+      <div style={touchMeterParamLabelCellStyle}>权重</div>
+      <TouchMeterParamInput
+        value={drafts.meterWeight}
+        jumpable={Boolean(onSourceJump && meterWeight?.path)}
+        ariaLabel="u4MeterWeight"
+        onChange={(value) => onDraftChange("meterWeight", value)}
+        onContextMenu={jumpToSource("Touch.u4MeterWeight", meterWeight)}
+      />
+      <TouchMeterParamInput
+        value={drafts.yLow}
+        jumpable={Boolean(onSourceJump && yLow?.path)}
+        ariaLabel="Meter Target Low"
+        onChange={(value) => onDraftChange("yLow", value)}
+        onContextMenu={jumpToSource("Touch.MeterTarget.Low", yLow)}
+      />
+      <TouchMeterParamInput
+        value={drafts.yHigh}
+        jumpable={Boolean(onSourceJump && yHigh?.path)}
+        ariaLabel="Meter Target High"
+        onChange={(value) => onDraftChange("yHigh", value)}
+        onContextMenu={jumpToSource("Touch.MeterTarget.High", yHigh)}
+      />
+    </div>
+  );
+}
+
+function TouchMeterParamInput({
+  value,
+  jumpable,
+  ariaLabel,
+  onChange,
+  onContextMenu,
+}: {
+  value: string;
+  jumpable: boolean;
+  ariaLabel: string;
+  onChange: (value: string) => void;
+  onContextMenu: (event: MouseEvent<HTMLInputElement>) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      aria-label={ariaLabel}
+      value={value}
+      inputMode="decimal"
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onContextMenu={onContextMenu}
+      style={touchMeterParamInputStyle(jumpable, focused)}
+    />
+  );
+}
+
 function HsTargetCard({
   cwvValue,
   inputs,
+  thdValues,
+  wetValues,
   onAreaJump,
   initialExpanded,
   onExpandedChange,
@@ -2287,12 +5639,19 @@ function HsTargetCard({
     wet: string | null;
     targetValue: string | null;
   }>;
+  thdValues: Partial<Record<HsTargetTermId, number>>;
+  wetValues: Partial<Record<HsWeightToneId, number>>;
   onAreaJump?: (sourceId: string) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [termOrder, setTermOrder] = useState<string[]>(HS_TARGET_TERM_ORDER);
+  const [formulaModePreference, setFormulaModePreference] = useState<HsTargetFormulaMode>("full");
+  const [formulaNeedsCompact, setFormulaNeedsCompact] = useState(false);
+  const formulaRowRef = useRef<HTMLDivElement | null>(null);
+  const formulaResultRef = useRef<HTMLElement | null>(null);
+  const fullFormulaMeasureRef = useRef<HTMLSpanElement | null>(null);
   const termSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
@@ -2305,9 +5664,11 @@ function HsTargetCard({
     if (!termOrder.includes(input.id)) orderedInputs.push(input);
   }
   const terms = orderedInputs.map((input) => {
-    const thd = parseFiniteNumber(input.thd);
+    const termId = coerceHsTargetTermId(input.id);
+    const wetTone = termId ? HS_TARGET_WEIGHT_TONE_BY_ID[termId] : null;
+    const thd = termId ? thdValues[termId] ?? NaN : NaN;
     const y = parseFiniteNumber(input.y);
-    const wet = parseFiniteNumber(input.wet);
+    const wet = wetTone ? wetValues[wetTone] ?? NaN : NaN;
     const target = Number.isFinite(cwvNumber) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0
       ? cwvNumber * thd / y
       : NaN;
@@ -2326,11 +5687,37 @@ function HsTargetCard({
     return { ...input, thd, y, wet, target, contribution, missing, targetLabelText };
   });
   const termIds = terms.map((term) => term.id);
+  const firstTermId = terms[0]?.id ?? null;
   const wetSum = terms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
   const weightedSum = terms.reduce((sum, term) =>
     sum + (Number.isFinite(term.contribution) ? term.contribution : 0), 0);
   const targetValue = wetSum > 0 ? weightedSum / wetSum : NaN;
-  const formula = "HS Target = ((CWV*BT_THD/BT_Y)*BT_Wet + (CWV*MT_THD/MT_Y)*MT_Wet + (CWV*DT_THD/DT_Y)*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
+  const fullFormula = "HS Target = ((CWV*BT_THD/BT_Y)*BT_Wet + (CWV*MT_THD/MT_Y)*MT_Wet + (CWV*DT_THD/DT_Y)*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
+  const compactFormula = "HS Target = (BT_Target*BT_Wet + MT_Target*MT_Wet + DT_Target*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
+  const formulaMode: HsTargetFormulaMode = formulaNeedsCompact || formulaModePreference === "compact" ? "compact" : "full";
+  const formula = formulaMode === "compact" ? compactFormula : fullFormula;
+  useLayoutEffect(() => {
+    const row = formulaRowRef.current;
+    const result = formulaResultRef.current;
+    const fullMeasure = fullFormulaMeasureRef.current;
+    if (!row || !result || !fullMeasure) return;
+
+    const update = () => {
+      const styles = window.getComputedStyle(row);
+      const paddingX = cssPixelValue(styles.paddingLeft) + cssPixelValue(styles.paddingRight);
+      const gap = cssPixelValue(styles.columnGap || styles.gap);
+      const availableWidth = row.clientWidth - paddingX - result.offsetWidth - gap;
+      const fullFormulaWidth = Math.ceil(fullMeasure.getBoundingClientRect().width || fullMeasure.scrollWidth);
+      const nextNeedsCompact = fullFormulaWidth > Math.max(0, availableWidth);
+      setFormulaNeedsCompact((current) => current === nextNeedsCompact ? current : nextNeedsCompact);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(row);
+    observer.observe(result);
+    return () => observer.disconnect();
+  }, [targetValue]);
   const onTermDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -2358,9 +5745,25 @@ function HsTargetCard({
           {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
         </button>
       </div>
-      <div style={thresholdFormulaStyle}>
-        <span>{formula}</span>
-        <strong style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
+      <div
+        ref={formulaRowRef}
+        title={undefined}
+        aria-label={undefined}
+        onMouseEnter={(event) => {
+          event.currentTarget.removeAttribute("title");
+          event.currentTarget.removeAttribute("aria-label");
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setFormulaModePreference((current) => current === "full" ? "compact" : "full");
+        }}
+        style={hsTargetFormulaRowStyle}
+      >
+        <span style={hsTargetFormulaTextStyle}>{formula}</span>
+        <strong ref={formulaResultRef} style={thresholdResultStyle}>{formatThresholdNumber(targetValue)}</strong>
+        <span style={hsTargetFormulaMeasureStyle} aria-hidden="true">
+          <span ref={fullFormulaMeasureRef}>{fullFormula}</span>
+        </span>
       </div>
       {expanded && <div style={hsTargetBodyStyle}>
         <DndContext
@@ -2375,10 +5778,11 @@ function HsTargetCard({
                 const active = Number.isFinite(term.wet) && term.wet > 0;
                 const status = hasMissing ? `缺失 ${term.missing.join("/")}` : active ? "参与加权" : "Wet=0";
                 const jumpLabel = HS_TARGET_AREA_LABEL_BY_ID[term.id] ?? "HS area";
+                const jumpHint = term.id === firstTermId ? `右键跳转到 ${jumpLabel}，按住左键拖拽调整位置` : "";
                 return (
                 <SortableHsTargetTermCard key={term.id} id={term.id}>
                   <div
-                    title={`右键跳转到 ${jumpLabel}，按住左键拖拽调整位置`}
+                    title={jumpHint}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       onAreaJump?.(term.id);
@@ -2445,6 +5849,7 @@ function SortableHsTargetTermCard({
   return (
     <div
       ref={setNodeRef}
+      className="chart-map-target-term-card"
       style={{
         ...hsTargetTermDragWrapStyle(isDragging),
         transform: CSS.Transform.toString(transform),
@@ -2468,6 +5873,7 @@ function HsWeightCard({
   sourceDraftText,
   onSourceDraftTextChange,
   onSourceJump,
+  onInterpolatedChange,
   initialExpanded,
   onExpandedChange,
 }: {
@@ -2480,6 +5886,7 @@ function HsWeightCard({
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onInterpolatedChange?: (values: Partial<Record<HsWeightToneId, number>>) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
@@ -2498,11 +5905,19 @@ function HsWeightCard({
   const bv = parseFiniteNumber(bvValue);
   const b2d = parseFiniteNumber(b2dValue);
   const mid = parseFiniteNumber(midValue);
+  const interpolatedValues = useMemo<Partial<Record<HsWeightToneId, number>>>(() =>
+    Object.fromEntries(
+      HS_WEIGHT_RESULT_ITEMS.map((item) => [
+        item.id,
+        editableSource ? interpolateHsWeightSource(editableSource, hsWeightChannelIndex(item.id), bv, b2d, mid) : NaN,
+      ]),
+    ) as Partial<Record<HsWeightToneId, number>>,
+  [b2d, bv, editableSource, mid]);
+  useLayoutEffect(() => {
+    onInterpolatedChange?.(interpolatedValues);
+  }, [interpolatedValues, onInterpolatedChange]);
   const resultItems = HS_WEIGHT_RESULT_ITEMS.map((item) => {
-    const channelIndex = HS_WEIGHT_CHANNELS.findIndex((channel) => channel.id === item.id);
-    const interpolated = editableSource && channelIndex >= 0
-      ? interpolateHsWeightSource(editableSource, channelIndex, bv, b2d, mid)
-      : NaN;
+    const interpolated = interpolatedValues[item.id] ?? NaN;
     return {
       ...item,
       wetText: formatHsWeightWetValue(wetValues[item.id]),
@@ -2779,65 +6194,19 @@ function HsWeightEditableCell({
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
 }) {
-  const [draftValue, setDraftValue] = useState(value);
-  const cellStyle = isHsWeightZeroCellText(draftValue)
-    ? { ...style, color: HS_WEIGHT_ZERO_TEXT_COLOR }
-    : style;
-
-  useEffect(() => {
-    setDraftValue(value);
-  }, [value]);
-
-  const resetDraft = () => {
-    setDraftValue(value);
-    onPreview?.(value);
-  };
-
-  const commitDraft = (): boolean => {
-    if (!editable) return false;
-    const nextValue = draftValue.trim();
-    if (nextValue === value.trim()) return true;
-    if (!isSourceNumberText(nextValue)) {
-      resetDraft();
-      return false;
-    }
-    const committed = onCommit?.(nextValue);
-    if (committed === false) {
-      resetDraft();
-      return false;
-    }
-    return true;
-  };
-
-  const updateDraft = (nextValue: string) => {
-    setDraftValue(nextValue);
-    onPreview?.(isSourceNumberText(nextValue.trim()) ? nextValue : value);
-  };
-
   return (
-    <div style={cellStyle}>
-      <input
-        aria-label={title}
-        value={draftValue}
-        readOnly={!editable}
-        tabIndex={editable ? 0 : -1}
-        onBlur={commitDraft}
-        onChange={(event) => updateDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commitDraft();
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            resetDraft();
-            event.currentTarget.blur();
-          }
-        }}
-        inputMode="decimal"
-        style={hsWeightCellInputStyle(editable)}
-      />
-    </div>
+    <EditableNumberTableCell
+      value={value}
+      editable={editable}
+      ariaLabel={title}
+      frameStyle={({ focused, draftValue }) => editableCellFrameStyle(
+        isHsWeightZeroCellText(draftValue) ? { ...style, color: HS_WEIGHT_ZERO_TEXT_COLOR } : style,
+        focused,
+      )}
+      inputStyle={({ editable: cellEditable }) => hsWeightCellInputStyle(cellEditable)}
+      onPreview={onPreview}
+      onCommit={onCommit}
+    />
   );
 }
 
@@ -2856,6 +6225,7 @@ function HsAreaCard({
   sourceDraftText,
   onSourceDraftTextChange,
   onSourceJump,
+  onInterpolatedChange,
   initialExpanded,
   onExpandedChange,
 }: {
@@ -2873,6 +6243,7 @@ function HsAreaCard({
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onInterpolatedChange?: (value: number) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
@@ -2891,6 +6262,9 @@ function HsAreaCard({
   const bv = parseFiniteNumber(bvValue);
   const axis = parseFiniteNumber(axisValue);
   const interpolatedThd = editableSource ? interpolateHsAreaSource(editableSource, bv, axis) : NaN;
+  useLayoutEffect(() => {
+    onInterpolatedChange?.(interpolatedThd);
+  }, [interpolatedThd, onInterpolatedChange]);
   const selected = locateHsAreaSelection(editableSource, bv, axis);
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
 
@@ -4136,6 +7510,15 @@ function numericFieldEntries(fields: FieldEntry[]): FieldEntry[] {
     .filter((field) => Number.isFinite(parseFiniteNumber(field.value)));
 }
 
+function firstNumericFieldEntry(fields: FieldEntry[]): FieldEntry | null {
+  return numericFieldEntries(fields)[0] ?? null;
+}
+
+function firstNumericFieldEntryValue(fields: FieldEntry[]): number {
+  const field = firstNumericFieldEntry(fields);
+  return parseFiniteNumber(field?.value);
+}
+
 function buildHsWeightValues(
   valueFields: FieldEntry[],
   bvCount: number,
@@ -4522,6 +7905,15 @@ function formatHsTargetTitleValue(value: string | null): string {
   return Number.isFinite(parsed) ? formatComputedNumber(parsed) : "-";
 }
 
+function interpolateTouchMeterTarget(bv: number, yLow: number, yHigh: number): number {
+  if (!Number.isFinite(yLow) || !Number.isFinite(yHigh)) return NaN;
+  if (!Number.isFinite(bv)) return NaN;
+  if (bv <= TOUCH_METER_TARGET_BV_LOW) return yLow;
+  if (bv >= TOUCH_METER_TARGET_BV_HIGH) return yHigh;
+  const ratio = (bv - TOUCH_METER_TARGET_BV_LOW) / (TOUCH_METER_TARGET_BV_HIGH - TOUCH_METER_TARGET_BV_LOW);
+  return yLow + (yHigh - yLow) * ratio;
+}
+
 function cleanLabel(comment: string): string {
   return comment
     .replace(/^[/\s*]+/, "")
@@ -4543,6 +7935,14 @@ function readTomlValue(tomlData: Record<string, string>, key: string | undefined
   const value = tomlData[key] ?? tomlData[key.toLowerCase()] ?? findCaseInsensitiveTomlValue(tomlData, key);
   if (value === undefined || value === null || value === "") return null;
   return Number.isFinite(parseFiniteNumber(value)) ? String(value).trim() : null;
+}
+
+function readFirstTomlValue(tomlData: Record<string, string>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = readTomlValue(tomlData, key);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 function findCaseInsensitiveTomlValue(tomlData: Record<string, string>, key: string): string | undefined {
@@ -4601,6 +8001,69 @@ function interpolateTableValue(
     }
   }
   return last.y;
+}
+
+function interpolateNumericCurve(x: number, xValues: number[], yValues: number[]): number {
+  if (!Number.isFinite(x) || xValues.length === 0 || yValues.length === 0) return NaN;
+  const count = Math.min(xValues.length, yValues.length);
+  const points: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < count; i += 1) {
+    const px = xValues[i];
+    const py = yValues[i];
+    if (Number.isFinite(px) && Number.isFinite(py)) {
+      points.push({ x: px, y: py });
+    }
+  }
+  if (points.length === 0) return NaN;
+  points.sort((a, b) => a.x - b.x);
+  if (points.length === 1 || x <= points[0].x) return points[0].y;
+  const last = points[points.length - 1];
+  if (x >= last.x) return last.y;
+  for (let i = 1; i < points.length; i += 1) {
+    const left = points[i - 1];
+    const right = points[i];
+    if (x <= right.x) {
+      if (right.x === left.x) return left.y;
+      const ratio = (x - left.x) / (right.x - left.x);
+      return left.y + (right.y - left.y) * ratio;
+    }
+  }
+  return last.y;
+}
+
+function locateLinearInterpolationIndexes(x: number, xValues: number[]): Set<number> {
+  const result = new Set<number>();
+  if (!Number.isFinite(x) || xValues.length === 0) return result;
+  const points = xValues
+    .map((value, index) => ({ value, index }))
+    .filter((point) => Number.isFinite(point.value))
+    .sort((a, b) => a.value - b.value);
+  if (points.length === 0) return result;
+  const exact = points.find((point) => point.value === x);
+  if (exact) {
+    result.add(exact.index);
+    return result;
+  }
+  if (points.length === 1 || x <= points[0].value) {
+    result.add(points[0].index);
+    return result;
+  }
+  const last = points[points.length - 1];
+  if (x >= last.value) {
+    result.add(last.index);
+    return result;
+  }
+  for (let i = 1; i < points.length; i += 1) {
+    const left = points[i - 1];
+    const right = points[i];
+    if (x < right.value) {
+      result.add(left.index);
+      result.add(right.index);
+      return result;
+    }
+  }
+  result.add(last.index);
+  return result;
 }
 
 function buildMidCurvePoints(source: MidCurveSource | null): Array<{ x: number; y: number }> {
@@ -4766,6 +8229,157 @@ function updateMtwvRowsCell(
   });
 }
 
+function getNsProbabilityTargetField(
+  source: NsProbabilityCurveSource,
+  target: NsProbabilityCurveCellTarget,
+): FieldEntry | null {
+  return source[target.curveId].fields[target.fieldId] ?? null;
+}
+
+function previewNsProbabilitySourceTarget(
+  source: NsProbabilityCurveSource,
+  target: NsProbabilityCurveCellTarget,
+  value: string,
+): NsProbabilityCurveSource {
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  return {
+    ...source,
+    [target.curveId]: {
+      ...source[target.curveId],
+      [target.fieldId]: numericValue,
+    },
+  };
+}
+
+function updateNsProbabilitySourceField(
+  source: NsProbabilityCurveSource,
+  field: FieldEntry,
+  value: string,
+): NsProbabilityCurveSource {
+  const numericValue = parseFiniteNumber(value);
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  const updateCurve = (curve: NsProbabilityCurve): NsProbabilityCurve => {
+    const nextCurve = { ...curve, fields: { ...curve.fields } };
+    for (const fieldId of NS_PROBABILITY_CURVE_FIELD_ORDER) {
+      if (!sameFieldEntry(curve.fields[fieldId], field)) continue;
+      nextCurve.fields[fieldId] = updateField(curve.fields[fieldId]);
+      if (Number.isFinite(numericValue)) nextCurve[fieldId] = numericValue;
+    }
+    return nextCurve;
+  };
+
+  return {
+    ...source,
+    bv: updateCurve(source.bv),
+    cdf: updateCurve(source.cdf),
+    fields: source.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
+function getNsNorTTargetField(source: NsNorTSource, target: NsNorTCellTarget): FieldEntry | null {
+  if (target.kind === "thdTable") {
+    return target.row === "bv"
+      ? source.bvFields[target.index] ?? null
+      : source.thdFields[target.index] ?? null;
+  }
+  if (target.kind === "evdDefine") {
+    return target.row === "interval"
+      ? source.nsEvdIntervalFields[target.index] ?? null
+      : source.nsEvdDefineFields[target.index] ?? null;
+  }
+  if (target.kind === "flatSetting") return source.flatSettings[target.id].field;
+  return source.flatProb.fields[target.fieldId] ?? null;
+}
+
+function previewNsNorTSourceTarget(source: NsNorTSource, target: NsNorTCellTarget, value: string): NsNorTSource {
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  if (target.kind === "thdTable") {
+    return target.row === "bv"
+      ? { ...source, bvValues: source.bvValues.map((item, index) => index === target.index ? numericValue : item) }
+      : { ...source, thdValues: source.thdValues.map((item, index) => index === target.index ? numericValue : item) };
+  }
+  if (target.kind === "evdDefine") {
+    return target.row === "interval"
+      ? {
+          ...source,
+          nsEvdIntervalValues: source.nsEvdIntervalValues.map((item, index) => index === target.index ? numericValue : item),
+        }
+      : {
+          ...source,
+          nsEvdDefineValues: source.nsEvdDefineValues.map((item, index) => index === target.index ? numericValue : item),
+        };
+  }
+  if (target.kind === "flatSetting") {
+    return {
+      ...source,
+      flatSettings: {
+        ...source.flatSettings,
+        [target.id]: {
+          ...source.flatSettings[target.id],
+          value: numericValue,
+        },
+      },
+    };
+  }
+  return {
+    ...source,
+    flatProb: {
+      ...source.flatProb,
+      [target.fieldId]: numericValue,
+    },
+  };
+}
+
+function updateNsNorTSourceTarget(
+  source: NsNorTSource,
+  target: NsNorTCellTarget,
+  field: FieldEntry,
+  value: string,
+): NsNorTSource {
+  const numericValue = parseFiniteNumber(value);
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  const updateValue = (candidate: number, candidateField: FieldEntry | null): number =>
+    candidateField && sameFieldEntry(candidateField, field) && Number.isFinite(numericValue) ? numericValue : candidate;
+  const nextSource = previewNsNorTSourceTarget(source, target, value);
+  const nextFlatSettings = Object.fromEntries(
+    (Object.entries(nextSource.flatSettings) as Array<[NsNorTFlatSettingId, NsNorTSource["flatSettings"][NsNorTFlatSettingId]]>)
+      .map(([id, setting]) => [
+        id,
+        {
+          ...setting,
+          value: updateValue(setting.value, setting.field),
+          field: updateField(setting.field),
+        },
+      ]),
+  ) as NsNorTSource["flatSettings"];
+  const nextFlatProb = { ...nextSource.flatProb, fields: { ...nextSource.flatProb.fields } };
+  for (const fieldId of NS_PROBABILITY_CURVE_FIELD_ORDER) {
+    const candidate = nextFlatProb.fields[fieldId];
+    if (!sameFieldEntry(candidate, field)) continue;
+    nextFlatProb.fields[fieldId] = updateField(candidate);
+    if (Number.isFinite(numericValue)) nextFlatProb[fieldId] = numericValue;
+  }
+
+  return {
+    ...nextSource,
+    bvValues: nextSource.bvValues.map((item, index) => updateValue(item, nextSource.bvFields[index] ?? null)),
+    thdValues: nextSource.thdValues.map((item, index) => updateValue(item, nextSource.thdFields[index] ?? null)),
+    nsEvdIntervalValues: nextSource.nsEvdIntervalValues.map((item, index) => updateValue(item, nextSource.nsEvdIntervalFields[index] ?? null)),
+    nsEvdDefineValues: nextSource.nsEvdDefineValues.map((item, index) => updateValue(item, nextSource.nsEvdDefineFields[index] ?? null)),
+    bvFields: nextSource.bvFields.map(updateField),
+    thdFields: nextSource.thdFields.map(updateField),
+    nsEvdIntervalFields: nextSource.nsEvdIntervalFields.map(updateField),
+    nsEvdDefineFields: nextSource.nsEvdDefineFields.map(updateField),
+    flatSettings: nextFlatSettings,
+    flatProb: nextFlatProb,
+    fields: nextSource.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
 function getHsWeightTargetField(source: HsWeightSource, target: HsWeightCellTarget): FieldEntry | null {
   if (target.kind === "bv") return source.bvAxisFields[target.bvIndex] ?? null;
   if (target.kind === "dr") return source.drB2dFields[target.bvIndex]?.[target.drIndex] ?? null;
@@ -4921,6 +8535,24 @@ function replaceHsAreaCellInSourceText(
   return replaceSourceFieldInSourceText(sourceText, source.fields, field, nextValue);
 }
 
+function replaceNsProbabilityCellInSourceText(
+  sourceText: string,
+  source: NsProbabilityCurveSource,
+  field: FieldEntry,
+  nextValue: string,
+): string | null {
+  return replaceSourceFieldInSourceText(sourceText, source.fields, field, nextValue);
+}
+
+function replaceNsNorTCellInSourceText(
+  sourceText: string,
+  source: NsNorTSource,
+  field: FieldEntry,
+  nextValue: string,
+): string | null {
+  return replaceSourceFieldInSourceText(sourceText, source.fields, field, nextValue);
+}
+
 function replaceSourceFieldInSourceText(
   sourceText: string,
   fields: FieldEntry[],
@@ -5068,6 +8700,31 @@ function formatComputedNumber(value: number): string {
   return value.toFixed(3).replace(/\.?0+$/, "");
 }
 
+function formatOneDecimalNumber(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : "-";
+}
+
+function normaliseNsProbability(value: number): number {
+  return Number.isFinite(value) ? value / 1024 : NaN;
+}
+
+function formatNsProbabilityPercent(value: number): string {
+  const ratio = normaliseNsProbability(value);
+  return Number.isFinite(ratio) ? `${(ratio * 100).toFixed(1)}%` : "-";
+}
+
+function formatNsProbabilityReadout(value: number): string {
+  return `P:${formatProbabilityReadoutNumber(value)}(${formatNsProbabilityPercent(value)})`;
+}
+
+function formatNsDtPcntPercent(value: number): string {
+  return Number.isFinite(value) ? `${(value / 1000 * 100).toFixed(1)}%` : "-";
+}
+
+function formatProbabilityReadoutNumber(value: number): string {
+  return formatOneDecimalNumber(value);
+}
+
 function formatThresholdNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "-";
 }
@@ -5092,6 +8749,32 @@ function formatInputNumber(value: number): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function nsProbabilityReadoutBounds(
+  x: number,
+  y: number,
+  anchor: "start" | "middle" | "end",
+  width: number,
+  height: number,
+): { left: number; right: number; top: number; bottom: number } {
+  const left = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+  return {
+    left,
+    right: left + width,
+    top: y - height,
+    bottom: y + 2,
+  };
+}
+
+function rectsOverlap(
+  left: { left: number; right: number; top: number; bottom: number },
+  right: { left: number; right: number; top: number; bottom: number },
+): boolean {
+  return left.left < right.right
+    && left.right > right.left
+    && left.top < right.bottom
+    && left.bottom > right.top;
 }
 
 function uniqueSortedNumbers(values: number[]): number[] {
@@ -5188,7 +8871,7 @@ function metricCardDragWrapStyle(draggable: boolean, dragging: boolean): CSSProp
     cursor: draggable ? "grab" : "default",
     touchAction: draggable ? "none" : "auto",
     userSelect: draggable ? "none" : "auto",
-    transition: "opacity 120ms ease, transform 120ms ease",
+    transition: "opacity 120ms ease, transform 160ms ease, filter 160ms ease",
   };
 }
 
@@ -5223,6 +8906,33 @@ const thresholdFormulaStyle: CSSProperties = {
   color: "var(--colorNeutralForeground2)",
   fontFamily: "ui-monospace, Consolas, monospace",
   fontSize: 12,
+};
+
+const hsTargetFormulaRowStyle: CSSProperties = {
+  ...thresholdFormulaStyle,
+  position: "relative",
+  alignItems: "center",
+  flexWrap: "nowrap",
+  cursor: "context-menu",
+};
+
+const hsTargetFormulaTextStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "clip",
+};
+
+const hsTargetFormulaMeasureStyle: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  top: 0,
+  height: 0,
+  overflow: "hidden",
+  visibility: "hidden",
+  pointerEvents: "none",
+  whiteSpace: "nowrap",
 };
 
 const thresholdDualControlStyle: CSSProperties = {
@@ -5282,6 +8992,372 @@ const mtwvFormulaTextStyle: CSSProperties = {
 const mtwvFormulaAccentStyle: CSSProperties = {
   color: "var(--colorBrandForeground1)",
   fontWeight: 900,
+};
+
+const touchTabGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 12,
+  minWidth: 0,
+};
+
+const touchFormulaStyle: CSSProperties = {
+  ...thresholdFormulaStyle,
+  alignItems: "center",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const touchTargetBodyStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "stretch",
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const touchChartWrapStyle: CSSProperties = {
+  position: "relative",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "1 1 auto",
+  minWidth: 0,
+  minHeight: 312,
+  padding: "2px 6px 6px",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const touchChartSvgStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  height: "100%",
+  minHeight: 304,
+  background: "var(--colorNeutralBackground1)",
+  boxSizing: "border-box",
+};
+
+const touchAxisStyle: CSSProperties = {
+  stroke: "rgb(125, 73, 0)",
+  strokeWidth: 4,
+  fill: "none",
+};
+
+const touchAxisArrowStyle: CSSProperties = {
+  fill: "rgb(125, 73, 0)",
+};
+
+const touchChartAxisLabelStyle: CSSProperties = {
+  fill: "var(--colorNeutralForeground1)",
+  fontSize: 17,
+  fontWeight: 900,
+};
+
+const touchChartSmallLabelStyle: CSSProperties = {
+  fill: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const touchChartAxisTextStyle: CSSProperties = {
+  fill: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const touchChartGuideStyle: CSSProperties = {
+  stroke: "#ef1d1d",
+  strokeWidth: 3,
+  strokeDasharray: "6 4",
+};
+
+const touchChartCurrentGuideStyle: CSSProperties = {
+  stroke: "rgba(126, 71, 196, 0.78)",
+  strokeWidth: 1.6,
+  strokeDasharray: "4 4",
+};
+
+const touchChartCurrentLabelStyle: CSSProperties = {
+  fill: "var(--colorBrandForeground1)",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 4,
+  paintOrder: "stroke",
+  fontSize: 14,
+  fontWeight: 900,
+};
+
+const touchChartCurrentAxisTextStyle: CSSProperties = {
+  fill: "var(--colorBrandForeground1)",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 3,
+  paintOrder: "stroke",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const touchMeterTargetLineStyle: CSSProperties = {
+  fill: "none",
+  stroke: "#16aee3",
+  strokeWidth: 5,
+  strokeLinecap: "butt",
+  strokeLinejoin: "round",
+};
+
+const touchMeterParamGridStyle: CSSProperties = {
+  position: "absolute",
+  top: 8,
+  right: 10,
+  zIndex: 2,
+  display: "grid",
+  gridTemplateColumns: "40px 48px",
+  overflow: "hidden",
+  border: "1px solid color-mix(in srgb, var(--colorBrandForeground1) 36%, var(--colorNeutralStroke2))",
+  borderRadius: 6,
+  background: "color-mix(in srgb, var(--colorNeutralBackground1) 92%, var(--colorBrandBackground2))",
+  boxShadow: "0 1px 4px rgba(0, 0, 0, 0.10)",
+  fontFamily: "\"Microsoft YaHei\", \"Noto Sans CJK SC\", \"PingFang SC\", ui-monospace, Consolas, monospace",
+  fontSize: 10,
+  fontWeight: 820,
+};
+
+const touchMeterParamLabelCellStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 20,
+  padding: "2px 5px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  color: "var(--colorNeutralForeground2)",
+  background: "color-mix(in srgb, var(--colorNeutralForeground1) 4%, var(--colorNeutralBackground1))",
+};
+
+function touchMeterParamInputStyle(jumpable: boolean, focused: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 20,
+    minWidth: 0,
+    width: 48,
+    padding: "2px 5px",
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -2,
+    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+    borderTop: "none",
+    borderLeft: "none",
+    color: jumpable ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+    background: focused
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 30%, var(--colorNeutralBackground1))"
+      : "var(--colorNeutralBackground1)",
+    boxShadow: focused
+      ? "inset 0 0 0 1px var(--colorBrandForeground1)"
+      : "none",
+    cursor: "text",
+    font: "inherit",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontWeight: 850,
+    textAlign: "center",
+    boxSizing: "border-box",
+    transition: "outline-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease",
+  };
+}
+
+const touchCalcTableWrapStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 10,
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const touchCalcRowStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  minWidth: 0,
+  padding: "10px 12px",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
+  borderRadius: 8,
+  background: "color-mix(in srgb, var(--colorNeutralForeground1) 3%, var(--colorNeutralBackground1))",
+};
+
+const touchCalcHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  minWidth: 0,
+};
+
+const touchCalcLabelStyle: CSSProperties = {
+  flex: "0 0 auto",
+  maxWidth: "34%",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const touchCalcHeaderDetailStyle: CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflowX: "auto",
+  overflowY: "hidden",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground3)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 10,
+  lineHeight: "15px",
+  textAlign: "right",
+};
+
+const touchCalcFormulaTextStyle: CSSProperties = {
+  minWidth: 0,
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  lineHeight: "18px",
+  fontWeight: 650,
+};
+
+const touchCalcValueStyle: CSSProperties = {
+  flex: "0 0 auto",
+  color: "var(--colorBrandForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 16,
+  fontWeight: 950,
+};
+
+const touchStableBodyStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(320px, 1fr) minmax(360px, 0.95fr)",
+  gap: 12,
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+  fontFamily: "\"Microsoft YaHei\", \"Noto Sans CJK SC\", \"PingFang SC\", sans-serif",
+};
+
+const touchStableExplainStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  minWidth: 0,
+  padding: 14,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 10,
+  background: "color-mix(in srgb, #fff7e6 58%, var(--colorNeutralBackground1))",
+};
+
+const touchStableLeadStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 15,
+  lineHeight: "22px",
+  fontWeight: 850,
+};
+
+const touchStableBulletStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "78px minmax(0, 1fr)",
+  gap: 8,
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+  lineHeight: "20px",
+};
+
+const touchStableFormulaBoxStyle: CSSProperties = {
+  marginTop: 2,
+  padding: "10px 12px",
+  borderLeft: "4px solid #f59e0b",
+  borderRadius: 8,
+  background: "color-mix(in srgb, #fef3c7 74%, var(--colorNeutralBackground1))",
+  color: "var(--colorNeutralForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 13,
+  fontWeight: 850,
+  overflowWrap: "anywhere",
+};
+
+const touchStableParamPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  minWidth: 0,
+};
+
+const touchStableParamGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 10,
+  minWidth: 0,
+};
+
+const touchStableParamStyle: CSSProperties = {
+  minWidth: 0,
+  padding: "10px 12px",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+  borderRadius: 9,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+};
+
+const touchStableParamLabelStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const touchStableParamValueStyle: CSSProperties = {
+  display: "block",
+  marginTop: 4,
+  color: "var(--colorBrandForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 18,
+  fontWeight: 950,
+};
+
+const touchStableParamHintStyle: CSSProperties = {
+  marginTop: 3,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 10,
+};
+
+const touchStableTableStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(120px, 0.75fr) minmax(0, 1.25fr)",
+  minWidth: 0,
+  overflow: "hidden",
+  border: "1px solid color-mix(in srgb, #f59e0b 42%, var(--colorNeutralStroke2))",
+  borderRadius: 10,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const touchStableTableHeadStyle: CSSProperties = {
+  padding: "8px 10px",
+  background: "#f59e0b",
+  color: "white",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const touchStableTableCellStyle: CSSProperties = {
+  padding: "8px 10px",
+  borderTop: "1px solid color-mix(in srgb, #f59e0b 22%, var(--colorNeutralStroke2))",
+  background: "color-mix(in srgb, #fed7aa 38%, var(--colorNeutralBackground1))",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  lineHeight: "18px",
+  fontWeight: 750,
 };
 
 const mtwvFlowStyle: CSSProperties = {
@@ -5495,9 +9571,43 @@ const hsTargetMetricRowsStyle: CSSProperties = {
   minWidth: 0,
 };
 
-function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, active: boolean): CSSProperties {
+const nsTargetMetricRowsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 6,
+  minWidth: 0,
+};
+
+function nsLowBndRangeStyle(clamped: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: clamped ? "var(--colorPaletteRedForeground1)" : "var(--colorNeutralForeground3)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 11,
+    fontWeight: 800,
+  };
+}
+
+const nsTargetDerivedThdStyle: CSSProperties = {
+  minWidth: 0,
+  minHeight: 14,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "var(--colorNeutralForeground3)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+function hsTargetMetricRowStyle(kind: "cwv" | "thd" | "y" | "wet", missing: boolean, active: boolean): CSSProperties {
   const background = missing
     ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 70%, var(--colorNeutralBackground1))"
+    : kind === "cwv"
+      ? `color-mix(in srgb, var(--colorBrandBackground2) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`
     : kind === "thd"
       ? `color-mix(in srgb, var(--colorPaletteBlueBackground2) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`
       : kind === "y"
@@ -5505,6 +9615,8 @@ function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, act
         : `color-mix(in srgb, var(--normal-sheet-yellow-bg) ${active ? 72 : 54}%, var(--colorNeutralBackground1))`;
   const border = missing
     ? "var(--colorPaletteRedBorder2)"
+    : kind === "cwv"
+      ? "color-mix(in srgb, var(--colorBrandForeground1) 42%, var(--colorNeutralStroke2))"
     : kind === "thd"
       ? "color-mix(in srgb, var(--colorPaletteBlueForeground2) 42%, var(--colorNeutralStroke2))"
       : kind === "y"
@@ -5512,6 +9624,8 @@ function hsTargetMetricRowStyle(kind: "thd" | "y" | "wet", missing: boolean, act
         : "color-mix(in srgb, var(--normal-sheet-yellow-fg) 48%, var(--colorNeutralStroke2))";
   const valueColor = missing
     ? "var(--colorPaletteRedForeground1)"
+    : kind === "cwv"
+      ? "var(--colorBrandForeground1)"
     : kind === "thd"
       ? "var(--colorPaletteBlueForeground2)"
       : kind === "y"
@@ -5549,6 +9663,722 @@ function hsTargetContributionStyle(active: boolean): CSSProperties {
     fontWeight: 900,
   };
 }
+
+const nsNorTSummaryStyle: CSSProperties = {
+  ...thresholdFormulaStyle,
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+};
+
+const nsNorTOeReadoutStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "baseline",
+  justifyContent: "flex-end",
+  flexWrap: "wrap",
+  gap: 4,
+  minWidth: 0,
+  marginLeft: "auto",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+};
+
+const nsNorTPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  minWidth: 0,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground2)",
+  overflow: "hidden",
+};
+
+const nsNorTPanelHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minHeight: 38,
+  padding: "8px 10px",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  background: "var(--colorNeutralBackground2)",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const nsNorTTableWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  overflow: "hidden",
+  padding: 10,
+  flex: "1 1 auto",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsNorTCurveTableBorder = "1px solid color-mix(in srgb, var(--colorNeutralForeground1) 46%, var(--colorNeutralStroke2))";
+const nsNorTParamTableBorder = "1px solid color-mix(in srgb, var(--colorNeutralForeground1) 40%, var(--colorNeutralStroke2))";
+
+const nsNorTParamTablesStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(170px, 1fr) minmax(250px, 0.94fr)",
+  alignItems: "stretch",
+  gap: 0,
+  marginTop: 10,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  alignSelf: "center",
+  border: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+  overflow: "hidden",
+};
+
+const nsBtParamTablesStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  alignItems: "stretch",
+  gap: 0,
+  marginTop: 10,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  alignSelf: "center",
+  border: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+  overflow: "hidden",
+};
+
+const nsBtParamStackStyle: CSSProperties = {
+  display: "contents",
+};
+
+const nsNorTParamStackStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateRows: "auto auto",
+  gap: 10,
+  minWidth: 0,
+};
+
+function nsNorTParamTableStyle(minWidth: number): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "minmax(76px, 1fr) minmax(58px, 0.56fr)",
+    gridAutoRows: "26px",
+    width: "100%",
+    minWidth,
+    height: 52,
+    boxSizing: "border-box",
+    overflow: "hidden",
+    border: nsNorTParamTableBorder,
+    background: "var(--colorNeutralBackground1)",
+    boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralForeground1) 8%, transparent)",
+  };
+}
+
+const nsNorTEvdDefineTableStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(62px, 0.72fr) repeat(2, minmax(70px, 1fr))",
+  gridTemplateRows: "26px 26px 10px 26px 26px",
+  width: "100%",
+  minWidth: 0,
+  height: 114,
+  justifySelf: "stretch",
+  boxSizing: "border-box",
+  overflow: "hidden",
+  border: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralForeground1) 8%, transparent)",
+};
+
+const nsNorTEvdDefineHeaderCellStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  boxSizing: "border-box",
+  padding: "0 4px",
+  borderRight: nsNorTParamTableBorder,
+  borderBottom: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 500,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const nsNorTEvdDefineBlankHeaderCellStyle: CSSProperties = {
+  ...nsNorTEvdDefineHeaderCellStyle,
+};
+
+const nsNorTEvdDefineSpacerStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+  minWidth: 0,
+  borderBottom: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsNorTEvdDefineNoteStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  boxSizing: "border-box",
+  padding: "0 4px",
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 10,
+  fontWeight: 500,
+};
+
+const nsNorTParamTitleStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "0 8px",
+  borderBottom: nsNorTParamTableBorder,
+  background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 38%, var(--colorNeutralBackground1))",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 500,
+};
+
+const nsNorTParamLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "0 8px",
+  borderRight: nsNorTParamTableBorder,
+  borderBottom: nsNorTParamTableBorder,
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 500,
+};
+
+function nsNorTParamValueCellFrameStyle(focused: boolean): CSSProperties {
+  return {
+    position: "relative",
+    display: "flex",
+    alignItems: "stretch",
+    minWidth: 0,
+    padding: 0,
+    borderBottom: nsNorTParamTableBorder,
+    background: "var(--colorNeutralBackground1)",
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -2,
+    boxShadow: focused ? "inset 0 0 0 1px var(--colorBrandForeground1)" : "none",
+    color: "var(--colorBrandForeground1)",
+  };
+}
+
+function nsNorTParamValueCellInputStyle(editable: boolean): CSSProperties {
+  return {
+    width: "100%",
+    height: "100%",
+    minWidth: 0,
+    padding: "0 6px",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: "var(--colorBrandForeground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 12,
+    fontWeight: 500,
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
+    boxSizing: "border-box",
+  };
+}
+
+function nsNorTCurveGridStyle(columnCount: number): CSSProperties {
+  const count = Math.max(1, columnCount);
+  return {
+    display: "grid",
+    gridTemplateColumns: `minmax(42px, 0.58fr) repeat(${count}, minmax(0, 1fr))`,
+    gridAutoRows: "22px",
+    width: "100%",
+    minWidth: 0,
+    alignSelf: "center",
+    boxSizing: "border-box",
+    overflow: "hidden",
+    border: nsNorTCurveTableBorder,
+    borderRadius: 0,
+    background: "var(--colorNeutralBackground1)",
+    boxShadow: "0 1px 0 color-mix(in srgb, var(--colorNeutralForeground1) 8%, transparent)",
+  };
+}
+
+function nsNorTCurveTitleCellStyle(columnCount: number): CSSProperties {
+  return {
+    gridColumn: `1 / span ${Math.max(1, columnCount) + 1}`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "0 8px",
+    borderBottom: nsNorTCurveTableBorder,
+    background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 38%, var(--colorNeutralBackground1))",
+    color: "var(--colorNeutralForeground1)",
+    fontSize: 12,
+    fontWeight: 600,
+  };
+}
+
+function nsNorTRowHeaderStyle(_strong: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "0 4px",
+    borderRight: nsNorTCurveTableBorder,
+    borderBottom: nsNorTCurveTableBorder,
+    background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 22%, var(--colorNeutralBackground1))",
+    color: "var(--colorNeutralForeground2)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 11,
+    fontWeight: 650,
+  };
+}
+
+function NsNorTParamTable({
+  title,
+  label,
+  value,
+  editable,
+  valueAriaLabel,
+  minWidth,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: {
+  title: string;
+  label: string;
+  value: string;
+  editable: boolean;
+  valueAriaLabel: string;
+  minWidth: number;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}) {
+  return (
+    <div style={nsNorTParamTableStyle(minWidth)}>
+      <div style={nsNorTParamTitleStyle}>{title}</div>
+      <div style={nsNorTParamLabelStyle}>{label}</div>
+      <EditableNumberTableCell
+        value={value}
+        editable={editable}
+        ariaLabel={valueAriaLabel}
+        frameStyle={({ focused }) => nsNorTParamValueCellFrameStyle(focused)}
+        inputStyle={({ editable: cellEditable }) => nsNorTParamValueCellInputStyle(cellEditable)}
+        onPreview={onPreview}
+        onCommit={onCommit}
+        onSourceJump={onSourceJump}
+      />
+    </div>
+  );
+}
+
+function NsNorTEvdDefineTable({
+  intervalDarkestValue,
+  intervalBrightestValue,
+  intervalDarkestEditable,
+  intervalBrightestEditable,
+  intervalDarkestAriaLabel,
+  intervalBrightestAriaLabel,
+  onIntervalDarkestPreview,
+  onIntervalDarkestCommit,
+  onIntervalBrightestPreview,
+  onIntervalBrightestCommit,
+  onIntervalDarkestSourceJump,
+  onIntervalBrightestSourceJump,
+}: {
+  intervalDarkestValue: string;
+  intervalBrightestValue: string;
+  intervalDarkestEditable: boolean;
+  intervalBrightestEditable: boolean;
+  intervalDarkestAriaLabel: string;
+  intervalBrightestAriaLabel: string;
+  onIntervalDarkestPreview?: (value: string) => void;
+  onIntervalDarkestCommit?: (value: string) => boolean | void;
+  onIntervalBrightestPreview?: (value: string) => void;
+  onIntervalBrightestCommit?: (value: string) => boolean | void;
+  onIntervalDarkestSourceJump?: () => void;
+  onIntervalBrightestSourceJump?: () => void;
+}) {
+  return (
+    <div style={nsNorTEvdDefineTableStyle}>
+      <div style={nsNorTParamTitleStyle}>NS EVD define</div>
+      <div style={nsNorTEvdDefineBlankHeaderCellStyle}>Interval</div>
+      <div style={nsNorTEvdDefineHeaderCellStyle}>Darkest</div>
+      <div style={nsNorTEvdDefineHeaderCellStyle}>Brightest</div>
+      <div style={nsNorTEvdDefineSpacerStyle} />
+      <div style={nsNorTEvdDefineHeaderCellStyle}>Pcnt%</div>
+      <EditableNumberTableCell
+        value={intervalDarkestValue}
+        editable={intervalDarkestEditable}
+        ariaLabel={intervalDarkestAriaLabel}
+        frameStyle={({ focused }) => nsNorTParamValueCellFrameStyle(focused)}
+        inputStyle={({ editable: cellEditable }) => nsNorTParamValueCellInputStyle(cellEditable)}
+        onPreview={onIntervalDarkestPreview}
+        onCommit={onIntervalDarkestCommit}
+        onSourceJump={onIntervalDarkestSourceJump}
+      />
+      <EditableNumberTableCell
+        value={intervalBrightestValue}
+        editable={intervalBrightestEditable}
+        ariaLabel={intervalBrightestAriaLabel}
+        frameStyle={({ focused }) => nsNorTParamValueCellFrameStyle(focused)}
+        inputStyle={({ editable: cellEditable }) => nsNorTParamValueCellInputStyle(cellEditable)}
+        onPreview={onIntervalBrightestPreview}
+        onCommit={onIntervalBrightestCommit}
+        onSourceJump={onIntervalBrightestSourceJump}
+      />
+      <div style={nsNorTEvdDefineNoteStyle}>Pcnt%: 120 = 12%, (1000 base)</div>
+    </div>
+  );
+}
+
+function nsNorTCellFrameStyle(
+  editable: boolean,
+  active: boolean,
+  focused: boolean,
+  variant: "curve" | "flat" = "flat",
+): CSSProperties {
+  if (variant === "curve") {
+    return {
+      position: "relative",
+      zIndex: focused ? 2 : active ? 1 : "auto",
+      display: "flex",
+      alignItems: "stretch",
+      minWidth: 0,
+      padding: 0,
+      border: "none",
+      borderRight: nsNorTCurveTableBorder,
+      borderBottom: nsNorTCurveTableBorder,
+      outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+      outlineOffset: -2,
+      background: active
+        ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+        : editable
+          ? "var(--colorNeutralBackground1)"
+          : "color-mix(in srgb, var(--colorNeutralForeground1) 4%, var(--colorNeutralBackground1))",
+      color: active ? "var(--colorBrandForeground1)" : editable ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForegroundDisabled)",
+      boxShadow: focused ? "inset 0 0 0 1px var(--colorBrandForeground1)" : "none",
+      transition: "background-color 120ms ease, outline-color 120ms ease, box-shadow 120ms ease",
+    };
+  }
+
+  return {
+    position: "relative",
+    zIndex: focused ? 2 : active ? 1 : "auto",
+    display: "flex",
+    alignItems: "stretch",
+    minWidth: 0,
+    padding: 0,
+    border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+    borderBottom: "none",
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -2,
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
+      : editable
+        ? "var(--colorNeutralBackground1)"
+        : "color-mix(in srgb, var(--colorNeutralForeground1) 4%, var(--colorNeutralBackground1))",
+    color: active ? "var(--colorBrandForeground1)" : editable ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForegroundDisabled)",
+    boxShadow: focused ? "inset 0 0 0 1px var(--colorBrandForeground1)" : "none",
+    transition: "background-color 120ms ease, outline-color 120ms ease, box-shadow 120ms ease",
+  };
+}
+
+function nsNorTCellInputStyle(editable: boolean, active: boolean, variant: "curve" | "flat" = "flat"): CSSProperties {
+  return {
+    width: "100%",
+    height: "100%",
+    minWidth: 0,
+    padding: variant === "curve" ? "0 2px" : "0 6px",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: "inherit",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: variant === "curve" ? 11 : 11,
+    fontWeight: variant === "curve" ? active ? 850 : 500 : active ? 900 : 800,
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
+    boxSizing: "border-box",
+  };
+}
+
+const nsProbabilityBodyStyle: CSSProperties = {
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsProbabilityChartGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+  minWidth: 0,
+};
+
+const nsProbabilityChartCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  minWidth: 0,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  overflow: "hidden",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsProbabilityFormulaTextStyle: CSSProperties = {
+  flex: "1 1 auto",
+  marginLeft: "auto",
+  color: "var(--colorNeutralForeground2)",
+  fontSize: 13,
+  textAlign: "right",
+  display: "inline-flex",
+  alignItems: "baseline",
+  justifyContent: "flex-end",
+  flexWrap: "wrap",
+  columnGap: 3,
+  rowGap: 2,
+  minWidth: 0,
+};
+
+const nsProbabilityChartPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  position: "relative",
+  minWidth: 0,
+  flex: "1 1 auto",
+  maxWidth: 620,
+  margin: "0 auto",
+};
+
+const nsProbabilityCurveEditorStyle: CSSProperties = {
+  position: "absolute",
+  top: 4,
+  right: 4,
+  display: "grid",
+  gridTemplateColumns: "56px repeat(2, 54px)",
+  gridTemplateRows: "repeat(2, 22px)",
+  gap: 0,
+  overflow: "hidden",
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.08)",
+  zIndex: 1,
+};
+
+const nsProbabilityCurveEditorLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "0 4px",
+  borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 56%, transparent)",
+  borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 56%, transparent)",
+  background: "color-mix(in srgb, var(--colorNeutralForeground1) 3%, var(--colorNeutralBackground1))",
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 10,
+  fontWeight: 850,
+  textTransform: "none",
+};
+
+function nsProbabilityCurveEditorCellStyle(editable: boolean, focused: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "stretch",
+    minWidth: 0,
+    padding: 0,
+    borderRight: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 56%, transparent)",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 56%, transparent)",
+    borderColor: focused
+      ? "var(--colorBrandForeground1)"
+      : "color-mix(in srgb, var(--colorNeutralStroke2) 56%, transparent)",
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : "none",
+    outlineOffset: -2,
+    background: editable
+      ? "var(--colorNeutralBackground1)"
+      : "color-mix(in srgb, var(--colorNeutralForeground1) 4%, var(--colorNeutralBackground1))",
+    boxShadow: focused
+      ? "inset 0 0 0 1px var(--colorBrandForeground1)"
+      : "none",
+    transition: "border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease",
+  };
+}
+
+function nsProbabilityCurveEditorInputStyle(editable: boolean): CSSProperties {
+  return {
+    width: "100%",
+    height: "100%",
+    minWidth: 0,
+    padding: "0 4px",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: editable ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForegroundDisabled)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: 10,
+    fontWeight: 800,
+    textAlign: "center",
+    cursor: editable ? "text" : "default",
+    boxSizing: "border-box",
+  };
+}
+
+const nsProbabilityBoundaryLineStyle: CSSProperties = {
+  stroke: "rgba(239, 68, 68, 0.78)",
+  strokeWidth: 1,
+  strokeDasharray: "4 4",
+};
+
+const nsProbabilityCurveStyle: CSSProperties = {
+  fill: "none",
+  stroke: "#17a8e5",
+  strokeWidth: 3,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+};
+
+const nsProbabilityEndpointPointStyle: CSSProperties = {
+  fill: "#c97911",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 1.4,
+};
+
+const nsProbabilityCurrentGuideLineStyle: CSSProperties = {
+  stroke: "rgba(126, 71, 196, 0.7)",
+  strokeWidth: 1.2,
+  strokeDasharray: "4 4",
+};
+
+const nsProbabilityCurrentPointStyle: CSSProperties = {
+  fill: "var(--colorBrandForeground1)",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 1.5,
+};
+
+const nsProbabilityCurrentValueTextStyle: CSSProperties = {
+  fill: "var(--colorBrandForeground1)",
+  stroke: "var(--colorNeutralBackground1)",
+  strokeWidth: 4,
+  paintOrder: "stroke",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const nsAreaPlaceholderBodyStyle: CSSProperties = {
+  minHeight: 136,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsDtPanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  minWidth: 0,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+  borderRadius: 8,
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  overflow: "hidden",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsDtTableStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsDtChartPanelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  flex: "1 1 auto",
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const nsDtChartOuterFrameStyle: CSSProperties = {
+  fill: "color-mix(in srgb, var(--colorNeutralBackground1) 94%, var(--colorNeutralForeground1))",
+  stroke: "color-mix(in srgb, var(--colorNeutralForeground1) 28%, var(--colorNeutralStroke2))",
+  strokeWidth: 1.2,
+  filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18))",
+};
+
+const nsDtChartZoneStyle: CSSProperties = {
+  fill: "url(#ns-dt-lowbnd-zone)",
+  stroke: "#49c821",
+  strokeWidth: 1.2,
+};
+
+const nsDtAxisLineStyle: CSSProperties = {
+  stroke: "color-mix(in srgb, var(--colorNeutralForeground1) 86%, transparent)",
+  strokeWidth: 1.4,
+  fill: "none",
+};
+
+const nsDtAxisArrowStyle: CSSProperties = {
+  fill: "color-mix(in srgb, var(--colorNeutralForeground1) 86%, transparent)",
+};
+
+const nsDtDistributionCurveStyle: CSSProperties = {
+  fill: "none",
+  stroke: "color-mix(in srgb, var(--colorNeutralForeground1) 88%, transparent)",
+  strokeWidth: 2.8,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  filter: "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28))",
+};
+
+const nsDtDarkYLineStyle: CSSProperties = {
+  stroke: "#49c821",
+  strokeWidth: 2.6,
+  filter: "drop-shadow(0 1px 1px rgba(73, 200, 33, 0.35))",
+};
+
+const nsDtDarkBracketCurveStyle: CSSProperties = {
+  fill: "none",
+  stroke: "color-mix(in srgb, var(--colorNeutralForeground1) 38%, transparent)",
+  strokeWidth: 1,
+};
+
+const nsDtAxisLabelStyle: CSSProperties = {
+  fill: "var(--colorNeutralForeground1)",
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+const nsDtGreenLabelStyle: CSSProperties = {
+  fill: "#2db600",
+  fontSize: 10,
+  fontWeight: 750,
+};
 
 const hsWeightBodyStyle: CSSProperties = {
   display: "flex",
@@ -5630,6 +10460,20 @@ function hsWeightCellInputStyle(editable: boolean): CSSProperties {
     fontWeight: "inherit",
     textAlign: "center",
     cursor: editable ? "text" : "default",
+  };
+}
+
+function editableCellFrameStyle(baseStyle: CSSProperties, focused: boolean): CSSProperties {
+  return {
+    ...baseStyle,
+    position: focused ? "relative" : baseStyle.position,
+    zIndex: focused ? 2 : baseStyle.zIndex,
+    outline: focused ? "1.5px solid var(--colorBrandForeground1)" : baseStyle.outline ?? "none",
+    outlineOffset: -2,
+    boxShadow: focused
+      ? "inset 0 0 0 1px var(--colorBrandForeground1)"
+      : baseStyle.boxShadow,
+    transition: `${baseStyle.transition ?? ""}, outline-color 120ms ease, box-shadow 120ms ease`,
   };
 }
 
@@ -5851,11 +10695,9 @@ function hsDarkAreaColumnHeaderStyle(active: boolean): CSSProperties {
     padding: "0 4px",
     borderRight: HS_WEIGHT_GRID_BORDER,
     borderBottom: HS_WEIGHT_MAJOR_BORDER,
-    background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
-      : HS_WEIGHT_DR_BACKGROUND,
+    background: HS_WEIGHT_DR_BACKGROUND,
     color: active ? "var(--colorBrandForeground1)" : HS_WEIGHT_DR_TEXT_COLOR,
-    fontWeight: 900,
+    fontWeight: active ? 950 : 900,
   };
 }
 
@@ -5868,11 +10710,9 @@ function hsDarkAreaRowHeaderStyle(active: boolean): CSSProperties {
     padding: "0 5px",
     borderRight: HS_WEIGHT_MAJOR_BORDER,
     borderBottom: HS_WEIGHT_GRID_BORDER,
-    background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 42%, var(--colorNeutralBackground1))"
-      : HS_WEIGHT_BV_BACKGROUND,
+    background: HS_WEIGHT_BV_BACKGROUND,
     color: active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-palegreen-fg)",
-    fontWeight: 900,
+    fontWeight: active ? 950 : 900,
   };
 }
 
@@ -6485,32 +11325,30 @@ const thresholdTableStyle: CSSProperties = {
 };
 
 const mtwvTableWrapStyle: CSSProperties = {
-  overflow: "auto",
-  padding: "10px",
-  background: "var(--colorNeutralBackground2)",
-};
-
-const mtwvTableSurfaceStyle: CSSProperties = {
+  width: "100%",
   minWidth: 0,
-  padding: "10px",
-  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-  borderRadius: 8,
+  overflow: "hidden",
+  padding: "10px 12px 12px",
   background: "var(--colorNeutralBackground1)",
-  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 
 function mtwvHeatmapGridStyle(columnCount: number): CSSProperties {
+  const count = Math.max(1, columnCount);
+  const compact = count > 12;
   return {
     display: "grid",
-    gridTemplateColumns: `42px repeat(${Math.max(1, columnCount)}, minmax(34px, 1fr))`,
-    gridAutoRows: "minmax(30px, auto)",
-    minWidth: Math.max(620, 42 + Math.max(1, columnCount) * 38),
+    gridTemplateColumns: `${compact ? "minmax(38px, 0.85fr)" : "minmax(42px, 0.9fr)"} repeat(${count}, minmax(0, 1fr))`,
+    gridAutoRows: compact ? "minmax(26px, auto)" : "minmax(30px, auto)",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
     overflow: "hidden",
     border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
     borderRadius: 10,
     background: "var(--colorNeutralBackground1)",
     fontFamily: "ui-monospace, Consolas, monospace",
-    fontSize: 11,
+    fontSize: compact ? 10 : 11,
   };
 }
 
@@ -6601,11 +11439,8 @@ const chartSvgStyle: CSSProperties = {
   maxWidth: 620,
   minHeight: 220,
   margin: "0 auto",
-  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
   background: "var(--colorNeutralBackground1)",
-  borderRadius: 8,
   boxSizing: "border-box",
-  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 
 const chartTitleTextStyle: CSSProperties = {
@@ -6839,6 +11674,173 @@ const sourceSectionStyle: CSSProperties = {
   padding: 0,
   background: "var(--colorNeutralBackground1)",
   overflow: "hidden",
+};
+
+const ablGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+  gap: 12,
+  minWidth: 0,
+};
+
+const ablCardStyle: CSSProperties = {
+  ...sourceSectionStyle,
+  margin: 0,
+  borderRadius: 12,
+  boxShadow: "0 8px 22px rgba(0, 0, 0, 0.08)",
+};
+
+const ablHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  minHeight: 44,
+  padding: "0 12px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "linear-gradient(90deg, color-mix(in srgb, var(--colorBrandBackground2) 30%, var(--colorNeutralBackground2)), var(--colorNeutralBackground2))",
+};
+
+const ablHeaderTitleWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  minWidth: 0,
+};
+
+const ablRowsStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  minWidth: 0,
+  background: "var(--colorNeutralBackground1)",
+};
+
+function ablRowButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "minmax(180px, 38%) minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    minHeight: 46,
+    padding: "8px 12px 8px 14px",
+    border: "none",
+    borderBottom: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
+    background: enabled ? "var(--colorNeutralBackground1)" : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))",
+    color: "inherit",
+    textAlign: "left",
+    cursor: enabled ? "pointer" : "default",
+    transition: "background-color 140ms ease, box-shadow 140ms ease",
+  };
+}
+
+const ablRowLabelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 0,
+  minWidth: 0,
+  color: "var(--colorNeutralForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 13,
+  fontWeight: 850,
+  overflowWrap: "anywhere",
+};
+
+const ablValueListStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+  gap: 6,
+  minWidth: 0,
+};
+
+const ablValueBoxStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minWidth: 46,
+  height: 26,
+  padding: "0 8px",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 6,
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 22%, var(--colorNeutralBackground3))",
+  color: "var(--colorBrandForeground1)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 12,
+  fontWeight: 850,
+  lineHeight: "26px",
+};
+
+const faceTabGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 12,
+  minWidth: 0,
+};
+
+const faceFormulaRowStyle: CSSProperties = {
+  ...thresholdFormulaStyle,
+  alignItems: "center",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const faceFormulaResultStyle: CSSProperties = {
+  ...thresholdResultStyle,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  whiteSpace: "nowrap",
+};
+
+const faceMetricGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(190px, 1fr))",
+  gap: 12,
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const faceMetricCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  minWidth: 0,
+  minHeight: 116,
+  padding: 12,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+  borderRadius: 10,
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground1))",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+};
+
+const faceMetricHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: 10,
+  minWidth: 0,
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const faceMetricFormulaStyle: CSSProperties = {
+  minWidth: 0,
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: "ui-monospace, Consolas, monospace",
+  fontSize: 12,
+  lineHeight: "18px",
+  fontWeight: 800,
+  overflowWrap: "anywhere",
+};
+
+const faceMetricDetailStyle: CSSProperties = {
+  minWidth: 0,
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 11,
+  lineHeight: "16px",
+  overflowWrap: "anywhere",
 };
 
 const sourceSectionHeaderStyle: CSSProperties = {

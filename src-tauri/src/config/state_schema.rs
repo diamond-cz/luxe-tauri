@@ -118,6 +118,9 @@ pub struct Isp6sAeVisual {
     #[serde(default = "default_chart_hs_card_order")]
     pub chart_hs_card_order:                           Vec<String>,
     #[serde(default)] pub chart_hs_card_collapsed:     Vec<String>,
+    #[serde(default = "default_chart_ns_card_order")]
+    pub chart_ns_card_order:                           Vec<String>,
+    #[serde(default)] pub chart_ns_card_collapsed:     Vec<String>,
     #[serde(default = "default_chart_main_t_mid_chart_mode")]
     pub chart_main_t_mid_chart_mode:                   String,
     #[serde(default = "default_chart_main_t_mid_chart_source")]
@@ -138,6 +141,9 @@ fn default_chart_main_t_card_order() -> Vec<String> {
 }
 fn default_chart_hs_card_order() -> Vec<String> {
     vec!["hsTarget".into(), "hsWeight".into(), "hsBright".into(), "hsMiddle".into(), "hsDark".into()]
+}
+fn default_chart_ns_card_order() -> Vec<String> {
+    vec!["nsTarget".into(), "nsProb".into(), "nsNorT".into(), "nsBT".into(), "nsDT".into()]
 }
 fn default_chart_main_t_mid_chart_mode() -> String { "thd".into() }
 fn default_chart_main_t_mid_chart_source() -> String { "mid".into() }
@@ -170,6 +176,8 @@ impl Default for Isp6sAeVisual {
             chart_main_t_card_collapsed: vec![],
             chart_hs_card_order: default_chart_hs_card_order(),
             chart_hs_card_collapsed: vec![],
+            chart_ns_card_order: default_chart_ns_card_order(),
+            chart_ns_card_collapsed: vec![],
             chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
