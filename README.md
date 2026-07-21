@@ -66,8 +66,7 @@ rustc --version           # >= 1.77
 cargo tauri --version     # 2.x
 ```
 
-本项目当前使用 npm。不要在同一工作区混用 npm / pnpm / yarn；如从 pnpm 迁移到 npm，
-建议提交 `package-lock.json`，并在确认不再使用后移除旧的 `pnpm-lock.yaml`。
+本项目当前统一使用 npm。依赖版本以 `package-lock.json` 为准；不要在同一工作区混用 npm / pnpm / yarn。
 
 ---
 
@@ -78,7 +77,7 @@ git clone <repo> luxe-tauri
 cd luxe-tauri
 
 npm install               # 第一次拉依赖（首次约 1 分钟）
-c         # 启动 Tauri dev，Vite 在 :1420 提供 HMR
+npm run tauri:dev         # 启动 Tauri dev，Vite 在 :1420 提供 HMR
 ```
 
 第一次 `tauri:dev` 会编译 Rust 端（约 3-5 分钟），之后增量编译 < 30 秒。前端
@@ -470,14 +469,14 @@ luxe-tauri/
 LUXE 把 hiz 关键契约 1:1 端口过来，便于把 hiz 端的测试数据直接喂到新版做对比：
 
 
-| 契约                | 来源                                      | 保留细节                                                                                                                                                                                                     |
-| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| cpp_parser 路径语法 | `hiz/src/core/cpp_parser.py`              | `[i][j].k` + `FieldEntry { path, value, comment, line, depth, index, value_type }` + `StructNode` 字段名                                                                                                     |
-| Isp6s.toml schema   | `hiz/configs/Isp6s.toml`                  | `card.* / Image / LCE.group / para_check.items / preview_info.items / card_source.*` 字段名 + `context = "block"|"line"|<int>` + `jump_to = "first"|"min"` + `highlight = "ranges"|"union"` + `re:` 前缀正则 |
-| 16 locale 顺序      | `hiz/src/core/i18n.py::_LANGUAGE_LOCALES` | 索引 0=zh_CN … 15=ar_SA 完全一致                                                                                                                                                                            |
-| close_behavior      | `hiz_main.py::closeEvent`                 | 0/1/2 = ask/tray/quit 语义                                                                                                                                                                                   |
-| 自适应几何算法      | `hiz_main.py::_compute_adaptive_geometry` | `min(curr_w/saved_sw, curr_h/saved_sh)` 夹到 `[1024×380, avail*0.95]`，5 项单测覆盖                                                                                                                         |
-| 今日诗词            | `hiz/src/core/poetry.py`                  | 同一`X-User-Token` + 同一默认句                                                                                                                                                                              |
+| 契约                | 来源                                      | 保留细节                                                                                                         |
+| ------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| cpp_parser 路径语法 | `hiz/src/core/cpp_parser.py`              | `[i][j].k` + `FieldEntry { path, value, comment, line, depth, index, value_type }` + `StructNode` 字段名         |
+| Isp6s.toml schema   | `hiz/configs/Isp6s.toml`                  | `card.* / Image / LCE.group / para_check.items / preview_info.items / card_source.*` 字段名 + `context = "block" |
+| 16 locale 顺序      | `hiz/src/core/i18n.py::_LANGUAGE_LOCALES` | 索引 0=zh_CN … 15=ar_SA 完全一致                                                                                |
+| close_behavior      | `hiz_main.py::closeEvent`                 | 0/1/2 = ask/tray/quit 语义                                                                                       |
+| 自适应几何算法      | `hiz_main.py::_compute_adaptive_geometry` | `min(curr_w/saved_sw, curr_h/saved_sh)` 夹到 `[1024×380, avail*0.95]`，5 项单测覆盖                             |
+| 今日诗词            | `hiz/src/core/poetry.py`                  | 同一`X-User-Token` + 同一默认句                                                                                  |
 
 详见 `D:\Image_process\hiz\CLAUDE.md` 中的对照说明。
 
