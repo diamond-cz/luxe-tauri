@@ -68,6 +68,7 @@ export interface Isp6sAeVisual {
   chart_hs_card_collapsed:     string[];
   chart_ns_card_order:         string[];
   chart_ns_card_collapsed:     string[];
+  chart_face_card_collapsed:   string[];
   chart_main_t_mid_chart_mode: string;
   chart_main_t_mid_chart_source: string;
   chart_main_t_mid_readout_mode: string;

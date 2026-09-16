@@ -262,6 +262,44 @@ interface TouchTargetSource {
 
 type TouchMeterParamId = "meterWeight" | "yLow" | "yHigh";
 type TouchMeterParamDrafts = Record<TouchMeterParamId, string>;
+type FaceMetricCardId = "backSceneTarget" | "fbtTh" | "fdThGroup" | "fdMinThGroup" | "oethGroup";
+type FaceFbtTableKey = "fdTh" | "nsFdTh" | "fdMinTh" | "nsFdMinTh" | "oeth" | "nsOeth";
+
+type FaceBvDrCellTarget =
+  | { kind: "rowHeader"; rowIndex: number }
+  | { kind: "columnHeader"; columnIndex: number }
+  | { kind: "value"; rowIndex: number; columnIndex: number };
+
+interface FaceBvDrTableSource {
+  title: string;
+  valuePath: string;
+  columnHeaderPath: string;
+  rowHeaderPath: string;
+  rowHeaders: number[];
+  rowHeaderFields: Array<FieldEntry | null>;
+  columnHeaders: number[];
+  columnHeaderFields: Array<FieldEntry | null>;
+  values: number[][];
+  valueFields: Array<Array<FieldEntry | null>>;
+  fields: FieldEntry[];
+}
+
+interface FaceFbtTableItem {
+  tableKey: FaceFbtTableKey;
+  title: string;
+  source: FaceBvDrTableSource | null;
+  result: number;
+}
+
+interface FaceFbtSource {
+  fdTh: FaceBvDrTableSource;
+  nsFdTh: FaceBvDrTableSource;
+  fdMinTh: FaceBvDrTableSource;
+  nsFdMinTh: FaceBvDrTableSource;
+  oeth: FaceBvDrTableSource;
+  nsOeth: FaceBvDrTableSource;
+  fields: FieldEntry[];
+}
 
 const CHART_TABS: ChartTabId[] = ["MainT", "HS", "NS", "ABL", "Face", "Face_FLT", "Touch"];
 const SOURCE_NUMBER_RE = /[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g;
@@ -350,6 +388,31 @@ const FACE_FBT_FDY_KEY = "AE_TAG_FBT_FDY";
 const FACE_PROB_KEYS = ["AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE"] as const;
 const FACE_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
 const FACE_PURE_AE_CWR_STABLE_KEY = "AE_TAG_PURE_AE_CWR_STABLE";
+const FACE_FBT_OE_SYS_KEY = "AE_TAG_FBT_OE_SYS";
+const FACE_FBT_TARGET_KEY = "AE_TAG_FBT_TARGET";
+const FACE_FBT_FDDR_RA_KEY = "AE_TAG_FBT_FDDR_RA";
+const FACE_FBT_DR_KEY = "AE_TAG_FBT_DR";
+const FACE_FBT_FDTH_KEY = "AE_TAG_FBT_FDTH";
+const FACE_FBT_FDMINTH_KEY = "AE_TAG_FBT_FDMINTH";
+const FACE_FBT_OETH_KEY = "AE_TAG_FBT_OETH";
+const FACE_FBT_FD_ROW_HEADER_PATH = "[0][4][1][17]" as const;
+const FACE_FBT_FD_DR_HEADER_PATH = "[0][4][1][20]" as const;
+const FACE_FBT_FDTH_TABLE_PATH = "[0][4][1][22]" as const;
+const FACE_FBT_FDMINTH_TABLE_PATH = "[0][4][1][23]" as const;
+const FACE_FBT_OETH_TABLE_PATH = "[0][4][1][21]" as const;
+const FACE_FBT_NS_FD_ROW_HEADER_PATH = "[0][4][1][24]" as const;
+const FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH = "[0][4][1][25]" as const;
+const FACE_FBT_NS_DR_HEADER_PATH = "[0][4][1][27]" as const;
+const FACE_FBT_NS_OETH_TABLE_PATH = "[0][4][1][28]" as const;
+const FACE_FBT_NS_FDTH_TABLE_PATH = "[0][4][1][29]" as const;
+const FACE_FBT_NS_FDMINTH_TABLE_PATH = "[0][4][1][30]" as const;
+const FACE_METRIC_CARD_ORDER: FaceMetricCardId[] = [
+  "backSceneTarget",
+  "fbtTh",
+  "fdThGroup",
+  "fdMinThGroup",
+  "oethGroup",
+];
 const NS_TARGET_INPUTS: Array<{
   id: NsTargetTermId;
   label: string;
@@ -674,6 +737,13 @@ export function ChartMapMode({
     identity: null,
     source: null,
   });
+  const [faceFbtSource, setFaceFbtSource] = useState<{
+    identity: string | null;
+    source: FaceFbtSource | null;
+  }>({
+    identity: null,
+    source: null,
+  });
   const [hsWeightSource, setHsWeightSource] = useState<HsWeightSource | null>(null);
   const [hsBrightAreaSource, setHsBrightAreaSource] = useState<HsAreaSource | null>(null);
   const [hsMiddleAreaSource, setHsMiddleAreaSource] = useState<HsAreaSource | null>(null);
@@ -727,6 +797,7 @@ export function ChartMapMode({
   const currentNsProbabilitySource = nsProbabilitySource.identity === sourceIdentity ? nsProbabilitySource.source : null;
   const currentNsNorTSource = nsNorTSource.identity === sourceIdentity ? nsNorTSource.source : null;
   const currentNsBTSource = nsBTSource.identity === sourceIdentity ? nsBTSource.source : null;
+  const currentFaceFbtSource = faceFbtSource.identity === sourceIdentity ? faceFbtSource.source : null;
   const currentHsBrightAreaSource = hsSourceIdentity === sourceIdentity ? hsBrightAreaSource : null;
   const currentHsMiddleAreaSource = hsSourceIdentity === sourceIdentity ? hsMiddleAreaSource : null;
   const currentHsDarkAreaSource = hsSourceIdentity === sourceIdentity ? hsDarkAreaSource : null;
@@ -781,6 +852,34 @@ export function ChartMapMode({
   );
   const facePureAeCwrStableValue = useMemo(
     () => readTomlValue(tomlData, FACE_PURE_AE_CWR_STABLE_KEY),
+    [tomlData],
+  );
+  const faceFbtOeSysValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_OE_SYS_KEY),
+    [tomlData],
+  );
+  const faceFbtTargetValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_TARGET_KEY),
+    [tomlData],
+  );
+  const faceFbtFddrRaValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_FDDR_RA_KEY),
+    [tomlData],
+  );
+  const faceFbtDrValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_DR_KEY),
+    [tomlData],
+  );
+  const faceFbtFdThValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_FDTH_KEY),
+    [tomlData],
+  );
+  const faceFbtFdMinThValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_FDMINTH_KEY),
+    [tomlData],
+  );
+  const faceFbtOethValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FBT_OETH_KEY),
     [tomlData],
   );
   const hsCwvValue = useMemo(
@@ -1019,6 +1118,7 @@ export function ChartMapMode({
       setNsProbabilitySource({ identity: null, source: null });
       setNsNorTSource({ identity: null, source: null });
       setNsBTSource({ identity: null, source: null });
+      setFaceFbtSource({ identity: null, source: null });
       setHsWeightSource(null);
       setHsBrightAreaSource(null);
       setHsMiddleAreaSource(null);
@@ -1045,6 +1145,9 @@ export function ChartMapMode({
         setNsNorTSource({ identity: null, source: null });
         setNsBTSource({ identity: null, source: null });
       }
+      if (tab === "Face") {
+        setFaceFbtSource({ identity: null, source: null });
+      }
       if (tab === "HS") {
         setHsWeightSource(null);
         setHsBrightAreaSource(null);
@@ -1070,6 +1173,7 @@ export function ChartMapMode({
       let nsProbability: NsProbabilityCurveSource | null = null;
       let nsNorT: NsNorTSource | null = null;
       let nsBT: NsNorTSource | null = null;
+      let faceFbt: FaceFbtSource | null = null;
       let hsWeight: HsWeightSource | null = null;
       let hsBrightArea: HsAreaSource | null = null;
       let hsMiddleArea: HsAreaSource | null = null;
@@ -1103,6 +1207,9 @@ export function ChartMapMode({
       if (tab === "Touch") {
         touchTarget = await loadTouchTargetSource(filePath);
       }
+      if (tab === "Face") {
+        faceFbt = await loadFaceFbtSource(filePath);
+      }
       let nextSections: ChartSection[] = [];
       if (tab === "ABL") {
         nextSections = await loadAblSections(filePath);
@@ -1133,6 +1240,9 @@ export function ChartMapMode({
           setNsNorTSource({ identity: sourceIdentity, source: nsNorT });
           setNsBTSource({ identity: sourceIdentity, source: nsBT });
         }
+        if (tab === "Face") {
+          setFaceFbtSource({ identity: sourceIdentity, source: faceFbt });
+        }
         if (tab === "HS") {
           setHsWeightSource(hsWeight);
           setHsBrightAreaSource(hsBrightArea);
@@ -1160,6 +1270,9 @@ export function ChartMapMode({
           setNsProbabilitySource({ identity: null, source: null });
           setNsNorTSource({ identity: null, source: null });
           setNsBTSource({ identity: null, source: null });
+        }
+        if (tab === "Face") {
+          setFaceFbtSource({ identity: null, source: null });
         }
         if (tab === "HS") {
           setHsWeightSource(null);
@@ -1669,12 +1782,26 @@ export function ChartMapMode({
 
           {tab === "Face" && (
             <FaceTabContent
+              source={currentFaceFbtSource}
+              bvValue={imageBvValue}
               cwvValue={faceCwvValue}
               fbtThValue={faceFbtThValue}
               fdyValue={faceFbtFdyValue}
               faceProbValue={faceProbValue}
               normalTargetValue={faceNormalTargetValue}
               stableValue={facePureAeCwrStableValue}
+              oeSysValue={faceFbtOeSysValue}
+              fbtTargetValue={faceFbtTargetValue}
+              fddrRaValue={faceFbtFddrRaValue}
+              drValue={faceFbtDrValue}
+              fdThValue={faceFbtFdThValue}
+              fdMinThValue={faceFbtFdMinThValue}
+              oethValue={faceFbtOethValue}
+              sourceDraftText={sourceDraftText}
+              onSourceDraftTextChange={onSourceDraftTextChange}
+              collapsedIds={visual.chart_face_card_collapsed}
+              onCollapsedIdsChange={(next) => patchVis({ chart_face_card_collapsed: next })}
+              onSourceJump={onSourceJump}
             />
           )}
 
@@ -2193,6 +2320,174 @@ async function loadHsAreaSource(filePath: string, config: HsAreaSourceConfig): P
   };
 }
 
+async function loadFaceFbtSource(filePath: string): Promise<FaceFbtSource> {
+  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth] = await Promise.all([
+    loadFaceBvDrTableSource(filePath, "fd_th_tbl", FACE_FBT_FDTH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", FACE_FBT_NS_FDTH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "fd_minth_tbl", FACE_FBT_FDMINTH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", FACE_FBT_NS_FDMINTH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "fd_oeth_tbl", FACE_FBT_OETH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", FACE_FBT_NS_OETH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FD_ROW_HEADER_PATH),
+  ]);
+  return {
+    fdTh,
+    nsFdTh,
+    fdMinTh,
+    nsFdMinTh,
+    oeth,
+    nsOeth,
+    fields: [
+      ...fdTh.fields,
+      ...nsFdTh.fields,
+      ...fdMinTh.fields,
+      ...nsFdMinTh.fields,
+      ...oeth.fields,
+      ...nsOeth.fields,
+    ].sort(compareFieldEntries),
+  };
+}
+
+async function loadFaceBvDrTableSource(
+  filePath: string,
+  title: string,
+  valuePath: string,
+  columnHeaderPath: string,
+  rowHeaderPath: string,
+): Promise<FaceBvDrTableSource> {
+  const [valueFields, columnHeaderFields, rowHeaderFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, valuePath),
+    loadFieldEntriesAtPath(filePath, columnHeaderPath),
+    loadFieldEntriesAtPath(filePath, rowHeaderPath),
+  ]);
+  const numericValueFields = numericFieldEntries(valueFields);
+  const numericRowHeaderFields = numericFieldEntries(rowHeaderFields);
+  const numericColumnHeaderFields = numericFieldEntries(columnHeaderFields);
+  const inferredShape = inferHsAreaMatrixShape(numericValueFields, valuePath);
+  const rowCount = Math.max(1, numericRowHeaderFields.length || inferredShape.rowCount || 1);
+  const columnCount = Math.max(1, numericColumnHeaderFields.length || inferredShape.columnCount || 1);
+  const rowAxis = buildHsAreaAxis(numericRowHeaderFields, rowCount);
+  const columnAxis = buildHsAreaAxis(numericColumnHeaderFields, columnCount);
+  const matrix = buildHsAreaMatrix(numericValueFields, rowCount, columnCount, valuePath);
+  return {
+    title,
+    valuePath,
+    columnHeaderPath,
+    rowHeaderPath,
+    rowHeaders: numericRowHeaderFields.length > 0
+      ? rowAxis.values.map((value, index) => Number.isFinite(value) ? value : index)
+      : Array.from({ length: rowCount }, (_, index) => index),
+    rowHeaderFields: numericRowHeaderFields.length > 0
+      ? rowAxis.fields
+      : Array.from({ length: rowCount }, (): FieldEntry | null => null),
+    columnHeaders: numericColumnHeaderFields.length > 0
+      ? columnAxis.values.map((value, index) => Number.isFinite(value) ? value : index)
+      : Array.from({ length: columnCount }, (_, index) => index),
+    columnHeaderFields: numericColumnHeaderFields.length > 0
+      ? columnAxis.fields
+      : Array.from({ length: columnCount }, (): FieldEntry | null => null),
+    values: matrix.values,
+    valueFields: matrix.fields,
+    fields: [...valueFields, ...columnHeaderFields, ...rowHeaderFields].sort(compareFieldEntries),
+  };
+}
+
+function rebuildFaceFbtFields(source: FaceFbtSource): FieldEntry[] {
+  return [
+    ...source.fdTh.fields,
+    ...source.nsFdTh.fields,
+    ...source.fdMinTh.fields,
+    ...source.nsFdMinTh.fields,
+    ...source.oeth.fields,
+    ...source.nsOeth.fields,
+  ].sort(compareFieldEntries);
+}
+
+function getFaceBvDrTargetField(source: FaceBvDrTableSource, target: FaceBvDrCellTarget): FieldEntry | null {
+  if (target.kind === "rowHeader") return source.rowHeaderFields[target.rowIndex] ?? null;
+  if (target.kind === "columnHeader") return source.columnHeaderFields[target.columnIndex] ?? null;
+  return source.valueFields[target.rowIndex]?.[target.columnIndex] ?? null;
+}
+
+function previewFaceBvDrTableSourceTarget(
+  source: FaceBvDrTableSource,
+  target: FaceBvDrCellTarget,
+  value: string,
+): FaceBvDrTableSource {
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  if (target.kind === "rowHeader") {
+    return {
+      ...source,
+      rowHeaders: source.rowHeaders.map((item, index) => index === target.rowIndex ? numericValue : item),
+    };
+  }
+  if (target.kind === "columnHeader") {
+    return {
+      ...source,
+      columnHeaders: source.columnHeaders.map((item, index) => index === target.columnIndex ? numericValue : item),
+    };
+  }
+  return {
+    ...source,
+    values: source.values.map((row, rowIndex) =>
+      rowIndex === target.rowIndex
+        ? row.map((item, columnIndex) => columnIndex === target.columnIndex ? numericValue : item)
+        : row,
+    ),
+  };
+}
+
+function updateFaceBvDrTableSourceField(source: FaceBvDrTableSource, field: FieldEntry, value: string): FaceBvDrTableSource {
+  const numericValue = parseFiniteNumber(value);
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  const updateValue = (candidate: number, candidateField: FieldEntry | null): number =>
+    candidateField && sameFieldEntry(candidateField, field) && Number.isFinite(numericValue) ? numericValue : candidate;
+
+  return {
+    ...source,
+    rowHeaders: source.rowHeaders.map((item, index) => updateValue(item, source.rowHeaderFields[index] ?? null)),
+    rowHeaderFields: source.rowHeaderFields.map(updateField),
+    columnHeaders: source.columnHeaders.map((item, index) => updateValue(item, source.columnHeaderFields[index] ?? null)),
+    columnHeaderFields: source.columnHeaderFields.map(updateField),
+    values: source.values.map((row, rowIndex) =>
+      row.map((item, columnIndex) => updateValue(item, source.valueFields[rowIndex]?.[columnIndex] ?? null)),
+    ),
+    valueFields: source.valueFields.map((row) => row.map(updateField)),
+    fields: source.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
+function previewFaceFbtSourceTarget(
+  source: FaceFbtSource,
+  tableKey: FaceFbtTableKey,
+  target: FaceBvDrCellTarget,
+  value: string,
+): FaceFbtSource {
+  const nextTable = previewFaceBvDrTableSourceTarget(source[tableKey], target, value);
+  if (nextTable === source[tableKey]) return source;
+  const nextSource = { ...source, [tableKey]: nextTable };
+  return {
+    ...nextSource,
+    fields: rebuildFaceFbtFields(nextSource),
+  };
+}
+
+function updateFaceFbtSourceField(
+  source: FaceFbtSource,
+  tableKey: FaceFbtTableKey,
+  field: FieldEntry,
+  value: string,
+): FaceFbtSource {
+  const nextTable = updateFaceBvDrTableSourceField(source[tableKey], field, value);
+  if (nextTable === source[tableKey]) return source;
+  const nextSource = { ...source, [tableKey]: nextTable };
+  return {
+    ...nextSource,
+    fields: rebuildFaceFbtFields(nextSource),
+  };
+}
+
 async function loadMainTargetMidCurve(
   filePath: string,
   paths: { x1: string; y1: string; x2: string; y2: string } = MID_CURVE_PATHS,
@@ -2324,6 +2619,12 @@ function sanitiseNsMetricCollapsed(collapsed: string[] | undefined): NsMetricCar
   const known = new Set<NsMetricCardId>(NS_METRIC_CARD_ORDER);
   return (collapsed ?? [])
     .filter((id): id is NsMetricCardId => known.has(id as NsMetricCardId));
+}
+
+function sanitiseFaceMetricCollapsed(collapsed: string[] | undefined): FaceMetricCardId[] {
+  const known = new Set<FaceMetricCardId>(FACE_METRIC_CARD_ORDER);
+  return (collapsed ?? [])
+    .filter((id): id is FaceMetricCardId => known.has(id as FaceMetricCardId));
 }
 
 function hsMetricCardDomId(cardId: HsMetricCardId): string {
@@ -5006,26 +5307,90 @@ function formatAblRowLabel(label: string): string {
 }
 
 function FaceTabContent({
+  source,
+  bvValue,
   cwvValue,
   fbtThValue,
   fdyValue,
   faceProbValue,
   normalTargetValue,
   stableValue,
+  oeSysValue,
+  fbtTargetValue,
+  fddrRaValue,
+  drValue,
+  fdThValue,
+  fdMinThValue,
+  oethValue,
+  sourceDraftText,
+  onSourceDraftTextChange,
+  collapsedIds,
+  onCollapsedIdsChange,
+  onSourceJump,
 }: {
+  source: FaceFbtSource | null;
+  bvValue: string | null;
   cwvValue: string | null;
   fbtThValue: string | null;
   fdyValue: string | null;
   faceProbValue: string | null;
   normalTargetValue: string | null;
   stableValue: string | null;
+  oeSysValue: string | null;
+  fbtTargetValue: string | null;
+  fddrRaValue: string | null;
+  drValue: string | null;
+  fdThValue: string | null;
+  fdMinThValue: string | null;
+  oethValue: string | null;
+  sourceDraftText?: string | null;
+  onSourceDraftTextChange?: (text: string) => void;
+  collapsedIds: string[];
+  onCollapsedIdsChange: (next: string[]) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
 }) {
+  const faceCollapsedIds = useMemo(() => sanitiseFaceMetricCollapsed(collapsedIds), [collapsedIds]);
+  const collapsed = new Set(faceCollapsedIds);
+  const [editableSource, setEditableSource] = useState(source);
+  const sourceDraftTextRef = useRef(sourceDraftText ?? "");
+
+  useEffect(() => {
+    setEditableSource(source);
+  }, [source]);
+  useEffect(() => {
+    sourceDraftTextRef.current = sourceDraftText ?? "";
+  }, [sourceDraftText]);
+
+  const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+  const currentSource = editableSource ?? source;
+  const bv = parseFiniteNumber(bvValue);
+  const dr = parseFiniteNumber(drValue);
   const cwv = parseFiniteNumber(cwvValue);
   const fbtTh = parseFiniteNumber(fbtThValue);
   const fdy = parseFiniteNumber(fdyValue);
   const faceProb = parseFiniteNumber(faceProbValue);
   const normalTarget = parseFiniteNumber(normalTargetValue);
   const stable = parseFiniteNumber(stableValue);
+  const oeSys = parseFiniteNumber(oeSysValue);
+  const fbtTargetValueNumber = parseFiniteNumber(fbtTargetValue);
+  const fddrRa = parseFiniteNumber(fddrRaValue);
+  const fdThToml = parseFiniteNumber(fdThValue);
+  const fdMinThToml = parseFiniteNumber(fdMinThValue);
+  const oethToml = parseFiniteNumber(oethValue);
+
+  const oethInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.oeth, bv, dr) : NaN;
+  const nsOethInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.nsOeth, bv, dr) : NaN;
+  const fdMinThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.fdMinTh, bv, dr) : NaN;
+  const nsFdMinThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.nsFdMinTh, bv, dr) : NaN;
+  const fdThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.fdTh, bv, dr) : NaN;
+  const nsFdThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.nsFdTh, bv, dr) : NaN;
+  const faceOeTar = Number.isFinite(oethInterpolated) && Number.isFinite(fdThInterpolated) && Number.isFinite(oeSys) && oeSys !== 0
+    ? (oethInterpolated * fdThInterpolated) / oeSys
+    : NaN;
+  const pureTarget = limitNumber(faceOeTar, fdMinThInterpolated, fdThInterpolated);
+  const computedFbtTarget = Number.isFinite(pureTarget) && Number.isFinite(fddrRa)
+    ? (pureTarget * fddrRa) / 1024
+    : NaN;
   const fbtTarget = Number.isFinite(cwv) && Number.isFinite(fbtTh) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (fbtTh / fdy)
     : NaN;
@@ -5033,38 +5398,170 @@ function FaceTabContent({
     ? (fbtTarget * faceProb + normalTarget * (1024 - faceProb)) / 1024
     : NaN;
 
+  const setCardExpanded = (cardId: FaceMetricCardId, expanded: boolean) => {
+    const next = new Set(collapsed);
+    if (expanded) {
+      next.delete(cardId);
+    } else {
+      next.add(cardId);
+    }
+    onCollapsedIdsChange(FACE_METRIC_CARD_ORDER.filter((id) => next.has(id)));
+  };
+
+  const previewCell = (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewFaceFbtSourceTarget(current, tableKey, target, trimmed) : current);
+  };
+
+  const updateCell = (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const table = editableSource[tableKey];
+    const field = getFaceBvDrTargetField(table, target);
+    if (!field) return false;
+    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateFaceFbtSourceField(current, tableKey, field, trimmed) : current);
+    return true;
+  };
+
+  const backSceneExpanded = !collapsed.has("backSceneTarget");
+  const fbtThExpanded = !collapsed.has("fbtTh");
+  const fdThGroupExpanded = !collapsed.has("fdThGroup");
+  const fdMinThGroupExpanded = !collapsed.has("fdMinThGroup");
+  const oethGroupExpanded = !collapsed.has("oethGroup");
+
   return (
     <div style={faceTabGridStyle}>
       <section style={thresholdCardStyle}>
         <div style={thresholdHeaderStyle}>
           <div style={thresholdTitleStyle}>Back Scene Target</div>
+          <button
+            type="button"
+            style={sourceButtonStyle(true)}
+            title={backSceneExpanded ? "Collapse Back Scene Target" : "Expand Back Scene Target"}
+            aria-label={backSceneExpanded ? "Collapse Back Scene Target" : "Expand Back Scene Target"}
+            onClick={() => setCardExpanded("backSceneTarget", !backSceneExpanded)}
+          >
+            {backSceneExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
         </div>
-        <div style={faceFormulaRowStyle}>
-          <span>Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
-          <strong style={faceFormulaResultStyle}>
-            {formatComputedNumber(stable)} | {formatOneDecimalNumber(backSceneTarget)}
-          </strong>
+        {backSceneExpanded && <>
+          <div style={faceFormulaRowStyle}>
+            <span>Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
+            <strong style={faceFormulaResultStyle}>
+              {formatComputedNumber(stable)} | {formatOneDecimalNumber(backSceneTarget)}
+            </strong>
+          </div>
+          <div style={faceMetricGridStyle}>
+            <FaceMetricCard
+              title="FBT target"
+              value={formatOneDecimalNumber(fbtTarget)}
+              formula="CWV * (FBT_TH / FDY)"
+              detail={`CWV ${formatComputedNumber(cwv)} / FBT_TH ${formatComputedNumber(fbtTh)} / FDY ${formatComputedNumber(fdy)}`}
+            />
+            <FaceMetricCard
+              title="FaceProb"
+              value={formatComputedNumber(faceProb)}
+              formula={FACE_PROB_KEYS.join(" / ")}
+              detail="Back scene weight: 1024 base"
+            />
+            <FaceMetricCard
+              title="Normal Target"
+              value={formatComputedNumber(normalTarget)}
+              formula={FACE_NORMAL_TARGET_KEY}
+              detail="Normal AE target"
+            />
+          </div>
+        </>}
+      </section>
+
+      <section style={thresholdCardStyle}>
+        <div style={faceCardHeaderBarStyle}>
+          <div style={thresholdTitleStyle}>FBT_TH</div>
+          <div style={faceCardHeaderActionsStyle}>
+            <strong style={faceFormulaResultStyle}>
+              FBT_TARGET: {formatComputedNumber(fbtTargetValueNumber)} | {formatOneDecimalNumber(computedFbtTarget)}
+            </strong>
+            <button
+              type="button"
+              style={sourceButtonStyle(true)}
+              title={fbtThExpanded ? "Collapse FBT_TH" : "Expand FBT_TH"}
+              aria-label={fbtThExpanded ? "Collapse FBT_TH" : "Expand FBT_TH"}
+              onClick={() => setCardExpanded("fbtTh", !fbtThExpanded)}
+            >
+              {fbtThExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
-        <div style={faceMetricGridStyle}>
-          <FaceMetricCard
-            title="FBT target"
-            value={formatOneDecimalNumber(fbtTarget)}
-            formula="CWV * (FBT_TH / FDY)"
-            detail={`CWV ${formatComputedNumber(cwv)} / FBT_TH ${formatComputedNumber(fbtTh)} / FDY ${formatComputedNumber(fdy)}`}
-          />
-          <FaceMetricCard
-            title="FaceProb"
-            value={formatComputedNumber(faceProb)}
-            formula={FACE_PROB_KEYS.join(" / ")}
-            detail="Back scene 权重，1024 base"
-          />
-          <FaceMetricCard
-            title="Normal Target"
-            value={formatComputedNumber(normalTarget)}
-            formula={FACE_NORMAL_TARGET_KEY}
-            detail="Normal AE target"
-          />
-        </div>
+        {fbtThExpanded && <>
+          <div style={faceFormulaRowStyle}>
+            <span>
+              OETH {formatOneDecimalNumber(oethInterpolated)} / FDMINTH {formatOneDecimalNumber(fdMinThInterpolated)} / FDTH {formatOneDecimalNumber(fdThInterpolated)} / PURE_TARGET {formatOneDecimalNumber(pureTarget)}
+            </span>
+            <strong style={faceFormulaResultStyle}>FaceOE_TAR {formatOneDecimalNumber(faceOeTar)}</strong>
+          </div>
+          <div style={faceFbtGroupStackStyle}>
+            <FaceFbtTableGroup
+              cardId="fdThGroup"
+              title="FDTH"
+              tables={[
+                { tableKey: "fdTh", title: "fd_th_tbl", source: currentSource?.fdTh ?? null, result: fdThInterpolated },
+                { tableKey: "nsFdTh", title: "ns_fd_th_tbl", source: currentSource?.nsFdTh ?? null, result: nsFdThInterpolated },
+              ]}
+              metricLabel="FDTH"
+              tomlValue={fdThToml}
+              bv={bv}
+              dr={dr}
+              expanded={fdThGroupExpanded}
+              editable={canEdit}
+              onExpandedChange={(expanded) => setCardExpanded("fdThGroup", expanded)}
+              onCellPreview={previewCell}
+              onCellCommit={updateCell}
+              onSourceJump={onSourceJump}
+            />
+            <FaceFbtTableGroup
+              cardId="fdMinThGroup"
+              title="FDMINTH"
+              tables={[
+                { tableKey: "fdMinTh", title: "fd_minth_tbl", source: currentSource?.fdMinTh ?? null, result: fdMinThInterpolated },
+                { tableKey: "nsFdMinTh", title: "ns_fd_minth_tbl", source: currentSource?.nsFdMinTh ?? null, result: nsFdMinThInterpolated },
+              ]}
+              metricLabel="FDMINTH"
+              tomlValue={fdMinThToml}
+              bv={bv}
+              dr={dr}
+              expanded={fdMinThGroupExpanded}
+              editable={canEdit}
+              onExpandedChange={(expanded) => setCardExpanded("fdMinThGroup", expanded)}
+              onCellPreview={previewCell}
+              onCellCommit={updateCell}
+              onSourceJump={onSourceJump}
+            />
+            <FaceFbtTableGroup
+              cardId="oethGroup"
+              title="OETH"
+              tables={[
+                { tableKey: "oeth", title: "fd_oeth_tbl", source: currentSource?.oeth ?? null, result: oethInterpolated },
+                { tableKey: "nsOeth", title: "ns_fd_oeth_tbl", source: currentSource?.nsOeth ?? null, result: nsOethInterpolated },
+              ]}
+              metricLabel="OETH"
+              tomlValue={oethToml}
+              bv={bv}
+              dr={dr}
+              expanded={oethGroupExpanded}
+              editable={canEdit}
+              onExpandedChange={(expanded) => setCardExpanded("oethGroup", expanded)}
+              onCellPreview={previewCell}
+              onCellCommit={updateCell}
+              onSourceJump={onSourceJump}
+            />
+          </div>
+        </>}
       </section>
     </div>
   );
@@ -5090,6 +5587,258 @@ function FaceMetricCard({
       <div style={faceMetricFormulaStyle}>{formula}</div>
       <div style={faceMetricDetailStyle}>{detail}</div>
     </div>
+  );
+}
+
+function FaceFbtTableGroup({
+  cardId,
+  title,
+  tables,
+  metricLabel,
+  tomlValue,
+  bv,
+  dr,
+  expanded,
+  editable,
+  onExpandedChange,
+  onCellPreview,
+  onCellCommit,
+  onSourceJump,
+}: {
+  cardId: FaceMetricCardId;
+  title: string;
+  tables: FaceFbtTableItem[];
+  metricLabel: string;
+  tomlValue: number;
+  bv: number;
+  dr: number;
+  expanded: boolean;
+  editable: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onCellPreview?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => void;
+  onCellCommit?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  return (
+    <section id={`face-card-${cardId}`} style={faceFbtGroupCardStyle}>
+      <div style={faceCardHeaderBarStyle}>
+        <div style={thresholdTitleStyle}>{title}</div>
+        <div style={faceCardHeaderActionsStyle}>
+          <strong style={faceFormulaResultStyle}>
+            {metricLabel}: {formatComputedNumber(tomlValue)} | {formatOneDecimalNumber(tables[0]?.result ?? NaN)}
+          </strong>
+          <button
+            type="button"
+            style={sourceButtonStyle(true)}
+            title={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            onClick={() => onExpandedChange(!expanded)}
+          >
+            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div style={faceDualTableGridStyle}>
+          {tables.map((table) => (
+            <FaceBvDrTableCard
+              key={table.tableKey}
+              tableKey={table.tableKey}
+              title={table.title}
+              source={table.source}
+              bv={bv}
+              dr={dr}
+              result={table.result}
+              editable={editable}
+              onCellPreview={onCellPreview}
+              onCellCommit={onCellCommit}
+              onSourceJump={onSourceJump}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FaceBvDrTableCard({
+  tableKey,
+  title,
+  source,
+  bv,
+  dr,
+  result,
+  editable,
+  onCellPreview,
+  onCellCommit,
+  onSourceJump,
+}: {
+  tableKey: FaceFbtTableKey;
+  title: string;
+  source: FaceBvDrTableSource | null;
+  bv: number;
+  dr: number;
+  result: number;
+  editable: boolean;
+  onCellPreview?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => void;
+  onCellCommit?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const rowSelection = source ? boundsForTableAxis(bv, source.rowHeaders) : { points: [] };
+  const columnSelection = source ? boundsForTableAxis(dr, source.columnHeaders) : { points: [] };
+  const activeRows = new Set(rowSelection.points.map((point) => point.index));
+  const activeColumns = new Set(columnSelection.points.map((point) => point.index));
+  const sourcePaths = source
+    ? [source.valuePath, source.columnHeaderPath, source.rowHeaderPath]
+    : [];
+  const canJumpToSource = Boolean(onSourceJump && sourcePaths.length > 0);
+  const canEdit = editable && Boolean(source);
+
+  return (
+    <div style={faceBvDrCardStyle}>
+      <div style={faceBvDrCardHeaderStyle}>
+        <div style={faceBvDrTitleStyle}>
+          <span>{title}</span>
+          <strong>{formatOneDecimalNumber(result)}</strong>
+        </div>
+        <button
+          type="button"
+          style={groupSourceButtonStyle(canJumpToSource)}
+          title={`Jump to ${title} source`}
+          aria-label={`Jump to ${title} source`}
+          disabled={!canJumpToSource}
+          onClick={() => canJumpToSource && onSourceJump?.(`Face.${title}`, {
+            paths: sourcePaths,
+            context: 4,
+            jump_to: "first",
+            highlight: "ranges",
+          })}
+        >
+          <TableLink24Regular className="h-4 w-4" />
+        </button>
+      </div>
+      {source ? (
+        <div style={faceBvDrTableScrollStyle}>
+          <div style={faceBvDrTableStyle(source.columnHeaders.length)}>
+            <div style={faceBvDrCornerCellStyle}>BV/DR</div>
+            {source.columnHeaders.map((value, columnIndex) => {
+              const field = source.columnHeaderFields[columnIndex] ?? null;
+              const target: FaceBvDrCellTarget = { kind: "columnHeader", columnIndex };
+              return (
+                <FaceBvDrEditableCell
+                  key={`${title}:dr:${columnIndex}`}
+                  value={field?.value ?? formatComputedNumber(value)}
+                  editable={canEdit && Boolean(field)}
+                  active={activeColumns.has(columnIndex)}
+                  ariaLabel={`${title}.columnHeader.${columnIndex}${field ? `.${field.path}` : ""}`}
+                  variant="columnHeader"
+                  onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
+                  onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
+                  onSourceJump={field && onSourceJump
+                    ? () => onSourceJump(`Face.${title}.columnHeader`, {
+                        paths: [field.path],
+                        jump_to: "first",
+                        highlight: "ranges",
+                      })
+                    : undefined}
+                />
+              );
+            })}
+            {source.rowHeaders.map((rowValue, rowIndex) => {
+              const rowField = source.rowHeaderFields[rowIndex] ?? null;
+              const rowTarget: FaceBvDrCellTarget = { kind: "rowHeader", rowIndex };
+              return (
+                <Fragment key={`${title}:row:${rowIndex}`}>
+                  <FaceBvDrEditableCell
+                    value={rowField?.value ?? formatComputedNumber(rowValue)}
+                    editable={canEdit && Boolean(rowField)}
+                    active={activeRows.has(rowIndex)}
+                    ariaLabel={`${title}.rowHeader.${rowIndex}${rowField ? `.${rowField.path}` : ""}`}
+                    variant="rowHeader"
+                    onPreview={(nextValue) => onCellPreview?.(tableKey, rowTarget, nextValue)}
+                    onCommit={(nextValue) => onCellCommit?.(tableKey, rowTarget, nextValue)}
+                    onSourceJump={rowField && onSourceJump
+                      ? () => onSourceJump(`Face.${title}.rowHeader`, {
+                          paths: [rowField.path],
+                          jump_to: "first",
+                          highlight: "ranges",
+                        })
+                      : undefined}
+                  />
+                  {source.columnHeaders.map((_, columnIndex) => {
+                    const field = source.valueFields[rowIndex]?.[columnIndex] ?? null;
+                    const value = source.values[rowIndex]?.[columnIndex] ?? NaN;
+                    const active = activeRows.has(rowIndex) && activeColumns.has(columnIndex);
+                    const target: FaceBvDrCellTarget = { kind: "value", rowIndex, columnIndex };
+                    return (
+                      <FaceBvDrEditableCell
+                        key={`${title}:cell:${rowIndex}:${columnIndex}`}
+                        value={field?.value ?? formatComputedNumber(value)}
+                        editable={canEdit && Boolean(field)}
+                        active={active}
+                        ariaLabel={`${title}.value.${rowIndex}.${columnIndex}${field ? `.${field.path}` : ""}`}
+                        variant="value"
+                        onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
+                        onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
+                        onSourceJump={field && onSourceJump
+                          ? () => onSourceJump(`Face.${title}.value`, {
+                              paths: [field.path],
+                              jump_to: "first",
+                              highlight: "ranges",
+                            })
+                          : undefined}
+                      />
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div style={faceBvDrEmptyStyle}>No source table</div>
+      )}
+    </div>
+  );
+}
+
+function FaceBvDrEditableCell({
+  value,
+  editable,
+  active,
+  ariaLabel,
+  variant,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: {
+  value: string;
+  editable: boolean;
+  active: boolean;
+  ariaLabel: string;
+  variant: "columnHeader" | "rowHeader" | "value";
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}) {
+  const baseStyle = variant === "columnHeader"
+    ? hsDarkAreaColumnHeaderStyle(active)
+    : variant === "rowHeader"
+      ? hsDarkAreaRowHeaderStyle(active)
+      : hsDarkAreaDataCellStyle(active);
+
+  return (
+    <EditableNumberTableCell
+      value={value}
+      editable={editable}
+      active={active}
+      ariaLabel={ariaLabel}
+      frameStyle={({ focused }) => editableCellFrameStyle(baseStyle, focused)}
+      inputStyle={({ editable: cellEditable }) => hsWeightCellInputStyle(cellEditable)}
+      onPreview={onPreview}
+      onCommit={onCommit}
+      onSourceJump={onSourceJump}
+    />
   );
 }
 
@@ -7790,6 +8539,26 @@ function interpolateHsAreaSource(source: HsAreaSource, bv: number, axisValue: nu
   return weightTotal > 0 ? total / weightTotal : NaN;
 }
 
+function interpolateFaceBvDrTableSource(source: FaceBvDrTableSource, bv: number, dr: number): number {
+  if (!Number.isFinite(bv) || !Number.isFinite(dr)) return NaN;
+  const rowBounds = boundsForTableAxis(bv, source.rowHeaders);
+  const columnBounds = boundsForTableAxis(dr, source.columnHeaders);
+  let total = 0;
+  let weightTotal = 0;
+
+  for (const rowPoint of rowBounds.points) {
+    for (const columnPoint of columnBounds.points) {
+      const value = source.values[rowPoint.index]?.[columnPoint.index] ?? NaN;
+      if (!Number.isFinite(value)) continue;
+      const weight = rowPoint.weight * columnPoint.weight;
+      total += value * weight;
+      weightTotal += weight;
+    }
+  }
+
+  return weightTotal > 0 ? total / weightTotal : NaN;
+}
+
 function locateHsAreaSelection(source: HsAreaSource | null, bv: number, axisValue: number): HsAreaSelection {
   if (!source) return { rowIndexes: new Set(), columnIndexes: new Set() };
   const rowBounds = boundsForTableAxis(bv, source.rowHeaders);
@@ -8749,6 +9518,11 @@ function formatInputNumber(value: number): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function limitNumber(value: number, low: number, high: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(low) || !Number.isFinite(high)) return NaN;
+  return clamp(value, Math.min(low, high), Math.max(low, high));
 }
 
 function nsProbabilityReadoutBounds(
@@ -11841,6 +12615,114 @@ const faceMetricDetailStyle: CSSProperties = {
   fontSize: 11,
   lineHeight: "16px",
   overflowWrap: "anywhere",
+};
+
+const faceCardHeaderBarStyle: CSSProperties = {
+  ...thresholdHeaderStyle,
+  justifyContent: "space-between",
+};
+
+const faceCardHeaderActionsStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 10,
+  minWidth: 0,
+};
+
+const faceDualTableGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 480px), 1fr))",
+  gap: 12,
+  alignItems: "start",
+  minWidth: 0,
+  padding: 12,
+  background: "var(--colorNeutralBackground1)",
+};
+
+const faceFbtGroupStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  minWidth: 0,
+};
+
+const faceFbtGroupCardStyle: CSSProperties = {
+  ...thresholdCardStyle,
+  margin: 0,
+};
+
+const faceBvDrCardStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+};
+
+const faceBvDrCardHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minHeight: 36,
+  padding: "0 10px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))",
+};
+
+const faceBvDrTitleStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 8,
+  minWidth: 0,
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const faceBvDrTableScrollStyle: CSSProperties = {
+  overflow: "visible",
+  minWidth: 0,
+  padding: 10,
+};
+
+function faceBvDrTableStyle(columnCount: number): CSSProperties {
+  const normalizedColumnCount = Math.max(1, columnCount);
+  return {
+    display: "grid",
+    gridTemplateColumns: `minmax(48px, 0.9fr) repeat(${normalizedColumnCount}, minmax(0, 1fr))`,
+    width: "100%",
+    minWidth: 0,
+    border: HS_WEIGHT_FRAME_BORDER,
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "var(--colorNeutralBackground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: normalizedColumnCount > 8 ? 10 : 11,
+  };
+}
+
+const faceBvDrCornerCellStyle: CSSProperties = {
+  minWidth: 0,
+  minHeight: 28,
+  padding: "6px 7px",
+  borderRight: HS_WEIGHT_MAJOR_BORDER,
+  borderBottom: HS_WEIGHT_MAJOR_BORDER,
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))",
+  color: "var(--colorNeutralForeground1)",
+  fontWeight: 900,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const faceBvDrEmptyStyle: CSSProperties = {
+  minHeight: 86,
+  padding: 12,
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 12,
 };
 
 const sourceSectionHeaderStyle: CSSProperties = {

@@ -28,6 +28,7 @@ const DEFAULT: Isp6sAeVisual = {
   chart_hs_card_collapsed:     [],
   chart_ns_card_order:         ["nsTarget", "nsProb", "nsNorT", "nsBT", "nsDT"],
   chart_ns_card_collapsed:     [],
+  chart_face_card_collapsed:   [],
   chart_main_t_mid_chart_mode: "thd",
   chart_main_t_mid_chart_source: "mid",
   chart_main_t_mid_readout_mode: "value",
