@@ -395,6 +395,14 @@ const FACE_FBT_DR_KEY = "AE_TAG_FBT_DR";
 const FACE_FBT_FDTH_KEY = "AE_TAG_FBT_FDTH";
 const FACE_FBT_FDMINTH_KEY = "AE_TAG_FBT_FDMINTH";
 const FACE_FBT_OETH_KEY = "AE_TAG_FBT_OETH";
+const FACE_FLT_FDY_KEY = "AE_TAG_FLT_FDY";
+const FACE_FLT_FDSZ_RA_KEY = "AE_TAG_FLT_FDSZ_RA";
+const FACE_FLT_OE_SYS_KEY = "AE_TAG_FLT_OE_SYS";
+const FACE_FLT_DR_KEY = "AE_TAG_FLT_DR";
+const FACE_FLT_FDTH_KEY = "AE_TAG_FLT_FDTH";
+const FACE_FLT_FDMINTH_KEY = "AE_TAG_FLT_FDMINTH";
+const FACE_FLT_OETH_KEY = "AE_TAG_FLT_OETH";
+const FACE_LINK_CWR_STABLE_KEY = "AE_TAG_LINK_FACE_CWR_STABLE";
 const FACE_FBT_FD_ROW_HEADER_PATH = "[0][4][1][17]" as const;
 const FACE_FBT_FD_DR_HEADER_PATH = "[0][4][1][20]" as const;
 const FACE_FBT_FDTH_TABLE_PATH = "[0][4][1][22]" as const;
@@ -406,6 +414,16 @@ const FACE_FBT_NS_DR_HEADER_PATH = "[0][4][1][27]" as const;
 const FACE_FBT_NS_OETH_TABLE_PATH = "[0][4][1][28]" as const;
 const FACE_FBT_NS_FDTH_TABLE_PATH = "[0][4][1][29]" as const;
 const FACE_FBT_NS_FDMINTH_TABLE_PATH = "[0][4][1][30]" as const;
+const FACE_FLT_BV_HEADER_PATH = "[0][4][1][31]" as const;
+const FACE_FLT_DR_HEADER_PATH = "[0][4][1][34]" as const;
+const FACE_FLT_OETH_TABLE_PATH = "[0][4][1][35]" as const;
+const FACE_FLT_FDTH_TABLE_PATH = "[0][4][1][36]" as const;
+const FACE_FLT_FDMINTH_TABLE_PATH = "[0][4][1][37]" as const;
+const FACE_FLT_NS_BV_HEADER_PATH = "[0][4][1][38]" as const;
+const FACE_FLT_NS_DR_HEADER_PATH = "[0][4][1][41]" as const;
+const FACE_FLT_NS_OETH_TABLE_PATH = "[0][4][1][42]" as const;
+const FACE_FLT_NS_FDTH_TABLE_PATH = "[0][4][1][43]" as const;
+const FACE_FLT_NS_FDMINTH_TABLE_PATH = "[0][4][1][44]" as const;
 const FACE_METRIC_CARD_ORDER: FaceMetricCardId[] = [
   "backSceneTarget",
   "fbtTh",
@@ -787,6 +805,7 @@ export function ChartMapMode({
   }, [focusTarget, setTab]);
 
   const sourceKey = useMemo(() => tab, [tab]);
+  const isFaceTab = tab === "Face" || tab === "Face_FLT";
   const sourceIdentity = useMemo(
     () => filePath ? `${filePath}\u0000${sourceRevision ?? 0}` : null,
     [filePath, sourceRevision],
@@ -880,6 +899,38 @@ export function ChartMapMode({
   );
   const faceFbtOethValue = useMemo(
     () => readTomlValue(tomlData, FACE_FBT_OETH_KEY),
+    [tomlData],
+  );
+  const faceFltFdyValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_FDY_KEY),
+    [tomlData],
+  );
+  const faceFltFdszRaValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_FDSZ_RA_KEY),
+    [tomlData],
+  );
+  const faceFltOeSysValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_OE_SYS_KEY),
+    [tomlData],
+  );
+  const faceFltDrValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_DR_KEY),
+    [tomlData],
+  );
+  const faceFltFdThValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_FDTH_KEY),
+    [tomlData],
+  );
+  const faceFltFdMinThValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_FDMINTH_KEY),
+    [tomlData],
+  );
+  const faceFltOethValue = useMemo(
+    () => readTomlValue(tomlData, FACE_FLT_OETH_KEY),
+    [tomlData],
+  );
+  const faceLinkCwrStableValue = useMemo(
+    () => readTomlValue(tomlData, FACE_LINK_CWR_STABLE_KEY),
     [tomlData],
   );
   const hsCwvValue = useMemo(
@@ -1145,7 +1196,7 @@ export function ChartMapMode({
         setNsNorTSource({ identity: null, source: null });
         setNsBTSource({ identity: null, source: null });
       }
-      if (tab === "Face") {
+      if (isFaceTab) {
         setFaceFbtSource({ identity: null, source: null });
       }
       if (tab === "HS") {
@@ -1207,8 +1258,8 @@ export function ChartMapMode({
       if (tab === "Touch") {
         touchTarget = await loadTouchTargetSource(filePath);
       }
-      if (tab === "Face") {
-        faceFbt = await loadFaceFbtSource(filePath);
+      if (isFaceTab) {
+        faceFbt = await loadFaceFbtSource(filePath, tab === "Face_FLT");
       }
       let nextSections: ChartSection[] = [];
       if (tab === "ABL") {
@@ -1240,7 +1291,7 @@ export function ChartMapMode({
           setNsNorTSource({ identity: sourceIdentity, source: nsNorT });
           setNsBTSource({ identity: sourceIdentity, source: nsBT });
         }
-        if (tab === "Face") {
+        if (isFaceTab) {
           setFaceFbtSource({ identity: sourceIdentity, source: faceFbt });
         }
         if (tab === "HS") {
@@ -1271,7 +1322,7 @@ export function ChartMapMode({
           setNsNorTSource({ identity: null, source: null });
           setNsBTSource({ identity: null, source: null });
         }
-        if (tab === "Face") {
+        if (isFaceTab) {
           setFaceFbtSource({ identity: null, source: null });
         }
         if (tab === "HS") {
@@ -1290,7 +1341,7 @@ export function ChartMapMode({
     return () => {
       cancelled = true;
     };
-  }, [filePath, schema, sourceIdentity, sourceKey, sourceRevision, tab]);
+  }, [filePath, isFaceTab, schema, sourceIdentity, sourceKey, sourceRevision, tab]);
 
   const setMainTCardExpanded = (cardId: MainTMetricCardId, expanded: boolean) => {
     const collapsed = new Set(mainTCardCollapsedIds);
@@ -1780,23 +1831,25 @@ export function ChartMapMode({
             />
           )}
 
-          {tab === "Face" && (
+          {isFaceTab && (
             <FaceTabContent
               source={currentFaceFbtSource}
+              fltMode={tab === "Face_FLT"}
               bvValue={imageBvValue}
               cwvValue={faceCwvValue}
               fbtThValue={faceFbtThValue}
-              fdyValue={faceFbtFdyValue}
-              faceProbValue={faceProbValue}
+              fdyValue={tab === "Face_FLT" ? faceFltFdyValue : faceFbtFdyValue}
+              faceProbValue={tab === "Face_FLT" ? faceFltFdszRaValue : faceProbValue}
+              nsProbValue={nsProbValue}
               normalTargetValue={faceNormalTargetValue}
-              stableValue={facePureAeCwrStableValue}
-              oeSysValue={faceFbtOeSysValue}
+              stableValue={tab === "Face_FLT" ? faceLinkCwrStableValue : facePureAeCwrStableValue}
+              oeSysValue={tab === "Face_FLT" ? faceFltOeSysValue : faceFbtOeSysValue}
               fbtTargetValue={faceFbtTargetValue}
               fddrRaValue={faceFbtFddrRaValue}
-              drValue={faceFbtDrValue}
-              fdThValue={faceFbtFdThValue}
-              fdMinThValue={faceFbtFdMinThValue}
-              oethValue={faceFbtOethValue}
+              drValue={tab === "Face_FLT" ? faceFltDrValue : faceFbtDrValue}
+              fdThValue={tab === "Face_FLT" ? faceFltFdThValue : faceFbtFdThValue}
+              fdMinThValue={tab === "Face_FLT" ? faceFltFdMinThValue : faceFbtFdMinThValue}
+              oethValue={tab === "Face_FLT" ? faceFltOethValue : faceFbtOethValue}
               sourceDraftText={sourceDraftText}
               onSourceDraftTextChange={onSourceDraftTextChange}
               collapsedIds={visual.chart_face_card_collapsed}
@@ -1805,7 +1858,7 @@ export function ChartMapMode({
             />
           )}
 
-          {tab !== "HS" && tab !== "NS" && tab !== "Touch" && tab !== "ABL" && tab !== "Face" && sections.map((section) => (
+          {tab !== "HS" && tab !== "NS" && tab !== "Touch" && tab !== "ABL" && !isFaceTab && sections.map((section) => (
             <section key={section.id} style={sourceSectionStyle}>
               <div style={sourceSectionHeaderStyle}>
                 <span style={sourceSectionTitleStyle}>{section.title}</span>
@@ -2320,14 +2373,18 @@ async function loadHsAreaSource(filePath: string, config: HsAreaSourceConfig): P
   };
 }
 
-async function loadFaceFbtSource(filePath: string): Promise<FaceFbtSource> {
+async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<FaceFbtSource> {
+  const fdColumnHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_DR_HEADER_PATH;
+  const fdRowHeaderPath = fltMode ? FACE_FLT_DR_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
+  const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
+  const nsRowHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
   const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth] = await Promise.all([
-    loadFaceBvDrTableSource(filePath, "fd_th_tbl", FACE_FBT_FDTH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
-    loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", FACE_FBT_NS_FDTH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FD_ROW_HEADER_PATH),
-    loadFaceBvDrTableSource(filePath, "fd_minth_tbl", FACE_FBT_FDMINTH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
-    loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", FACE_FBT_NS_FDMINTH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
-    loadFaceBvDrTableSource(filePath, "fd_oeth_tbl", FACE_FBT_OETH_TABLE_PATH, FACE_FBT_FD_DR_HEADER_PATH, FACE_FBT_FD_ROW_HEADER_PATH),
-    loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", FACE_FBT_NS_OETH_TABLE_PATH, FACE_FBT_NS_DR_HEADER_PATH, FACE_FBT_NS_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "fd_th_tbl", fltMode ? FACE_FLT_FDTH_TABLE_PATH : FACE_FBT_FDTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
+    loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", fltMode ? FACE_FLT_NS_FDTH_TABLE_PATH : FACE_FBT_NS_FDTH_TABLE_PATH, nsColumnHeaderPath, nsRowHeaderPath),
+    loadFaceBvDrTableSource(filePath, "fd_minth_tbl", fltMode ? FACE_FLT_FDMINTH_TABLE_PATH : FACE_FBT_FDMINTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
+    loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", fltMode ? FACE_FLT_NS_FDMINTH_TABLE_PATH : FACE_FBT_NS_FDMINTH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "fd_oeth_tbl", fltMode ? FACE_FLT_OETH_TABLE_PATH : FACE_FBT_OETH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
+    loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", fltMode ? FACE_FLT_NS_OETH_TABLE_PATH : FACE_FBT_NS_OETH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH),
   ]);
   return {
     fdTh,
@@ -5308,11 +5365,13 @@ function formatAblRowLabel(label: string): string {
 
 function FaceTabContent({
   source,
+  fltMode,
   bvValue,
   cwvValue,
   fbtThValue,
   fdyValue,
   faceProbValue,
+  nsProbValue,
   normalTargetValue,
   stableValue,
   oeSysValue,
@@ -5329,11 +5388,13 @@ function FaceTabContent({
   onSourceJump,
 }: {
   source: FaceFbtSource | null;
+  fltMode: boolean;
   bvValue: string | null;
   cwvValue: string | null;
   fbtThValue: string | null;
   fdyValue: string | null;
   faceProbValue: string | null;
+  nsProbValue: string | null;
   normalTargetValue: string | null;
   stableValue: string | null;
   oeSysValue: string | null;
@@ -5369,6 +5430,7 @@ function FaceTabContent({
   const fbtTh = parseFiniteNumber(fbtThValue);
   const fdy = parseFiniteNumber(fdyValue);
   const faceProb = parseFiniteNumber(faceProbValue);
+  const nsProb = parseFiniteNumber(nsProbValue);
   const normalTarget = parseFiniteNumber(normalTargetValue);
   const stable = parseFiniteNumber(stableValue);
   const oeSys = parseFiniteNumber(oeSysValue);
@@ -5384,15 +5446,26 @@ function FaceTabContent({
   const nsFdMinThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.nsFdMinTh, bv, dr) : NaN;
   const fdThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.fdTh, bv, dr) : NaN;
   const nsFdThInterpolated = currentSource ? interpolateFaceBvDrTableSource(currentSource.nsFdTh, bv, dr) : NaN;
-  const faceOeTar = Number.isFinite(oethInterpolated) && Number.isFinite(fdThInterpolated) && Number.isFinite(oeSys) && oeSys !== 0
-    ? (oethInterpolated * fdThInterpolated) / oeSys
+  const computedOeth = blendFaceMetric(oethInterpolated, nsOethInterpolated, nsProb);
+  const computedFdMinTh = blendFaceMetric(fdMinThInterpolated, nsFdMinThInterpolated, nsProb);
+  const computedFdTh = blendFaceMetric(fdThInterpolated, nsFdThInterpolated, nsProb);
+  const faceOeTar = Number.isFinite(computedOeth) && Number.isFinite(computedFdTh) && Number.isFinite(oeSys) && oeSys !== 0
+    ? (computedOeth * computedFdTh) / oeSys
     : NaN;
-  const pureTarget = limitNumber(faceOeTar, fdMinThInterpolated, fdThInterpolated);
+  const pureTarget = limitNumber(faceOeTar, computedFdMinTh, computedFdTh);
   const computedFbtTarget = Number.isFinite(pureTarget) && Number.isFinite(fddrRa)
     ? (pureTarget * fddrRa) / 1024
     : NaN;
-  const fbtTarget = Number.isFinite(cwv) && Number.isFinite(fbtTh) && Number.isFinite(fdy) && fdy !== 0
-    ? cwv * (fbtTh / fdy)
+  const imageFaceOeTar = Number.isFinite(oethToml) && Number.isFinite(fdThToml) && Number.isFinite(oeSys) && oeSys !== 0
+    ? (fdThToml * oethToml) / oeSys
+    : NaN;
+  const imagePureTarget = limitNumber(imageFaceOeTar, fdMinThToml, fdThToml);
+  const imageFltTarget = Number.isFinite(imagePureTarget) && Number.isFinite(fddrRa)
+    ? (imagePureTarget * fddrRa) / 1024
+    : NaN;
+  const thresholdValue = fltMode ? computedFbtTarget : fbtTh;
+  const fbtTarget = Number.isFinite(cwv) && Number.isFinite(thresholdValue) && Number.isFinite(fdy) && fdy !== 0
+    ? cwv * (thresholdValue / fdy)
     : NaN;
   const backSceneTarget = Number.isFinite(fbtTarget) && Number.isFinite(faceProb) && Number.isFinite(normalTarget)
     ? (fbtTarget * faceProb + normalTarget * (1024 - faceProb)) / 1024
@@ -5434,17 +5507,23 @@ function FaceTabContent({
   const fdThGroupExpanded = !collapsed.has("fdThGroup");
   const fdMinThGroupExpanded = !collapsed.has("fdMinThGroup");
   const oethGroupExpanded = !collapsed.has("oethGroup");
+  const thresholdTitle = fltMode ? "FLT_TH" : "FBT_TH";
+  const targetTitle = fltMode ? "FLT_TARGET" : "FBT_TARGET";
+  const linkTargetTitle = fltMode ? "Face Link Target" : "Back Scene Target";
+  const weightTitle = fltMode ? "FDSZ_RA" : "FaceProb";
+  const weightKey = fltMode ? FACE_FLT_FDSZ_RA_KEY : FACE_PROB_KEYS.join(" / ");
+  const displayedTargetValue = fltMode ? imageFltTarget : fbtTargetValueNumber;
 
   return (
     <div style={faceTabGridStyle}>
       <section style={thresholdCardStyle}>
         <div style={thresholdHeaderStyle}>
-          <div style={thresholdTitleStyle}>Back Scene Target</div>
+          <div style={thresholdTitleStyle}>{linkTargetTitle}</div>
           <button
             type="button"
             style={sourceButtonStyle(true)}
-            title={backSceneExpanded ? "Collapse Back Scene Target" : "Expand Back Scene Target"}
-            aria-label={backSceneExpanded ? "Collapse Back Scene Target" : "Expand Back Scene Target"}
+            title={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
+            aria-label={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
             onClick={() => setCardExpanded("backSceneTarget", !backSceneExpanded)}
           >
             {backSceneExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
@@ -5452,23 +5531,25 @@ function FaceTabContent({
         </div>
         {backSceneExpanded && <>
           <div style={faceFormulaRowStyle}>
-            <span>Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
+            <span>{fltMode
+              ? "Face Link Target = (FLT Target * FDSZ_RA + Normal Target * (1024-FDSZ_RA)) / 1024"
+              : "Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
             <strong style={faceFormulaResultStyle}>
               {formatComputedNumber(stable)} | {formatOneDecimalNumber(backSceneTarget)}
             </strong>
           </div>
           <div style={faceMetricGridStyle}>
             <FaceMetricCard
-              title="FBT target"
+              title={fltMode ? "FLT Target" : "FBT target"}
               value={formatOneDecimalNumber(fbtTarget)}
-              formula="CWV * (FBT_TH / FDY)"
-              detail={`CWV ${formatComputedNumber(cwv)} / FBT_TH ${formatComputedNumber(fbtTh)} / FDY ${formatComputedNumber(fdy)}`}
+              formula={`CWV * (${thresholdTitle} / FDY)`}
+              detail={`CWV ${formatComputedNumber(cwv)} / ${thresholdTitle} ${formatOneDecimalNumber(thresholdValue)} / FDY ${formatComputedNumber(fdy)}`}
             />
             <FaceMetricCard
-              title="FaceProb"
+              title={weightTitle}
               value={formatComputedNumber(faceProb)}
-              formula={FACE_PROB_KEYS.join(" / ")}
-              detail="Back scene weight: 1024 base"
+              formula={weightKey}
+              detail={`${linkTargetTitle} weight: 1024 base`}
             />
             <FaceMetricCard
               title="Normal Target"
@@ -5482,16 +5563,16 @@ function FaceTabContent({
 
       <section style={thresholdCardStyle}>
         <div style={faceCardHeaderBarStyle}>
-          <div style={thresholdTitleStyle}>FBT_TH</div>
+          <div style={thresholdTitleStyle}>{thresholdTitle}</div>
           <div style={faceCardHeaderActionsStyle}>
             <strong style={faceFormulaResultStyle}>
-              FBT_TARGET: {formatComputedNumber(fbtTargetValueNumber)} | {formatOneDecimalNumber(computedFbtTarget)}
+              {targetTitle}: {formatOneDecimalNumber(displayedTargetValue)} | {formatOneDecimalNumber(computedFbtTarget)}
             </strong>
             <button
               type="button"
               style={sourceButtonStyle(true)}
-              title={fbtThExpanded ? "Collapse FBT_TH" : "Expand FBT_TH"}
-              aria-label={fbtThExpanded ? "Collapse FBT_TH" : "Expand FBT_TH"}
+              title={fbtThExpanded ? `Collapse ${thresholdTitle}` : `Expand ${thresholdTitle}`}
+              aria-label={fbtThExpanded ? `Collapse ${thresholdTitle}` : `Expand ${thresholdTitle}`}
               onClick={() => setCardExpanded("fbtTh", !fbtThExpanded)}
             >
               {fbtThExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
@@ -5501,7 +5582,7 @@ function FaceTabContent({
         {fbtThExpanded && <>
           <div style={faceFormulaRowStyle}>
             <span>
-              OETH {formatOneDecimalNumber(oethInterpolated)} / FDMINTH {formatOneDecimalNumber(fdMinThInterpolated)} / FDTH {formatOneDecimalNumber(fdThInterpolated)} / PURE_TARGET {formatOneDecimalNumber(pureTarget)}
+              OETH {formatOneDecimalNumber(computedOeth)} / FDMINTH {formatOneDecimalNumber(computedFdMinTh)} / FDTH {formatOneDecimalNumber(computedFdTh)} / PURE_TARGET {formatOneDecimalNumber(pureTarget)}
             </span>
             <strong style={faceFormulaResultStyle}>FaceOE_TAR {formatOneDecimalNumber(faceOeTar)}</strong>
           </div>
@@ -5515,6 +5596,7 @@ function FaceTabContent({
               ]}
               metricLabel="FDTH"
               tomlValue={fdThToml}
+              computedValue={computedFdTh}
               bv={bv}
               dr={dr}
               expanded={fdThGroupExpanded}
@@ -5533,6 +5615,7 @@ function FaceTabContent({
               ]}
               metricLabel="FDMINTH"
               tomlValue={fdMinThToml}
+              computedValue={computedFdMinTh}
               bv={bv}
               dr={dr}
               expanded={fdMinThGroupExpanded}
@@ -5551,6 +5634,7 @@ function FaceTabContent({
               ]}
               metricLabel="OETH"
               tomlValue={oethToml}
+              computedValue={computedOeth}
               bv={bv}
               dr={dr}
               expanded={oethGroupExpanded}
@@ -5596,6 +5680,7 @@ function FaceFbtTableGroup({
   tables,
   metricLabel,
   tomlValue,
+  computedValue,
   bv,
   dr,
   expanded,
@@ -5610,6 +5695,7 @@ function FaceFbtTableGroup({
   tables: FaceFbtTableItem[];
   metricLabel: string;
   tomlValue: number;
+  computedValue: number;
   bv: number;
   dr: number;
   expanded: boolean;
@@ -5625,7 +5711,7 @@ function FaceFbtTableGroup({
         <div style={thresholdTitleStyle}>{title}</div>
         <div style={faceCardHeaderActionsStyle}>
           <strong style={faceFormulaResultStyle}>
-            {metricLabel}: {formatComputedNumber(tomlValue)} | {formatOneDecimalNumber(tables[0]?.result ?? NaN)}
+            {metricLabel}: {formatComputedNumber(tomlValue)} | {formatOneDecimalNumber(computedValue)}
           </strong>
           <button
             type="button"
@@ -9523,6 +9609,11 @@ function clamp(value: number, min: number, max: number): number {
 function limitNumber(value: number, low: number, high: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(low) || !Number.isFinite(high)) return NaN;
   return clamp(value, Math.min(low, high), Math.max(low, high));
+}
+
+function blendFaceMetric(normalValue: number, nsValue: number, nsProb: number): number {
+  if (!Number.isFinite(normalValue) || !Number.isFinite(nsValue) || !Number.isFinite(nsProb)) return NaN;
+  return (nsValue * nsProb + normalValue * (1024 - nsProb)) / 1024;
 }
 
 function nsProbabilityReadoutBounds(
