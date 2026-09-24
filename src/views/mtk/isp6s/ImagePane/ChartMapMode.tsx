@@ -2374,17 +2374,19 @@ async function loadHsAreaSource(filePath: string, config: HsAreaSourceConfig): P
 }
 
 async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<FaceFbtSource> {
-  const fdColumnHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_DR_HEADER_PATH;
-  const fdRowHeaderPath = fltMode ? FACE_FLT_DR_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
-  const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
-  const nsRowHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
+  // Face_FLT stores BV on the row axis and DR on the column axis; keep the
+  // Face table's axis convention (row = BV, column = DR) when loading it.
+  const fdColumnHeaderPath = fltMode ? FACE_FLT_DR_HEADER_PATH : FACE_FBT_FD_DR_HEADER_PATH;
+  const fdRowHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
+  const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
+  const nsRowHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
   const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth] = await Promise.all([
     loadFaceBvDrTableSource(filePath, "fd_th_tbl", fltMode ? FACE_FLT_FDTH_TABLE_PATH : FACE_FBT_FDTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", fltMode ? FACE_FLT_NS_FDTH_TABLE_PATH : FACE_FBT_NS_FDTH_TABLE_PATH, nsColumnHeaderPath, nsRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "fd_minth_tbl", fltMode ? FACE_FLT_FDMINTH_TABLE_PATH : FACE_FBT_FDMINTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
-    loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", fltMode ? FACE_FLT_NS_FDMINTH_TABLE_PATH : FACE_FBT_NS_FDMINTH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", fltMode ? FACE_FLT_NS_FDMINTH_TABLE_PATH : FACE_FBT_NS_FDMINTH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
     loadFaceBvDrTableSource(filePath, "fd_oeth_tbl", fltMode ? FACE_FLT_OETH_TABLE_PATH : FACE_FBT_OETH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
-    loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", fltMode ? FACE_FLT_NS_OETH_TABLE_PATH : FACE_FBT_NS_OETH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH),
+    loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", fltMode ? FACE_FLT_NS_OETH_TABLE_PATH : FACE_FBT_NS_OETH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH),
   ]);
   return {
     fdTh,
