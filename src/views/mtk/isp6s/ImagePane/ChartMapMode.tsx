@@ -270,6 +270,8 @@ type FaceBvDrCellTarget =
   | { kind: "columnHeader"; columnIndex: number }
   | { kind: "value"; rowIndex: number; columnIndex: number };
 
+type FaceProbCellTarget = { rowIndex: number; columnIndex: number };
+
 interface FaceBvDrTableSource {
   title: string;
   valuePath: string;
@@ -291,6 +293,18 @@ interface FaceFbtTableItem {
   result: number;
 }
 
+interface FaceProbTableRow {
+  label: string;
+  path: string;
+  values: string[];
+  fields: Array<FieldEntry | null>;
+}
+
+interface FaceProbSource {
+  rows: FaceProbTableRow[];
+  fields: FieldEntry[];
+}
+
 interface FaceFbtSource {
   fdTh: FaceBvDrTableSource;
   nsFdTh: FaceBvDrTableSource;
@@ -298,6 +312,7 @@ interface FaceFbtSource {
   nsFdMinTh: FaceBvDrTableSource;
   oeth: FaceBvDrTableSource;
   nsOeth: FaceBvDrTableSource;
+  faceProb: FaceProbSource;
   fields: FieldEntry[];
 }
 
@@ -387,7 +402,6 @@ const FACE_FBT_TH_KEYS = ["AE_TAG_FBT_TH", "AE_TAG_FBT_FDTH"] as const;
 const FACE_FBT_FDY_KEY = "AE_TAG_FBT_FDY";
 const FACE_PROB_KEYS = ["AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE"] as const;
 const FACE_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
-const FACE_PURE_AE_CWR_STABLE_KEY = "AE_TAG_PURE_AE_CWR_STABLE";
 const FACE_FBT_OE_SYS_KEY = "AE_TAG_FBT_OE_SYS";
 const FACE_FBT_TARGET_KEY = "AE_TAG_FBT_TARGET";
 const FACE_FBT_FDDR_RA_KEY = "AE_TAG_FBT_FDDR_RA";
@@ -402,7 +416,6 @@ const FACE_FLT_DR_KEY = "AE_TAG_FLT_DR";
 const FACE_FLT_FDTH_KEY = "AE_TAG_FLT_FDTH";
 const FACE_FLT_FDMINTH_KEY = "AE_TAG_FLT_FDMINTH";
 const FACE_FLT_OETH_KEY = "AE_TAG_FLT_OETH";
-const FACE_LINK_CWR_STABLE_KEY = "AE_TAG_LINK_FACE_CWR_STABLE";
 const FACE_FBT_FD_ROW_HEADER_PATH = "[0][4][1][17]" as const;
 const FACE_FBT_FD_DR_HEADER_PATH = "[0][4][1][20]" as const;
 const FACE_FBT_FDTH_TABLE_PATH = "[0][4][1][22]" as const;
@@ -424,6 +437,13 @@ const FACE_FLT_NS_DR_HEADER_PATH = "[0][4][1][41]" as const;
 const FACE_FLT_NS_OETH_TABLE_PATH = "[0][4][1][42]" as const;
 const FACE_FLT_NS_FDTH_TABLE_PATH = "[0][4][1][43]" as const;
 const FACE_FLT_NS_FDMINTH_TABLE_PATH = "[0][4][1][44]" as const;
+const FACE_PROB_TABLE_ROWS = [
+  { label: "BV", path: "[0][4][1][7]" },
+  { label: "sz_small", path: "[0][4][1][8]" },
+  { label: "sz_big", path: "[0][4][1][9]" },
+  { label: "loc_near", path: "[0][4][1][10]" },
+  { label: "loc_far", path: "[0][4][1][11]" },
+] as const;
 const FACE_METRIC_CARD_ORDER: FaceMetricCardId[] = [
   "backSceneTarget",
   "fbtTh",
@@ -869,10 +889,6 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
     [tomlData],
   );
-  const facePureAeCwrStableValue = useMemo(
-    () => readTomlValue(tomlData, FACE_PURE_AE_CWR_STABLE_KEY),
-    [tomlData],
-  );
   const faceFbtOeSysValue = useMemo(
     () => readTomlValue(tomlData, FACE_FBT_OE_SYS_KEY),
     [tomlData],
@@ -927,10 +943,6 @@ export function ChartMapMode({
   );
   const faceFltOethValue = useMemo(
     () => readTomlValue(tomlData, FACE_FLT_OETH_KEY),
-    [tomlData],
-  );
-  const faceLinkCwrStableValue = useMemo(
-    () => readTomlValue(tomlData, FACE_LINK_CWR_STABLE_KEY),
     [tomlData],
   );
   const hsCwvValue = useMemo(
@@ -1842,7 +1854,6 @@ export function ChartMapMode({
               faceProbValue={tab === "Face_FLT" ? faceFltFdszRaValue : faceProbValue}
               nsProbValue={nsProbValue}
               normalTargetValue={faceNormalTargetValue}
-              stableValue={tab === "Face_FLT" ? faceLinkCwrStableValue : facePureAeCwrStableValue}
               oeSysValue={tab === "Face_FLT" ? faceFltOeSysValue : faceFbtOeSysValue}
               fbtTargetValue={faceFbtTargetValue}
               fddrRaValue={faceFbtFddrRaValue}
@@ -2380,13 +2391,14 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
   const fdRowHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
   const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
   const nsRowHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
-  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth] = await Promise.all([
+  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth, faceProb] = await Promise.all([
     loadFaceBvDrTableSource(filePath, "fd_th_tbl", fltMode ? FACE_FLT_FDTH_TABLE_PATH : FACE_FBT_FDTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", fltMode ? FACE_FLT_NS_FDTH_TABLE_PATH : FACE_FBT_NS_FDTH_TABLE_PATH, nsColumnHeaderPath, nsRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "fd_minth_tbl", fltMode ? FACE_FLT_FDMINTH_TABLE_PATH : FACE_FBT_FDMINTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_minth_tbl", fltMode ? FACE_FLT_NS_FDMINTH_TABLE_PATH : FACE_FBT_NS_FDMINTH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FDMINTH_ROW_HEADER_PATH),
     loadFaceBvDrTableSource(filePath, "fd_oeth_tbl", fltMode ? FACE_FLT_OETH_TABLE_PATH : FACE_FBT_OETH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_oeth_tbl", fltMode ? FACE_FLT_NS_OETH_TABLE_PATH : FACE_FBT_NS_OETH_TABLE_PATH, nsColumnHeaderPath, fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH),
+    loadFaceProbSource(filePath),
   ]);
   return {
     fdTh,
@@ -2395,6 +2407,7 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
     nsFdMinTh,
     oeth,
     nsOeth,
+    faceProb,
     fields: [
       ...fdTh.fields,
       ...nsFdTh.fields,
@@ -2402,7 +2415,27 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
       ...nsFdMinTh.fields,
       ...oeth.fields,
       ...nsOeth.fields,
+      ...faceProb.fields,
     ].sort(compareFieldEntries),
+  };
+}
+
+async function loadFaceProbSource(filePath: string): Promise<FaceProbSource> {
+  const fieldGroups = await Promise.all(
+    FACE_PROB_TABLE_ROWS.map(({ path }) => loadFieldEntriesAtPath(filePath, path)),
+  );
+  const rows = FACE_PROB_TABLE_ROWS.map(({ label, path }, index) => {
+    const fields = numericFieldEntries(fieldGroups[index] ?? []);
+    return {
+      label,
+      path,
+      values: fields.map((field) => field.value),
+      fields,
+    };
+  });
+  return {
+    rows,
+    fields: fieldGroups.flat().sort(compareFieldEntries),
   };
 }
 
@@ -2458,6 +2491,7 @@ function rebuildFaceFbtFields(source: FaceFbtSource): FieldEntry[] {
     ...source.nsFdMinTh.fields,
     ...source.oeth.fields,
     ...source.nsOeth.fields,
+    ...source.faceProb.fields,
   ].sort(compareFieldEntries);
 }
 
@@ -2517,6 +2551,42 @@ function updateFaceBvDrTableSourceField(source: FaceBvDrTableSource, field: Fiel
   };
 }
 
+function getFaceProbTargetField(source: FaceProbSource, target: FaceProbCellTarget): FieldEntry | null {
+  return source.rows[target.rowIndex]?.fields[target.columnIndex] ?? null;
+}
+
+function previewFaceProbSourceTarget(
+  source: FaceProbSource,
+  target: FaceProbCellTarget,
+  value: string,
+): FaceProbSource {
+  const row = source.rows[target.rowIndex];
+  if (!row || target.columnIndex < 0 || target.columnIndex >= row.values.length) return source;
+  return {
+    ...source,
+    rows: source.rows.map((currentRow, rowIndex) => {
+      if (rowIndex !== target.rowIndex) return currentRow;
+      const values = [...currentRow.values];
+      values[target.columnIndex] = value;
+      return { ...currentRow, values };
+    }),
+  };
+}
+
+function updateFaceProbSourceField(source: FaceProbSource, field: FieldEntry, value: string): FaceProbSource {
+  const updateField = (candidate: FieldEntry | null): FieldEntry | null =>
+    candidate && sameFieldEntry(candidate, field) ? { ...candidate, value } : candidate;
+  return {
+    ...source,
+    rows: source.rows.map((row) => ({
+      ...row,
+      values: row.values.map((item, index) => sameFieldEntry(row.fields[index] ?? null, field) ? value : item),
+      fields: row.fields.map(updateField),
+    })),
+    fields: source.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+}
+
 function previewFaceFbtSourceTarget(
   source: FaceFbtSource,
   tableKey: FaceFbtTableKey,
@@ -2526,6 +2596,34 @@ function previewFaceFbtSourceTarget(
   const nextTable = previewFaceBvDrTableSourceTarget(source[tableKey], target, value);
   if (nextTable === source[tableKey]) return source;
   const nextSource = { ...source, [tableKey]: nextTable };
+  return {
+    ...nextSource,
+    fields: rebuildFaceFbtFields(nextSource),
+  };
+}
+
+function previewFaceFbtFaceProbSourceTarget(
+  source: FaceFbtSource,
+  target: FaceProbCellTarget,
+  value: string,
+): FaceFbtSource {
+  const nextFaceProb = previewFaceProbSourceTarget(source.faceProb, target, value);
+  if (nextFaceProb === source.faceProb) return source;
+  const nextSource = { ...source, faceProb: nextFaceProb };
+  return {
+    ...nextSource,
+    fields: rebuildFaceFbtFields(nextSource),
+  };
+}
+
+function updateFaceFbtFaceProbSourceField(
+  source: FaceFbtSource,
+  field: FieldEntry,
+  value: string,
+): FaceFbtSource {
+  const nextFaceProb = updateFaceProbSourceField(source.faceProb, field, value);
+  if (nextFaceProb === source.faceProb) return source;
+  const nextSource = { ...source, faceProb: nextFaceProb };
   return {
     ...nextSource,
     fields: rebuildFaceFbtFields(nextSource),
@@ -5375,7 +5473,6 @@ function FaceTabContent({
   faceProbValue,
   nsProbValue,
   normalTargetValue,
-  stableValue,
   oeSysValue,
   fbtTargetValue,
   fddrRaValue,
@@ -5398,7 +5495,6 @@ function FaceTabContent({
   faceProbValue: string | null;
   nsProbValue: string | null;
   normalTargetValue: string | null;
-  stableValue: string | null;
   oeSysValue: string | null;
   fbtTargetValue: string | null;
   fddrRaValue: string | null;
@@ -5434,7 +5530,6 @@ function FaceTabContent({
   const faceProb = parseFiniteNumber(faceProbValue);
   const nsProb = parseFiniteNumber(nsProbValue);
   const normalTarget = parseFiniteNumber(normalTargetValue);
-  const stable = parseFiniteNumber(stableValue);
   const oeSys = parseFiniteNumber(oeSysValue);
   const fbtTargetValueNumber = parseFiniteNumber(fbtTargetValue);
   const fddrRa = parseFiniteNumber(fddrRaValue);
@@ -5472,7 +5567,6 @@ function FaceTabContent({
   const backSceneTarget = Number.isFinite(fbtTarget) && Number.isFinite(faceProb) && Number.isFinite(normalTarget)
     ? (fbtTarget * faceProb + normalTarget * (1024 - faceProb)) / 1024
     : NaN;
-
   const setCardExpanded = (cardId: FaceMetricCardId, expanded: boolean) => {
     const next = new Set(collapsed);
     if (expanded) {
@@ -5504,6 +5598,26 @@ function FaceTabContent({
     return true;
   };
 
+  const previewFaceProbCell = (target: FaceProbCellTarget, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    setEditableSource((current) => current ? previewFaceFbtFaceProbSourceTarget(current, target, trimmed) : current);
+  };
+
+  const updateFaceProbCell = (target: FaceProbCellTarget, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const field = getFaceProbTargetField(editableSource.faceProb, target);
+    if (!field) return false;
+    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateFaceFbtFaceProbSourceField(current, field, trimmed) : current);
+    return true;
+  };
+
   const backSceneExpanded = !collapsed.has("backSceneTarget");
   const fbtThExpanded = !collapsed.has("fbtTh");
   const fdThGroupExpanded = !collapsed.has("fdThGroup");
@@ -5511,6 +5625,7 @@ function FaceTabContent({
   const oethGroupExpanded = !collapsed.has("oethGroup");
   const thresholdTitle = fltMode ? "FLT_TH" : "FBT_TH";
   const targetTitle = fltMode ? "FLT_TARGET" : "FBT_TARGET";
+  const targetFormulaTitle = fltMode ? "FLT Target" : "FBT target";
   const linkTargetTitle = fltMode ? "Face Link Target" : "Back Scene Target";
   const weightTitle = fltMode ? "FDSZ_RA" : "FaceProb";
   const weightKey = fltMode ? FACE_FLT_FDSZ_RA_KEY : FACE_PROB_KEYS.join(" / ");
@@ -5519,46 +5634,80 @@ function FaceTabContent({
   return (
     <div style={faceTabGridStyle}>
       <section style={thresholdCardStyle}>
-        <div style={thresholdHeaderStyle}>
+        <div style={faceCardHeaderBarStyle}>
           <div style={thresholdTitleStyle}>{linkTargetTitle}</div>
-          <button
-            type="button"
-            style={sourceButtonStyle(true)}
-            title={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
-            aria-label={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
-            onClick={() => setCardExpanded("backSceneTarget", !backSceneExpanded)}
-          >
-            {backSceneExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
-          </button>
+          <div style={faceCardHeaderActionsStyle}>
+            <strong style={faceFormulaResultStyle}>
+              {formatOneDecimalNumber(backSceneTarget)}
+            </strong>
+            <button
+              type="button"
+              style={sourceButtonStyle(true)}
+              title={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
+              aria-label={backSceneExpanded ? `Collapse ${linkTargetTitle}` : `Expand ${linkTargetTitle}`}
+              onClick={() => setCardExpanded("backSceneTarget", !backSceneExpanded)}
+            >
+              {backSceneExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
         {backSceneExpanded && <>
           <div style={faceFormulaRowStyle}>
-            <span>{fltMode
-              ? "Face Link Target = (FLT Target * FDSZ_RA + Normal Target * (1024-FDSZ_RA)) / 1024"
-              : "Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
-            <strong style={faceFormulaResultStyle}>
-              {formatComputedNumber(stable)} | {formatOneDecimalNumber(backSceneTarget)}
-            </strong>
+            <div style={faceFormulaTextStackStyle}>
+              <span>
+                {targetFormulaTitle} = CWV * ({thresholdTitle} / FDY) ={" "}
+                {formatComputedNumber(cwv)} * ({formatOneDecimalNumber(thresholdValue)} / {formatComputedNumber(fdy)}) ={" "}
+                {formatOneDecimalNumber(fbtTarget)}
+              </span>
+              <span>{fltMode
+                ? "Face Link Target = (FLT Target * FDSZ_RA + Normal Target * (1024-FDSZ_RA)) / 1024"
+                : "Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
+              <span style={faceFormulaSubstitutionStyle}>
+                Calculation: (
+                <strong style={faceFormulaEmphasisStyle}>{formatOneDecimalNumber(fbtTarget)}</strong>{" "}
+                * {formatComputedNumber(faceProb)} +{" "}
+                <strong style={faceFormulaEmphasisStyle}>{formatComputedNumber(normalTarget)}</strong>{" "}
+                * (1024 - {formatComputedNumber(faceProb)})
+                ) / 1024 ={" "}
+                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(backSceneTarget)}</strong>
+              </span>
+            </div>
           </div>
-          <div style={faceMetricGridStyle}>
-            <FaceMetricCard
-              title={fltMode ? "FLT Target" : "FBT target"}
-              value={formatOneDecimalNumber(fbtTarget)}
-              formula={`CWV * (${thresholdTitle} / FDY)`}
-              detail={`CWV ${formatComputedNumber(cwv)} / ${thresholdTitle} ${formatOneDecimalNumber(thresholdValue)} / FDY ${formatComputedNumber(fdy)}`}
-            />
-            <FaceMetricCard
-              title={weightTitle}
-              value={formatComputedNumber(faceProb)}
-              formula={weightKey}
-              detail={`${linkTargetTitle} weight: 1024 base`}
-            />
-            <FaceMetricCard
-              title="Normal Target"
-              value={formatComputedNumber(normalTarget)}
-              formula={FACE_NORMAL_TARGET_KEY}
-              detail="Normal AE target"
-            />
+          <div style={fltMode ? faceMetricGridStyle : faceProbMetricGridStyle}>
+            {fltMode && (
+              <FaceMetricCard
+                title="FLT Target"
+                value={formatOneDecimalNumber(fbtTarget)}
+                formula={`CWV * (${thresholdTitle} / FDY)`}
+                detail={`CWV ${formatComputedNumber(cwv)} / ${thresholdTitle} ${formatOneDecimalNumber(thresholdValue)} / FDY ${formatComputedNumber(fdy)}`}
+              />
+            )}
+            {fltMode && (
+              <FaceMetricCard
+                title={weightTitle}
+                value={formatComputedNumber(faceProb)}
+                formula={weightKey}
+                detail={`${linkTargetTitle} weight: 1024 base`}
+              />
+            )}
+            {fltMode && (
+              <FaceMetricCard
+                title="Normal Target"
+                value={formatComputedNumber(normalTarget)}
+                formula={FACE_NORMAL_TARGET_KEY}
+                detail="Normal AE target"
+              />
+            )}
+            {!fltMode && (
+              <FaceProbTableCard
+                source={currentSource?.faceProb ?? null}
+                bv={bv}
+                editable={canEdit}
+                onCellPreview={previewFaceProbCell}
+                onCellCommit={updateFaceProbCell}
+                onSourceJump={onSourceJump}
+              />
+            )}
           </div>
         </>}
       </section>
@@ -5673,6 +5822,131 @@ function FaceMetricCard({
       <div style={faceMetricFormulaStyle}>{formula}</div>
       <div style={faceMetricDetailStyle}>{detail}</div>
     </div>
+  );
+}
+
+function FaceProbTableCard({
+  source,
+  bv,
+  editable,
+  onCellPreview,
+  onCellCommit,
+  onSourceJump,
+}: {
+  source: FaceProbSource | null;
+  bv: number;
+  editable: boolean;
+  onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
+  onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+}) {
+  const rows = source?.rows ?? FACE_PROB_TABLE_ROWS.map(({ label, path }) => ({
+    label,
+    path,
+    values: [],
+    fields: [],
+  }));
+  const columnCount = Math.max(1, ...rows.map((row) => row.values.length));
+  const bvAxis = rows[0]?.values.map((value) => parseFiniteNumber(value)) ?? [];
+  const bvSelection = Number.isFinite(bv) ? boundsForTableAxis(bv, bvAxis) : { points: [] };
+  const activeColumns = selectFaceProbActiveColumns(bv, bvAxis, bvSelection.points);
+  const interpolatedValues = interpolateFaceProbRows(rows, bvSelection.points);
+  const resultText = interpolatedValues.map((value) => formatComputedNumber(value)).join("|");
+  const sourcePaths = FACE_PROB_TABLE_ROWS.map(({ path }) => path);
+  const canJumpToSource = Boolean(onSourceJump);
+  const canEdit = editable && Boolean(source);
+
+  return (
+    <div style={faceProbTableCardStyle}>
+      <div style={faceProbTableHeaderStyle}>
+        <span style={faceProbTableTitleStyle}>FaceProb</span>
+        <div style={faceProbTableHeaderActionsStyle}>
+          <strong title={resultText} style={faceProbTableHeaderResultStyle}>{resultText}</strong>
+          <button
+          type="button"
+          title="跳转到 FaceProb 源码"
+          aria-label="跳转到 FaceProb 源码"
+          disabled={!canJumpToSource}
+          onClick={() => onSourceJump?.("Face.FaceProb", {
+            paths: sourcePaths,
+            context: 4,
+            jump_to: "first",
+            highlight: "ranges",
+          })}
+          style={groupSourceButtonStyle(canJumpToSource)}
+        >
+          <Code24Regular className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div style={faceProbTableBodyStyle}>
+        <div style={faceProbTableScrollStyle}>
+          <div style={faceProbTableStyle(columnCount)}>
+            {rows.map((row, rowIndex) => (
+              <Fragment key={row.path}>
+                <div title={row.path} style={faceProbTableLabelStyle}>{row.label}</div>
+                {Array.from({ length: columnCount }, (_, columnIndex) => {
+                  const field = row.fields[columnIndex] ?? null;
+                  const value = row.values[columnIndex] ?? "-";
+                  const active = activeColumns.has(columnIndex);
+                  const target: FaceProbCellTarget = { rowIndex, columnIndex };
+                  return (
+                    <FaceProbEditableCell
+                      key={`${row.path}:${columnIndex}`}
+                      value={value}
+                      editable={canEdit && Boolean(field)}
+                      active={active}
+                      ariaLabel={`FaceProb.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
+                      onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
+                      onCommit={(nextValue) => onCellCommit?.(target, nextValue)}
+                      onSourceJump={field && onSourceJump
+                        ? () => onSourceJump(`Face.FaceProb.${row.label}`, {
+                            paths: [field.path],
+                            jump_to: "first",
+                            highlight: "ranges",
+                          })
+                        : undefined}
+                    />
+                  );
+                })}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FaceProbEditableCell({
+  value,
+  editable,
+  active,
+  ariaLabel,
+  onPreview,
+  onCommit,
+  onSourceJump,
+}: {
+  value: string;
+  editable: boolean;
+  active: boolean;
+  ariaLabel: string;
+  onPreview?: (value: string) => void;
+  onCommit?: (value: string) => boolean | void;
+  onSourceJump?: () => void;
+}) {
+  return (
+    <EditableNumberTableCell
+      value={value}
+      editable={editable}
+      active={active}
+      ariaLabel={ariaLabel}
+      frameStyle={({ focused }) => editableCellFrameStyle(faceProbTableValueStyle(active), focused)}
+      inputStyle={({ editable: cellEditable }) => faceProbTableInputStyle(cellEditable)}
+      onPreview={onPreview}
+      onCommit={onCommit}
+      onSourceJump={onSourceJump}
+    />
   );
 }
 
@@ -8686,6 +8960,52 @@ function boundsForTableAxis(value: number, axis: readonly number[]): { points: A
     }
   }
   return { points: [{ ...last, weight: 1 }] };
+}
+
+function selectFaceProbActiveColumns(
+  value: number,
+  axis: readonly number[],
+  points: ReadonlyArray<{ index: number }>,
+): Set<number> {
+  const active = new Set(points.map((point) => point.index));
+  if (!Number.isFinite(value) || active.size !== 1) return active;
+
+  const finitePoints = axis
+    .map((axisValue, index) => ({ index, value: axisValue }))
+    .filter((point) => Number.isFinite(point.value))
+    .sort((a, b) => a.value - b.value);
+  if (finitePoints.length < 2) return active;
+
+  const selectedIndex = points[0]?.index;
+  const selectedOrder = finitePoints.findIndex((point) => point.index === selectedIndex);
+  if (selectedOrder < 0) return active;
+
+  if (value <= finitePoints[0].value) {
+    active.add(finitePoints[1].index);
+  } else if (value >= finitePoints[finitePoints.length - 1].value) {
+    active.add(finitePoints[finitePoints.length - 2].index);
+  } else {
+    active.add(finitePoints[Math.min(selectedOrder + 1, finitePoints.length - 1)].index);
+  }
+
+  return active;
+}
+
+function interpolateFaceProbRows(
+  rows: readonly FaceProbTableRow[],
+  points: ReadonlyArray<{ index: number; weight: number }>,
+): number[] {
+  return rows.slice(1).map((row) => {
+    let total = 0;
+    let weightTotal = 0;
+    for (const point of points) {
+      const value = parseFiniteNumber(row.values[point.index]);
+      if (!Number.isFinite(value)) continue;
+      total += value * point.weight;
+      weightTotal += point.weight;
+    }
+    return weightTotal > 0 ? total / weightTotal : NaN;
+  });
 }
 
 function boundsForAxis(value: number, axis: readonly number[]): { points: Array<{ index: number; value: number; weight: number }> } {
@@ -12651,6 +12971,32 @@ const faceFormulaRowStyle: CSSProperties = {
   fontWeight: 850,
 };
 
+const faceFormulaTextStackStyle: CSSProperties = {
+  display: "flex",
+  flex: "1 1 auto",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 0,
+  overflowWrap: "anywhere",
+};
+
+const faceFormulaSubstitutionStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground3)",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: "18px",
+};
+
+const faceFormulaEmphasisStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontWeight: 950,
+};
+
+const faceFormulaCalculationResultStyle: CSSProperties = {
+  color: "var(--colorBrandForeground1)",
+  fontWeight: 950,
+};
+
 const faceFormulaResultStyle: CSSProperties = {
   ...thresholdResultStyle,
   display: "inline-flex",
@@ -12666,6 +13012,14 @@ const faceMetricGridStyle: CSSProperties = {
   minWidth: 0,
   padding: 12,
   background: "var(--colorNeutralBackground1)",
+};
+
+const faceProbMetricGridStyle: CSSProperties = {
+  ...faceMetricGridStyle,
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 0,
+  padding: 0,
+  background: "transparent",
 };
 
 const faceMetricCardStyle: CSSProperties = {
@@ -12709,6 +13063,129 @@ const faceMetricDetailStyle: CSSProperties = {
   lineHeight: "16px",
   overflowWrap: "anywhere",
 };
+
+const faceProbTableTitleStyle: CSSProperties = {
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const faceProbTableCardStyle: CSSProperties = {
+  ...faceMetricCardStyle,
+  containerType: "inline-size",
+  gridColumn: "1 / -1",
+  width: "100%",
+  alignSelf: "stretch",
+  boxSizing: "border-box",
+  minHeight: 0,
+  margin: 0,
+  padding: 0,
+  border: "none",
+  borderRadius: "0 0 12px 12px",
+  boxShadow: "none",
+  overflow: "hidden",
+};
+
+const faceProbTableHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minWidth: 0,
+  padding: "10px 10px 8px",
+};
+
+const faceProbTableHeaderActionsStyle: CSSProperties = {
+  display: "inline-flex",
+  flex: "1 1 auto",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 8,
+  minWidth: 0,
+  marginLeft: "auto",
+};
+
+const faceProbTableHeaderResultStyle: CSSProperties = {
+  ...faceFormulaResultStyle,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const faceProbTableScrollStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+const faceProbTableBodyStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  minWidth: 0,
+  padding: 0,
+};
+
+function faceProbTableStyle(columnCount: number): CSSProperties {
+  const normalizedColumnCount = Math.max(1, columnCount);
+  return {
+    display: "grid",
+    gridTemplateColumns: `minmax(52px, 0.9fr) repeat(${normalizedColumnCount}, minmax(0, 1fr))`,
+    width: "100%",
+    minWidth: 0,
+    border: HS_WEIGHT_FRAME_BORDER,
+    borderRadius: "0 0 12px 12px",
+    overflow: "hidden",
+    background: "var(--colorNeutralBackground1)",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    fontSize: `clamp(8px, 2.2cqw, ${normalizedColumnCount > 12 ? 10 : normalizedColumnCount > 9 ? 11 : 12}px)`,
+  };
+}
+
+const faceProbTableLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  minWidth: 0,
+  minHeight: 26,
+  padding: "0 5px",
+  borderTop: "1px solid var(--colorNeutralStroke3)",
+  color: "var(--colorNeutralForeground2)",
+  fontWeight: 800,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+function faceProbTableValueStyle(active: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    minHeight: 26,
+    padding: "0 2px",
+    borderTop: "1px solid var(--colorNeutralStroke3)",
+    color: "var(--colorNeutralForeground1)",
+    fontVariantNumeric: "tabular-nums",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    background: active
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 72%, var(--colorNeutralBackground1))"
+      : undefined,
+    boxShadow: active
+      ? "inset 0 0 0 1px var(--colorBrandForeground1)"
+      : undefined,
+    fontWeight: active ? 900 : undefined,
+  };
+}
+
+function faceProbTableInputStyle(editable: boolean): CSSProperties {
+  return {
+    ...hsWeightCellInputStyle(editable),
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+}
 
 const faceCardHeaderBarStyle: CSSProperties = {
   ...thresholdHeaderStyle,

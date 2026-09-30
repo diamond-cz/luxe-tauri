@@ -100,6 +100,7 @@ pub struct PreviewInfoSection {
 pub struct PreviewInfoItem {
     pub label:    String,
     #[serde(default)] pub toml_key: String,
+    #[serde(default)] pub toml_keys: Vec<String>,
 }
 
 impl Isp6sSchema {

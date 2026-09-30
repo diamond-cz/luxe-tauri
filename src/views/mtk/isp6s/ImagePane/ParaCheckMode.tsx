@@ -59,13 +59,9 @@ export function ParaCheckMode({ filePath, schema, tomlData }: Props) {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="flex items-center justify-between px-3 py-2 text-xs"
-           style={{ color: "var(--colorNeutralForeground3)" }}>
-        <span>参数版本对比 · 红色 = AE.cpp 值与图片 TOML 不一致</span>
-        {loading && <span>loading…</span>}
-      </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-sm" style={{ fontFamily: "ui-monospace, monospace" }}>
+        <table className="w-full border-collapse text-sm"
+               style={{ fontFamily: "ui-monospace, monospace", minWidth: "100%", tableLayout: "auto" }}>
           <thead style={{
             background: "var(--colorNeutralBackground3)",
             color:      "var(--colorNeutralForeground2)",
@@ -103,7 +99,7 @@ export function ParaCheckMode({ filePath, schema, tomlData }: Props) {
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th className="px-3 py-2 text-left text-xs font-semibold uppercase"
+    <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase"
         style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
       {children}
     </th>
@@ -111,7 +107,7 @@ function Th({ children }: { children: React.ReactNode }) {
 }
 function Td({ children, highlight }: { children: React.ReactNode; highlight?: boolean }) {
   return (
-    <td className="px-3 py-1.5"
+    <td className="break-words px-3 py-1.5"
         style={{
           color: highlight ? "var(--colorPaletteRedForeground1)" : "var(--colorNeutralForeground2)",
           fontWeight: highlight ? 600 : 400,

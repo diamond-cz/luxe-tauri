@@ -52,7 +52,8 @@ export interface ParaCheckItem {
 }
 export interface PreviewInfoItem {
   label:    string;
-  toml_key: string;
+  toml_key?: string;
+  toml_keys?: string[];
 }
 export interface NormalCard {
   CWR?: string;

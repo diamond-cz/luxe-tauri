@@ -39,6 +39,11 @@ interface FaceDragHandleProps {
   onDragEnd: () => void;
 }
 
+interface FaceViewportSize {
+  width: number;
+  height: number;
+}
+
 const LIMIT_LABEL = "\u6781\u503c\u9650\u5236";
 const FACE_ROW_HEIGHT = 24;
 const FACE_BORDER_WIDTH = 1;
@@ -51,8 +56,12 @@ const FACE_INLINE_SECTION_ROW_HEIGHT =
   (FACE_TABLE_HEIGHT - FACE_BORDER_WIDTH * (FACE_SECTION_ROWS - 1)) / FACE_SECTION_ROWS;
 const FACE_TABLE_COLUMN_WIDTHS = [48, 124, 124, 124, 88, 124, 88];
 const FACE_TABLE_WIDTH = FACE_TABLE_COLUMN_WIDTHS.reduce((sum, width) => sum + width, 0);
+const FACE_TABLE_GAP = 3;
+const FACE_TABLE_MIN_SCALE = 0.56;
+const FACE_TABLE_SCROLLBAR_RESERVE = 18;
 const FACE_TABLE_UI_STATE_KEY = "luxe:isp6s:face-table-ui:v1";
 const DEFAULT_FACE_TABLE_ORDER: FaceTableId[] = ["CWR", "FBT", "FLT"];
+const PREVIOUS_FACE_TABLE_ORDER: FaceTableId[] = ["CWR", "FLT", "FBT"];
 const DEFAULT_FACE_TABLE_UI_STATE: FaceTableUiState = {
   fbtExpanded: true,
   fltExpanded: true,
@@ -63,8 +72,8 @@ const DEFAULT_FACE_TABLE_UI_STATE: FaceTableUiState = {
 const FACE_TOP_KV = [
   ["Face_LINK", "FLT_THD", "Cal_FLT"],
   ["Link_AE_CWR", "FBT_THD", "Cal_BackTar"],
-  ["Normal_CWR", "lowbnd", "Cal_FBT"],
-  [LIMIT_LABEL, "highbnd", "Cal_Gain"],
+  ["Normal_CWR", "Normal_Target", "Cal_FBT"],
+  [LIMIT_LABEL, "LCE_Gain", "Cal_Gain"],
 ] as const;
 
 const FACE_GROUPS_FBT: readonly (readonly FaceGroupItem[])[] = [
@@ -130,6 +139,10 @@ function sanitizeFaceTableOrder(value: unknown): FaceTableId[] {
   DEFAULT_FACE_TABLE_ORDER.forEach((item) => {
     if (!seen.has(item)) out.push(item);
   });
+  if (out.length === PREVIOUS_FACE_TABLE_ORDER.length
+    && out.every((item, idx) => item === PREVIOUS_FACE_TABLE_ORDER[idx])) {
+    return DEFAULT_FACE_TABLE_ORDER;
+  }
   return out;
 }
 
@@ -150,6 +163,7 @@ function moveFaceTable(order: FaceTableId[], from: FaceTableId, to: FaceTableId)
 }
 
 export function FaceTable({ tomlData }: Props) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const [schema, setSchema] = useState<FaceTableSchema | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialUiState] = useState<FaceTableUiState>(() => loadFaceTableUiState());
@@ -158,6 +172,7 @@ export function FaceTable({ tomlData }: Props) {
   const [detailBelowLayout, setDetailBelowLayout] = useState(initialUiState.detailBelowLayout);
   const [tableOrder, setTableOrder] = useState<FaceTableId[]>(initialUiState.tableOrder);
   const [draggingTable, setDraggingTable] = useState<FaceTableId | null>(null);
+  const [viewportSize, setViewportSize] = useState<FaceViewportSize>({ width: 0, height: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +187,20 @@ export function FaceTable({ tomlData }: Props) {
   }, []);
 
   useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      setViewportSize({ width: el.clientWidth, height: el.clientHeight });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     saveFaceTableUiState({ fbtExpanded, fltExpanded, detailBelowLayout, tableOrder });
   }, [fbtExpanded, fltExpanded, detailBelowLayout, tableOrder]);
 
@@ -180,8 +209,10 @@ export function FaceTable({ tomlData }: Props) {
     () => schema ? evaluateFaceTable(schema, lookup) : new Map<string, string>(),
     [schema, lookup],
   );
-  const topTableOrder = detailBelowLayout ? tableOrder.slice(0, 2) : tableOrder;
-  const bottomTableOrder = detailBelowLayout ? tableOrder.slice(2) : [];
+  const tableRows: FaceTableId[][] = detailBelowLayout ? tableOrder.map((id) => [id]) : [tableOrder];
+  const canvasSize = faceCanvasBaseSize(tableRows, fbtExpanded, fltExpanded);
+  const fitWidthLayout = detailBelowLayout;
+  const canvasScale = fitWidthLayout ? 1 : faceCanvasScale(viewportSize, canvasSize);
 
   const makeDragHandleProps = (id: FaceTableId): FaceDragHandleProps => ({
     draggable: true,
@@ -227,46 +258,40 @@ export function FaceTable({ tomlData }: Props) {
 
   return (
     <div
+      ref={viewportRef}
       className="h-full w-full overflow-auto"
-      style={{ backgroundColor: "var(--normal-sheet-bg, #ffffff)" }}
+      style={{
+        backgroundColor: "var(--normal-sheet-bg, #ffffff)",
+        overflowX: fitWidthLayout ? "hidden" : "auto",
+        overflowY: "auto",
+        scrollbarGutter: "stable",
+      }}
     >
-      <div style={faceCanvasStyle()}>
-        <div style={faceTopRowStyle()}>
-          {topTableOrder.map((id) => renderFaceTableById({
-            id,
-            schema,
-            display,
-            lookup,
-            detailBelowLayout,
-            fbtExpanded,
-            fltExpanded,
-            draggingTable,
-            onToggleDetailLayout: () => setDetailBelowLayout((below) => !below),
-            onToggleFbt: () => setFbtExpanded((expanded) => !expanded),
-            onToggleFlt: () => setFltExpanded((expanded) => !expanded),
-            dragHandleProps: makeDragHandleProps(id),
-            onDropTable: dropFaceTable,
-          }))}
-        </div>
-        {detailBelowLayout && bottomTableOrder.length > 0 && (
-          <div style={faceBottomRowStyle()}>
-            {bottomTableOrder.map((id) => renderFaceTableById({
-              id,
-              schema,
-              display,
-              lookup,
-              detailBelowLayout,
-              fbtExpanded,
-              fltExpanded,
-              draggingTable,
-              onToggleDetailLayout: () => setDetailBelowLayout((below) => !below),
-              onToggleFbt: () => setFbtExpanded((expanded) => !expanded),
-              onToggleFlt: () => setFltExpanded((expanded) => !expanded),
-              dragHandleProps: makeDragHandleProps(id),
-              onDropTable: dropFaceTable,
-            }))}
+      <div style={faceScaledViewportStyle(canvasSize, canvasScale, fitWidthLayout)}>
+        <div style={faceScaledCanvasStyle(canvasSize, canvasScale, fitWidthLayout)}>
+          <div style={faceCanvasStyle(fitWidthLayout)}>
+            {tableRows.map((row, rowIdx) => (
+              <div key={row.join("-")} style={faceTableRowStyle(rowIdx, fitWidthLayout)}>
+                {row.map((id) => renderFaceTableById({
+                  id,
+                  schema,
+                  display,
+                  lookup,
+                  detailBelowLayout,
+                  fbtExpanded,
+                  fltExpanded,
+                  draggingTable,
+                  onToggleDetailLayout: () => setDetailBelowLayout((below) => !below),
+                  onToggleFbt: () => setFbtExpanded((expanded) => !expanded),
+                  onToggleFlt: () => setFltExpanded((expanded) => !expanded),
+                  dragHandleProps: makeDragHandleProps(id),
+                  onDropTable: dropFaceTable,
+                  fitWidth: fitWidthLayout && row.length === 1,
+                }))}
+              </div>
+            ))}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -286,6 +311,7 @@ function renderFaceTableById({
   onToggleFlt,
   dragHandleProps,
   onDropTable,
+  fitWidth,
 }: {
   id: FaceTableId;
   schema: FaceTableSchema;
@@ -300,6 +326,7 @@ function renderFaceTableById({
   onToggleFlt: () => void;
   dragHandleProps: FaceDragHandleProps;
   onDropTable: (from: FaceTableId, to: FaceTableId) => void;
+  fitWidth: boolean;
 }) {
   let body: ReactNode;
   if (id === "CWR") {
@@ -311,6 +338,7 @@ function renderFaceTableById({
         detailBelowLayout={detailBelowLayout}
         onToggleDetailLayout={onToggleDetailLayout}
         dragHandleProps={dragHandleProps}
+        fitWidth={fitWidth}
       />
     );
   } else {
@@ -326,6 +354,7 @@ function renderFaceTableById({
         onToggle={id === "FBT" ? onToggleFbt : onToggleFlt}
         rowHeight={FACE_INLINE_SECTION_ROW_HEIGHT}
         dragHandleProps={dragHandleProps}
+        fitWidth={fitWidth}
       />
     );
   }
@@ -336,6 +365,7 @@ function renderFaceTableById({
       id={id}
       draggingTable={draggingTable}
       onDropTable={onDropTable}
+      fitWidth={fitWidth}
     >
       {body}
     </FaceTableShell>
@@ -346,18 +376,20 @@ function FaceTableShell({
   id,
   draggingTable,
   onDropTable,
+  fitWidth,
   children,
 }: {
   id: FaceTableId;
   draggingTable: FaceTableId | null;
   onDropTable: (from: FaceTableId, to: FaceTableId) => void;
+  fitWidth: boolean;
   children: ReactNode;
 }) {
   const activeDrop = draggingTable !== null && draggingTable !== id;
 
   return (
     <div
-      style={faceTableShellStyle(activeDrop)}
+      style={faceTableShellStyle(activeDrop, fitWidth)}
       onDragOver={(event) => {
         if (!activeDrop) return;
         event.preventDefault();
@@ -382,6 +414,7 @@ function FaceKvTable({
   detailBelowLayout,
   onToggleDetailLayout,
   dragHandleProps,
+  fitWidth,
 }: {
   schema: FaceTableSchema;
   display: Map<string, string>;
@@ -389,10 +422,11 @@ function FaceKvTable({
   detailBelowLayout: boolean;
   onToggleDetailLayout: () => void;
   dragHandleProps: FaceDragHandleProps;
+  fitWidth: boolean;
 }) {
   return (
-    <table style={faceTableStyle(true)}>
-      <FaceColGroup />
+    <table style={faceTableStyle(true, fitWidth)}>
+      <FaceColGroup fitWidth={fitWidth} />
       <tbody>
         {FACE_TOP_KV.map(([leftLabel, midLabel, rightLabel], rowIdx) => {
           const left = leftLabel === LIMIT_LABEL
@@ -422,7 +456,12 @@ function FaceKvTable({
               <FaceCell kind="kvLabel" strong align="left" rowHeight={FACE_KV_ROW_HEIGHT}>
                 {midLabel}
               </FaceCell>
-              <FaceValueCell cell={middle} rowHeight={FACE_KV_ROW_HEIGHT} tooltip={cellTooltip(middle.raw, middle.text, lookup)} />
+              <FaceValueCell
+                cell={middle}
+                rowHeight={FACE_KV_ROW_HEIGHT}
+                forceDataFg
+                tooltip={cellTooltip(middle.raw, middle.text, lookup)}
+              />
               <FaceCell kind="title" strong align="left" rowHeight={FACE_KV_ROW_HEIGHT}>
                 {rightLabel}
               </FaceCell>
@@ -445,6 +484,7 @@ function FaceSectionTable({
   onToggle,
   rowHeight,
   dragHandleProps,
+  fitWidth,
 }: {
   scope: Exclude<FaceScope, "TOP">;
   groups: readonly (readonly FaceGroupItem[])[];
@@ -455,10 +495,11 @@ function FaceSectionTable({
   onToggle: () => void;
   rowHeight: number;
   dragHandleProps: FaceDragHandleProps;
+  fitWidth: boolean;
 }) {
   return (
-    <table style={faceTableStyle(expanded)}>
-      <FaceColGroup collapsed={!expanded} />
+    <table style={faceTableStyle(expanded, fitWidth)}>
+      <FaceColGroup collapsed={!expanded} fitWidth={fitWidth} />
       <tbody>
         {renderFaceSectionRows(scope, groups, schema, display, lookup, expanded, onToggle, rowHeight, dragHandleProps)}
       </tbody>
@@ -466,12 +507,18 @@ function FaceSectionTable({
   );
 }
 
-function FaceColGroup({ collapsed = false }: { collapsed?: boolean }) {
+function FaceColGroup({
+  collapsed = false,
+  fitWidth = false,
+}: {
+  collapsed?: boolean;
+  fitWidth?: boolean;
+}) {
   const widths = collapsed ? [FACE_TABLE_COLUMN_WIDTHS[0]] : FACE_TABLE_COLUMN_WIDTHS;
   return (
     <colgroup>
       {widths.map((width, idx) => (
-        <col key={idx} style={{ width }} />
+        <col key={idx} style={{ width: fitWidth && !collapsed ? `${(width / FACE_TABLE_WIDTH) * 100}%` : width }} />
       ))}
     </colgroup>
   );
@@ -731,52 +778,116 @@ function FaceCell({
   );
 }
 
-function faceCanvasStyle(): CSSProperties {
+function faceCanvasBaseSize(
+  rows: FaceTableId[][],
+  fbtExpanded: boolean,
+  fltExpanded: boolean,
+): FaceViewportSize {
+  const width = rows.reduce((maxWidth, row) => {
+    const rowWidth = row.reduce(
+      (sum, id) => sum + faceTableBaseWidth(id, fbtExpanded, fltExpanded),
+      0,
+    ) + FACE_TABLE_GAP * Math.max(0, row.length - 1);
+    return Math.max(maxWidth, rowWidth);
+  }, 0);
+
+  return {
+    width: Math.max(FACE_TABLE_COLUMN_WIDTHS[0], width),
+    height: FACE_TABLE_HEIGHT * rows.length + FACE_TABLE_GAP * Math.max(0, rows.length - 1),
+  };
+}
+
+function faceTableBaseWidth(
+  id: FaceTableId,
+  fbtExpanded: boolean,
+  fltExpanded: boolean,
+): number {
+  if (id === "CWR") return FACE_TABLE_WIDTH;
+  const expanded = id === "FBT" ? fbtExpanded : fltExpanded;
+  return expanded ? FACE_TABLE_WIDTH : FACE_TABLE_COLUMN_WIDTHS[0];
+}
+
+function faceCanvasScale(viewport: FaceViewportSize, canvas: FaceViewportSize): number {
+  if (viewport.width <= 0 || viewport.height <= 0 || canvas.width <= 0 || canvas.height <= 0) {
+    return 1;
+  }
+
+  const availableWidth = Math.max(1, viewport.width - FACE_TABLE_SCROLLBAR_RESERVE);
+  const availableHeight = Math.max(1, viewport.height - FACE_TABLE_SCROLLBAR_RESERVE);
+  const fitScale = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
+  return Math.max(FACE_TABLE_MIN_SCALE, fitScale);
+}
+
+function faceScaledViewportStyle(
+  canvas: FaceViewportSize,
+  scale: number,
+  fitWidth: boolean,
+): CSSProperties {
+  return {
+    position: "relative",
+    width: fitWidth ? "100%" : canvas.width * scale,
+    height: canvas.height * scale,
+    minWidth: fitWidth ? 0 : canvas.width * scale,
+    minHeight: canvas.height * scale,
+  };
+}
+
+function faceScaledCanvasStyle(
+  canvas: FaceViewportSize,
+  scale: number,
+  fitWidth: boolean,
+): CSSProperties {
+  return {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: fitWidth ? "100%" : canvas.width,
+    height: canvas.height,
+    transform: `scale(${scale})`,
+    transformOrigin: "top left",
+  };
+}
+
+function faceCanvasStyle(fitWidth: boolean): CSSProperties {
   return {
     display: "inline-flex",
     flexDirection: "column",
     alignItems: "flex-start",
-    minWidth: "max-content",
+    width: fitWidth ? "100%" : "max-content",
     padding: 0,
   };
 }
 
-function faceTopRowStyle(): CSSProperties {
+function faceTableRowStyle(rowIdx: number, fitWidth: boolean): CSSProperties {
   return {
     display: "inline-flex",
     alignItems: "flex-start",
-    gap: 3,
-    minWidth: "max-content",
+    gap: FACE_TABLE_GAP,
+    marginTop: rowIdx === 0 ? 0 : FACE_TABLE_GAP,
+    width: fitWidth ? "100%" : undefined,
+    minWidth: fitWidth ? 0 : "max-content",
   };
 }
 
-function faceBottomRowStyle(): CSSProperties {
+function faceTableShellStyle(activeDrop: boolean, fitWidth: boolean): CSSProperties {
   return {
     display: "inline-flex",
     alignItems: "flex-start",
-    gap: 3,
-    marginTop: 3,
-    minWidth: "max-content",
-  };
-}
-
-function faceTableShellStyle(activeDrop: boolean): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "flex-start",
+    width: fitWidth ? "100%" : undefined,
+    minWidth: fitWidth ? 0 : undefined,
     outline: activeDrop ? "1px dashed var(--normal-sheet-orange-bg, #ff8a00)" : "none",
     outlineOffset: 2,
   };
 }
 
-function faceTableStyle(expanded = true): CSSProperties {
+function faceTableStyle(expanded = true, fitWidth = false): CSSProperties {
   return {
     borderCollapse: "collapse",
     color: "var(--normal-sheet-text, #202020)",
     fontFamily: '"Microsoft YaHei", "Segoe UI", Arial, sans-serif',
     fontSize: 12,
     tableLayout: "fixed",
-    width: expanded ? FACE_TABLE_WIDTH : FACE_TABLE_COLUMN_WIDTHS[0],
+    width: expanded && fitWidth ? "100%" : expanded ? FACE_TABLE_WIDTH : FACE_TABLE_COLUMN_WIDTHS[0],
     height: FACE_TABLE_HEIGHT,
   };
 }
@@ -825,10 +936,12 @@ function toggleButtonStyle(): CSSProperties {
 
 function faceCellContentStyle(): CSSProperties {
   return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: "inline-block",
+    maxWidth: "100%",
     minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    verticalAlign: "middle",
   };
 }
 
@@ -878,18 +991,20 @@ function faceCellStyle(
     height: opts.gap
       ? 8
       : rowHeight * heightRows + FACE_BORDER_WIDTH * Math.max(0, heightRows - 1),
-    minWidth: opts.compact ? 30 : kind === "data" || kind === "formula" ? 58 : 82,
+    minWidth: 0,
     padding: opts.gap ? 0 : opts.compact ? "0 6px" : "0 8px",
     border: opts.gap
       ? "none"
       : `1px solid ${color.border ?? "var(--normal-sheet-line, #303030)"}`,
     background: color.bg,
-    color: opts.forceDataFg ? "var(--face-sheet-data-fg, var(--normal-sheet-cream-fg, #242424))" : color.fg,
+    color: opts.forceDataFg ? "#000000" : color.fg,
     fontWeight: opts.strong ? 700 : 500,
     textAlign: opts.align,
     verticalAlign: "middle",
     whiteSpace: opts.compact ? "pre-line" : "nowrap",
     lineHeight: opts.compact ? "15px" : `${rowHeight}px`,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
     boxSizing: "border-box",
   };
 }
@@ -1240,7 +1355,7 @@ function tokenize(expr: string): Token[] {
 
 function formatFaceNumber(value: number, isFormula: boolean, scope: FaceScope, name: string): string {
   if (isFormula) {
-    if (scope === "TOP" && name === "Cal_Gain") return value.toFixed(2);
+    if (scope === "TOP" && (name === "Cal_Gain" || name === "LCE_Gain")) return value.toFixed(2);
     return value.toFixed(1);
   }
   if (Number.isInteger(value)) return String(value);

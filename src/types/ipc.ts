@@ -50,6 +50,8 @@ export interface Isp6sAeVisual {
   image_splitter_orientation: "V" | "H";
   image_inner_ratios:         number[];
   preview_mode:               "param_map" | "chart_map" | "image_split" | "para_check" | "image";
+  workspace_card_order:       string[];
+  workspace_column_ratios:    number[];
   top_card_order:             string[];
   normal_collapsed:           boolean;
   face_collapsed:             boolean;

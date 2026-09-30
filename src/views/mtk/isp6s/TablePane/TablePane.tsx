@@ -1,27 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  horizontalListSortingStrategy,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
   Image24Regular,
   TableSimple24Regular,
   ChartMultiple24Regular,
+  FolderAdd24Regular,
+  Search24Regular,
 } from "@fluentui/react-icons";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -33,32 +20,44 @@ import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
-import { NormalTable } from "./NormalTable";
-import { FaceTable } from "./FaceTable";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 
-type TabId = "image" | "normal" | "face" | "lce";
 type ImageSortDirection = "asc" | "desc";
 type ImageSortState = {
   column: string;
   key: string;
   direction: ImageSortDirection;
 };
-type LcePreviewMode = "image" | "image_table" | "image_split";
-
+type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "extra";
+type ImageTableColumn = {
+  id: string;
+  kind: ImageTableColumnKind;
+  label: string;
+  key?: string;
+  align: "left" | "center";
+};
+type ImageTableColumnDragState = {
+  id: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  timer: number | null;
+  active: boolean;
+  previousUserSelect: string;
+  cleanup?: () => void;
+};
 interface Props {
   schema:    Isp6sSchemaRoot;
   entries:   ImageEntry[];
   current:   number;
   imageDir:  string | null;
-  tomlData:  Record<string, string>;
   onPickImage: (idx: number) => void;
   onImageDirChange: (dir: string) => void;
-  collapsed: boolean;
-  onToggleCollapsed: (next: boolean) => void;
-  headerRatios: number[];
-  onHeaderRatiosChange: (next: number[]) => void;
+  imageSearchQuery: string;
+  imageSearchError: string | null;
+  onImageSearchQueryChange: (value: string) => void;
+  onImageSearch: () => void;
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png"];
@@ -69,10 +68,9 @@ const IMAGE_DROPDOWN_THUMBNAIL_SIZE = 48;
 const IMAGE_DROPDOWN_THUMBNAIL_BATCH = 3;
 const IMAGE_DROPDOWN_THUMBNAIL_FALLBACK_CONCURRENCY = 2;
 const IMAGE_DROPDOWN_THUMBNAIL_CACHE_LIMIT = 160;
-const IMAGE_HEADER_THUMBNAIL_SIZE = 80;
 const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
-const IMAGE_TABLE_HEADER_HEIGHT = 34;
-const IMAGE_TABLE_ROW_HEIGHT = 32;
+const IMAGE_TABLE_HEADER_HEIGHT = 36;
+const IMAGE_TABLE_ROW_HEIGHT = 58;
 const IMAGE_TABLE_OVERSCAN = 12;
 const IMAGE_TABLE_LOAD_DEBOUNCE_MS = 8;
 const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
@@ -80,57 +78,29 @@ const IMAGE_TABLE_PREFETCH_DELAY_MS = 90;
 const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
 const IMAGE_TABLE_PREFETCH_PAGES = 3;
 const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
-const IMAGE_LIST_TAB_STORAGE_KEY = "luxe:isp6s:image-list-tab";
-const LCE_PREVIEW_MODE_STORAGE_KEY = "luxe:isp6s:lce-preview-mode";
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: "image",  label: "Image" },
-  { id: "normal", label: "Normal" },
-  { id: "face",   label: "Face" },
-  { id: "lce",    label: "LCE" },
-];
-const DEFAULT_TAB_ORDER: TabId[] = TABS.map((item) => item.id);
-const DEFAULT_HEADER_RATIOS = [24, 18, 58];
-
+const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
+const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
+const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
 export function TablePane({
   schema,
   entries,
   current,
   imageDir,
-  tomlData,
   onPickImage,
   onImageDirChange,
-  collapsed,
-  onToggleCollapsed,
-  headerRatios,
-  onHeaderRatiosChange,
+  imageSearchQuery,
+  imageSearchError,
+  onImageSearchQueryChange,
+  onImageSearch,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
-  const [tab, setTab] = useState<TabId>(readImageListTab);
-  const [tabOrder, setTabOrder] = useState<TabId[]>(DEFAULT_TAB_ORDER);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const currentEntry = entries[current];
-
-  const orderedTabs = useMemo(
-    () => tabOrder
-      .map((id) => TABS.find((item) => item.id === id))
-      .filter((item): item is { id: TabId; label: string } => Boolean(item)),
-    [tabOrder],
-  );
-
-  const safeHeaderRatios = useMemo(() => {
-    if (headerRatios.length === 3 && headerRatios.every((value) => Number.isFinite(value) && value > 0)) {
-      return headerRatios;
-    }
-    return DEFAULT_HEADER_RATIOS;
-  }, [headerRatios]);
-
-  useEffect(() => {
-    writeImageListTab(tab);
-  }, [tab]);
+  const pickImageDir = async () => {
+    const picked = await openDialog({ directory: true, multiple: false });
+    if (typeof picked === "string") onImageDirChange(picked);
+  };
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -182,20 +152,6 @@ export function TablePane({
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   }
 
-  const pickImageDir = async () => {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked === "string") onImageDirChange(picked);
-  };
-
-  const onTabDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = tabOrder.indexOf(active.id as TabId);
-    const newIndex = tabOrder.indexOf(over.id as TabId);
-    if (oldIndex < 0 || newIndex < 0) return;
-    setTabOrder((prev) => arrayMove(prev, oldIndex, newIndex));
-  };
-
   const borderColor =
     dropState === "ok" ? "var(--colorPaletteGreenBorder2)" :
     dropState === "bad" ? "var(--colorPaletteRedBorder2)" :
@@ -207,193 +163,95 @@ export function TablePane({
 
   return (
     <div ref={rootRef}
-         className={`flex w-full flex-col transition-colors ${collapsed ? "" : "h-full"}`}
+         className="relative flex h-full w-full flex-col transition-colors"
          style={{
            background,
            border: `1px solid ${borderColor}`,
            borderRadius: 12,
            overflow: "hidden",
          }}>
-      <div className="shrink-0 px-3 py-2"
-           style={!collapsed ? { borderBottom: "1px solid var(--colorNeutralStroke2)" } : undefined}>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md"
-               style={{
-                 background: "var(--colorNeutralBackground3)",
-                 color: "var(--colorNeutralForeground2)",
-               }}>
-            <HeaderImageThumb entry={currentEntry} />
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <PanelGroup direction="horizontal" autoSaveId="isp6s-table-header">
-              <Panel
-                defaultSize={safeHeaderRatios[0]}
-                minSize={18}
-                onResize={(size) => onHeaderRatiosChange([size, safeHeaderRatios[1], safeHeaderRatios[2]])}
-              >
-                <div className="flex h-12 min-w-0 items-center">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    className="flex h-12 min-w-0 w-full flex-col justify-center rounded-md px-2 text-left transition-colors"
-                    onClick={pickImageDir}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        pickImageDir();
-                      }
-                    }}
-                    title={imageDir ?? "选择图片文件夹"}
-                    style={{
-                      color: "inherit",
-                      background: "transparent",
-                    }}
-                    onMouseEnter={(event) => {
-                      event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <div className="flex items-center gap-1 text-sm font-semibold"
-                         style={{ color: "var(--colorNeutralForeground1)" }}>
-                      图片列表卡片
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={collapsed ? <ChevronDown24Regular /> : <ChevronUp24Regular />}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleCollapsed(!collapsed);
-                        }}
-                        aria-label={collapsed ? "展开" : "收起"}
-                      />
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] font-medium leading-5"
-                         style={{ color: "var(--colorNeutralForeground3)" }}>
-                      {imageDir ?? "支持拖拽或选择图片文件夹"}
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-
-              <ResizeHandle direction="horizontal" size={8} />
-
-              {!collapsed ? (
-                <>
-                  <Panel
-                    defaultSize={safeHeaderRatios[1]}
-                    minSize={26}
-                    onResize={(size) => onHeaderRatiosChange([safeHeaderRatios[0], size, safeHeaderRatios[2]])}
-                  >
-                    <div className="flex h-12 min-w-0 items-center px-2">
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={onTabDragEnd}
-                      >
-                        <SortableContext
-                          items={orderedTabs.map((item) => item.id)}
-                          strategy={horizontalListSortingStrategy}
-                        >
-                          <div
-                            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 py-1"
-                            style={getOverlayChrome()}
-                          >
-                            {orderedTabs.map((item) => (
-                              <DraggableTabButton
-                                key={item.id}
-                                id={item.id}
-                                label={item.label}
-                                active={item.id === tab}
-                                onClick={() => setTab(item.id)}
-                              />
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </DndContext>
-                    </div>
-                  </Panel>
-
-                  <ResizeHandle direction="horizontal" size={8} />
-                  <Panel
-                    defaultSize={safeHeaderRatios[2]}
-                    minSize={40}
-                    onResize={(size) => onHeaderRatiosChange([safeHeaderRatios[0], safeHeaderRatios[1], size])}
-                  >
-                    <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
-                      <div
-                        className="flex h-full min-w-0 items-stretch gap-3 rounded-lg border px-2 py-1"
-                        style={getOverlayChrome()}
-                      >
-                      <span
-                        className="flex shrink-0 items-center self-stretch rounded-md px-2 py-1 text-sm font-semibold"
-                        style={getCurrentImageLabelChrome()}
-                      >
-                        当前图
-                        <span className="ml-0.5">:</span>
-                      </span>
-                      <div
-                        className="flex min-w-0 flex-1 items-center self-stretch rounded-md px-1"
-                        style={getCurrentImageConnectorChrome()}
-                      >
-                        <ImagePickerDropdown
-                          entries={entries}
-                          current={current}
-                          onPick={onPickImage}
-                        />
-                      </div>
-                      </div>
-                    </div>
-                  </Panel>
-                </>
-              ) : (
-                <Panel minSize={40}>
-                  <div className="flex h-12 min-w-[320px] items-center justify-end gap-3 px-2">
-                    <div
-                      className="flex h-full min-w-0 items-stretch gap-3 rounded-lg border px-2 py-1"
-                      style={getOverlayChrome()}
-                    >
-                    <span
-                      className="flex shrink-0 items-center self-stretch rounded-md px-2 py-1 text-sm font-semibold"
-                      style={getCurrentImageLabelChrome()}
-                    >
-                      当前图
-                      <span className="ml-0.5">:</span>
-                    </span>
-                    <div
-                      className="flex min-w-0 flex-1 items-center self-stretch rounded-md px-1"
-                      style={getCurrentImageConnectorChrome()}
-                    >
-                      <ImagePickerDropdown
-                        entries={entries}
-                        current={current}
-                        onPick={onPickImage}
-                      />
-                    </div>
-                    </div>
-                  </div>
-                </Panel>
-              )}
-            </PanelGroup>
-          </div>
+      <div className="flex h-11 shrink-0 items-center justify-between gap-2 px-4"
+           style={{
+             background: "var(--colorNeutralBackground2)",
+           }}>
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <TableSimple24Regular className="h-4 w-4 shrink-0"
+                                style={{ color: "var(--colorBrandForeground1)" }} />
+          <span style={{ color: "var(--colorNeutralForeground2)" }}>图片列表卡片</span>
         </div>
       </div>
+      <div className="absolute right-2 top-1 z-10">
+        <HoverTooltip content="Add image folder" positioning="below-center" inline>
+          <Button
+            size="small"
+            appearance="subtle"
+            icon={<FolderAdd24Regular />}
+            onClick={pickImageDir}
+            aria-label="Add image folder"
+          />
+        </HoverTooltip>
+      </div>
+      <div className="hidden"
+           style={{
+             background: "var(--colorNeutralBackground1)",
+             borderBottom: "1px solid var(--colorNeutralStroke2)",
+           }}>
+        <HoverTooltip content="添加图片文件夹" positioning="below-center" inline>
+          <Button
+            size="small"
+            appearance="subtle"
+            icon={<FolderAdd24Regular />}
+            onClick={pickImageDir}
+            aria-label="添加图片文件夹"
+          />
+        </HoverTooltip>
+        <span className="min-w-0 flex-1 truncate text-[11px]"
+              style={{ color: "var(--colorNeutralForeground3)" }}>
+          {imageDir ?? "点击文件夹图标添加图片文件夹"}
+        </span>
+      </div>
 
-      {!collapsed && (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {tab === "image"  && <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />}
-          {tab === "normal" && <NormalTable tomlData={tomlData} />}
-          {tab === "face"   && <FaceTable tomlData={tomlData} />}
-          {tab === "lce"    && <LceTab entry={currentEntry} schema={schema} tomlData={tomlData} />}
-        </div>
-      )}
+      <div className="flex h-8 shrink-0 items-center gap-2 px-4"
+           style={{
+             background: "var(--colorNeutralBackground1)",
+             borderBottom: "1px solid var(--colorNeutralStroke2)",
+           }}>
+        <Search24Regular className="h-4 w-4 shrink-0"
+                         style={{ color: "var(--colorNeutralForeground3)" }} />
+        <input
+          type="search"
+          value={imageSearchQuery}
+          onChange={(event) => onImageSearchQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            onImageSearch();
+          }}
+          placeholder="搜索图片名称"
+          aria-label="搜索图片名称"
+          aria-invalid={Boolean(imageSearchError)}
+          title={imageSearchError ?? "输入图片名称后按 Enter 搜索"}
+          className="min-w-0 flex-1 bg-transparent text-[11px] outline-none"
+          style={{
+            color: "var(--colorNeutralForeground2)",
+            caretColor: "var(--colorBrandForeground1)",
+          }}
+        />
+        {imageSearchError && (
+          <span className="shrink-0 text-[10px]" style={{ color: "var(--colorPaletteRedForeground1)" }}>
+            {imageSearchError}
+          </span>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />
+      </div>
     </div>
   );
 }
 
-function ImagePickerDropdown({
+export function ImagePickerDropdown({
   entries, current, onPick,
 }: {
   entries: ImageEntry[];
@@ -783,46 +641,38 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
   );
 }
 
-function HeaderImageThumb({ entry }: { entry: ImageEntry | undefined }) {
+function ImageTableThumbnail({ entry }: { entry: ImageEntry }) {
   const [url, setUrl] = useState<string | null>(null);
-  const path = entry?.jpg_path;
 
   useEffect(() => {
-    setUrl(null);
-    if (!path) return;
-
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      loadImageThumbnailBatch([path], IMAGE_HEADER_THUMBNAIL_SIZE)
-        .then((batch) => {
-          if (!cancelled) setUrl(batch[path] || safeImageUrl(path));
-        })
-        .catch(() => {
-          if (!cancelled) setUrl(safeImageUrl(path));
-        });
-    }, IMAGE_THUMBNAIL_IDLE_DELAY);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [path]);
-
-  if (!url) {
-    return <Image24Regular />;
-  }
+    loadImageThumbnailBatch([entry.jpg_path], 52)
+      .then((batch) => {
+        if (!cancelled) setUrl(batch[entry.jpg_path] || safeImageUrl(entry.jpg_path));
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(safeImageUrl(entry.jpg_path));
+      });
+    return () => { cancelled = true; };
+  }, [entry.jpg_path]);
 
   return (
-    <img
-      src={url}
-      alt={entry?.name ?? ""}
-      className="h-full w-full object-cover"
-      draggable={false}
-    />
+    <span style={{
+      display: "inline-flex",
+      width: 48,
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      overflow: "hidden",
+      background: "var(--colorNeutralBackground3)",
+      border: "1px solid var(--colorNeutralStroke2)",
+    }}>
+      {url ? <img src={url} alt={entry.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} draggable={false} /> : <Image24Regular />}
+    </span>
   );
 }
 
-function ImageTab({
+export function ImageTab({
   schema, entries, current, onPick,
 }: {
   schema:   Isp6sSchemaRoot;
@@ -847,6 +697,33 @@ function ImageTab({
     () => Object.entries(schema.Image ?? {}),
     [schema],
   );
+  const tableColumns = useMemo<ImageTableColumn[]>(
+    () => [
+      { id: "idx", kind: "idx", label: "idx", align: "center" },
+      { id: "thumbnail", kind: "thumbnail", label: "Thumbnail", align: "center" },
+      { id: "name", kind: "name", label: "FileName", align: "left" },
+      ...extraCols.map(([label, key], index) => ({
+        id: `extra:${key}`,
+        kind: "extra" as const,
+        label,
+        key,
+        align: index < 2 ? "center" as const : "left" as const,
+      })),
+    ],
+    [extraCols],
+  );
+  const [columnOrder, setColumnOrder] = useState<string[]>(readImageTableColumnOrder);
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
+  const columnDragRef = useRef<ImageTableColumnDragState | null>(null);
+  const suppressColumnClickRef = useRef(false);
+  const orderedColumns = useMemo(
+    () => mergeImageTableColumnOrder(
+      columnOrder,
+      tableColumns.map((column) => column.id),
+    ).map((id) => tableColumns.find((column) => column.id === id))
+      .filter((column): column is ImageTableColumn => Boolean(column)),
+    [columnOrder, tableColumns],
+  );
   const imageTomlKeys = useMemo(
     () => extraCols.map(([, key]) => key).filter((key) => key.length > 0),
     [extraCols],
@@ -863,6 +740,7 @@ function ImageTab({
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
+  const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }));
@@ -929,6 +807,24 @@ function ImageTab({
   useEffect(() => {
     writeImageTableSortControlsEnabled(sortControlsEnabled);
   }, [sortControlsEnabled]);
+
+  useEffect(() => {
+    const nextOrder = mergeImageTableColumnOrder(
+      columnOrder,
+      tableColumns.map((column) => column.id),
+    );
+    if (!areImageTableColumnOrdersEqual(columnOrder, nextOrder)) {
+      setColumnOrder(nextOrder);
+    }
+  }, [columnOrder, tableColumns]);
+
+  useEffect(() => {
+    writeImageTableColumnOrder(columnOrder);
+  }, [columnOrder]);
+
+  useEffect(() => () => {
+    cancelImageTableColumnDrag();
+  }, []);
 
   const visible = useMemo(() => {
     const bodyScrollTop = Math.max(0, scrollTop - IMAGE_TABLE_HEADER_HEIGHT);
@@ -1181,6 +1077,110 @@ function ImageTab({
     });
   }
 
+  function cancelImageTableColumnDrag() {
+    const drag = columnDragRef.current;
+    if (!drag) return;
+    if (drag.timer !== null) {
+      window.clearTimeout(drag.timer);
+    }
+    drag.cleanup?.();
+    if (drag.active) {
+      document.body.style.userSelect = drag.previousUserSelect;
+    }
+    columnDragRef.current = null;
+    setDragOverColumnId(null);
+  }
+
+  function getImageTableColumnIdAtPoint(x: number, y: number): string | null {
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-image-table-column-id]");
+    const id = target?.dataset.imageTableColumnId;
+    return id && tableColumns.some((column) => column.id === id) ? id : null;
+  }
+
+  function swapImageTableColumns(firstId: string, secondId: string) {
+    if (firstId === secondId) return;
+    setColumnOrder((current) => {
+      const next = mergeImageTableColumnOrder(
+        current,
+        tableColumns.map((column) => column.id),
+      );
+      const firstIndex = next.indexOf(firstId);
+      const secondIndex = next.indexOf(secondId);
+      if (firstIndex < 0 || secondIndex < 0) return current;
+      [next[firstIndex], next[secondIndex]] = [next[secondIndex], next[firstIndex]];
+      return next;
+    });
+  }
+
+  function startImageTableColumnDrag(columnId: string) {
+    return (event: ReactPointerEvent<HTMLTableCellElement>) => {
+      if (event.button !== 0 || !tableColumns.some((column) => column.id === columnId)) return;
+      cancelImageTableColumnDrag();
+
+      const drag: ImageTableColumnDragState = {
+        id: columnId,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        timer: null,
+        active: false,
+        previousUserSelect: document.body.style.userSelect,
+      };
+      columnDragRef.current = drag;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        if (columnDragRef.current !== drag || moveEvent.pointerId !== drag.pointerId) return;
+        const movedX = moveEvent.clientX - drag.startX;
+        const movedY = moveEvent.clientY - drag.startY;
+        if (!drag.active) {
+          if (Math.hypot(movedX, movedY) > IMAGE_TABLE_COLUMN_DRAG_DISTANCE) {
+            cancelImageTableColumnDrag();
+          }
+          return;
+        }
+
+        moveEvent.preventDefault();
+        setDragOverColumnId(getImageTableColumnIdAtPoint(moveEvent.clientX, moveEvent.clientY));
+      };
+      const onUp = (upEvent: PointerEvent) => {
+        if (columnDragRef.current !== drag || upEvent.pointerId !== drag.pointerId) return;
+        if (drag.active) {
+          const targetId = getImageTableColumnIdAtPoint(upEvent.clientX, upEvent.clientY);
+          if (targetId) {
+            swapImageTableColumns(drag.id, targetId);
+          }
+          suppressColumnClickRef.current = true;
+          window.setTimeout(() => {
+            suppressColumnClickRef.current = false;
+          }, 0);
+        }
+        cancelImageTableColumnDrag();
+      };
+      const onCancel = () => {
+        if (columnDragRef.current === drag) {
+          cancelImageTableColumnDrag();
+        }
+      };
+
+      drag.cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        window.removeEventListener("blur", onCancel);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
+      window.addEventListener("blur", onCancel);
+      drag.timer = window.setTimeout(() => {
+        if (columnDragRef.current !== drag) return;
+        drag.active = true;
+        document.body.style.userSelect = "none";
+        setDragOverColumnId(drag.id);
+      }, IMAGE_TABLE_COLUMN_DRAG_DELAY_MS);
+    };
+  }
+
   useEffect(() => {
     if (currentDisplayIndex >= 0) {
       ensureImageTableRowVisible(currentDisplayIndex);
@@ -1268,15 +1268,16 @@ function ImageTab({
   }, [imageTomlKeySignature, imageTomlKeys, tablePrefetchPaths, tablePrefetchSignature]);
 
 
-  const colSpan = 2 + extraCols.length;
+  const colSpan = orderedColumns.length;
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
-  const columnWidths = useMemo(() => {
+  const baseColumnWidths = useMemo(() => {
     const idxWidth = clampImageColumnWidth(
       estimateImageColumnTextWidth(String(Math.max(entries.length, 1))),
-      42,
-      56,
+      34,
+      46,
     );
+    const thumbnailWidth = 72;
     const nameWidth = clampImageColumnWidth(
       Math.max(
         estimateImageColumnTextWidth("name"),
@@ -1292,13 +1293,49 @@ function ImageTab({
       );
       return clampImageColumnWidth(valueWidth, 52, 132);
     });
-    return {
+    const byId: Record<string, number> = {
       idx: idxWidth,
+      thumbnail: thumbnailWidth,
       name: nameWidth,
-      extra: extraWidths,
-      table: idxWidth + nameWidth + extraWidths.reduce((sum, width) => sum + width, 0),
+    };
+    extraCols.forEach(([, key], index) => {
+      byId[`extra:${key}`] = extraWidths[index];
+    });
+    return {
+      byId,
     };
   }, [entries.length, extraCols, tomls, visible.rows]);
+
+  const columnWidths = useMemo(() => {
+    const byId: Record<string, number> = {};
+    for (const column of tableColumns) {
+      const fallback = baseColumnWidths.byId[column.id] ?? 72;
+      byId[column.id] = columnWidthOverrides[column.id] ?? fallback;
+    }
+    return {
+      byId,
+      table: orderedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
+    };
+  }, [baseColumnWidths, columnOrder, columnWidthOverrides, orderedColumns, tableColumns]);
+
+  const startColumnResize = (column: string, initialWidth: number, minWidth: number) =>
+    (event: ReactPointerEvent<HTMLSpanElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startX = event.clientX;
+      const onMove = (moveEvent: PointerEvent) => {
+        const nextWidth = Math.max(minWidth, Math.min(640, initialWidth + moveEvent.clientX - startX));
+        setColumnWidthOverrides((current) => ({ ...current, [column]: nextWidth }));
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp, { once: true });
+    };
 
   return (
     <div
@@ -1307,6 +1344,13 @@ function ImageTab({
       tabIndex={0}
       aria-label="Image table"
       onKeyDown={handleImageTableKeyDown}
+      onClickCapture={(event) => {
+        if (suppressColumnClickRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          suppressColumnClickRef.current = false;
+        }
+      }}
       onScroll={(event) => {
         const nextScrollTop = event.currentTarget.scrollTop;
         scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
@@ -1315,50 +1359,67 @@ function ImageTab({
       }}
     >
       <table className="w-full border-collapse text-xs"
-             style={{
-               fontFamily: "ui-monospace, monospace",
-               minWidth: "100%",
+           style={{
+                fontFamily: '"Segoe UI", Arial, sans-serif',
+                fontSize: 13,
+                color: "var(--colorNeutralForeground1)",
+                background: "var(--colorNeutralBackground1)",
+                minWidth: "100%",
                tableLayout: "fixed",
                width: columnWidths.table,
              }}>
         <colgroup>
-          <col style={{ width: columnWidths.idx }} />
-          <col style={{ width: columnWidths.name }} />
-          {extraCols.map(([col], index) => <col key={col} style={{ width: columnWidths.extra[index] }} />)}
+          {orderedColumns.map((column) => (
+            <col key={column.id} style={{ width: columnWidths.byId[column.id] }} />
+          ))}
         </colgroup>
         <thead style={{
-          background: "var(--colorNeutralBackground3)",
+           background: "var(--colorNeutralBackground2)",
           color: "var(--colorNeutralForeground2)",
           position: "sticky", top: 0, zIndex: 1,
           }}>
           <tr>
-            <Th align="center">
-              <HoverTooltip content="IDX 原始顺序" positioning="below-center" inline>
-                <span>idx</span>
-              </HoverTooltip>
-            </Th>
-            <Th align="center">
-              <ImageSortToggleHeader
-                enabled={sortControlsEnabled}
-                onToggle={toggleImageSortControls}
-                label="name"
-              />
-            </Th>
-            {extraCols.map(([col, key], index) => {
-              const active = sortState?.key === key;
+            {orderedColumns.map((column) => {
+              const active = column.kind === "extra" && sortState?.key === column.key;
+              const minWidth = column.kind === "idx"
+                ? 34
+                : column.kind === "thumbnail"
+                  ? 56
+                  : column.kind === "name"
+                    ? 120
+                    : 52;
               return (
-                <Th key={col} align={index < 2 ? "center" : "left"}>
-                  {sortControlsEnabled ? (
+                <Th
+                  key={column.id}
+                  columnId={column.id}
+                  align={column.align}
+                  dragOver={dragOverColumnId === column.id}
+                  onPointerDown={startImageTableColumnDrag(column.id)}
+                  onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
+                >
+                  {column.kind === "idx" ? (
+                    <HoverTooltip content="IDX 鍘熷椤哄簭" positioning="below-center" inline>
+                      <span>idx</span>
+                    </HoverTooltip>
+                  ) : column.kind === "thumbnail" ? (
+                    column.label
+                  ) : column.kind === "name" ? (
+                    <ImageSortToggleHeader
+                      enabled={sortControlsEnabled}
+                      onToggle={toggleImageSortControls}
+                      label={column.label}
+                    />
+                  ) : sortControlsEnabled ? (
                     <ImageSortHeader
-                      label={col}
-                      align={index < 2 ? "center" : "left"}
+                      label={column.label}
+                      align={column.align}
                       active={active}
-                      direction={active ? sortState.direction : "asc"}
+                      direction={active && sortState ? sortState.direction : "asc"}
                       loading={active && sortLoading}
-                      onClick={() => toggleImageSort(col, key)}
+                      onClick={() => toggleImageSort(column.label, column.key ?? "")}
                       onReset={() => setSortState(null)}
                     />
-                  ) : col}
+                  ) : column.label}
                 </Th>
               );
             })}
@@ -1378,19 +1439,23 @@ function ImageTab({
                     scrollRef.current?.focus({ preventScroll: true });
                     onPick(i);
                   }}
-                  style={{
-                    cursor: "pointer",
-                    height: IMAGE_TABLE_ROW_HEIGHT,
-                    background: i === current ? "var(--colorBrandBackground2)" : "transparent",
-                    borderBottom: "1px solid var(--colorNeutralStroke3)",
-                  }}>
-                <Td align="center">{i + 1}</Td>
-                <Td align="center">{e.name}</Td>
-                {extraCols.map(([col, key], index) => (
-                  <Td key={col} align={index < 2 ? "center" : "left"}>
-                    {data[key] ?? "-"}
-                  </Td>
-                ))}
+                   style={{
+                     cursor: "pointer",
+                     height: IMAGE_TABLE_ROW_HEIGHT,
+                     background: i === current ? "var(--colorBrandBackground2)" : "transparent",
+                     color: i === current ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground1)",
+                   }}>
+                 {orderedColumns.map((column) => (
+                   <Td key={column.id} align={column.align}>
+                     {column.kind === "idx"
+                       ? i + 1
+                       : column.kind === "thumbnail"
+                         ? <ImageTableThumbnail entry={e} />
+                         : column.kind === "name"
+                           ? e.name
+                           : data[column.key ?? ""] ?? "-"}
+                   </Td>
+                 ))}
               </tr>
             );
           })}
@@ -1412,16 +1477,13 @@ function ImageTab({
   );
 }
 
-function LceTab({
-  entry,
+export function LceTab({
   schema,
   tomlData,
 }: {
-  entry: ImageEntry | undefined;
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
 }) {
-  const [mode, setMode] = useState<LcePreviewMode>(readLcePreviewMode);
   const labels = ["0", "1", "50", "250", "500", "750", "950", "999"];
   const num = (k: string) => {
     const v = tomlData[k];
@@ -1430,14 +1492,25 @@ function LceTab({
   };
   const p = labels.map((n) => num(`SW_LCE_P${n}`));
   const o = labels.map((n) => num(`SW_LCE_O${n}`));
-
-  useEffect(() => {
-    writeLcePreviewMode(mode);
-  }, [mode]);
-
+  const entry: ImageEntry | undefined = undefined;
+  const hideImage = true;
+  const previewMode: string = "image_table";
+  const setMode = (_mode: string) => {};
   return (
     <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-split" className="h-full w-full">
       <Panel defaultSize={38} minSize={22}>
+        <div className="h-full w-full overflow-hidden border"
+             style={{
+               background: "var(--colorNeutralBackground1)",
+               borderColor: "var(--colorNeutralStroke2)",
+               borderLeft: 0,
+               borderTop: 0,
+               borderBottom: 0,
+               borderRadius: "0 0 0 12px",
+             }}>
+          <LcePreviewInfoTable schema={schema} tomlData={tomlData} />
+        </div>
+        {false && (
         <div className="h-full w-full">
             <div
               className="relative flex h-full w-full items-center justify-center overflow-hidden border"
@@ -1452,17 +1525,19 @@ function LceTab({
             >
               <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md px-1 py-1"
                    style={getOverlayChrome()}>
-                <HoverTooltip content="图片" positioning="below-center" inline>
-                  <Button
-                    appearance={mode === "image" ? "primary" : "subtle"}
-                  size="small"
-                  icon={<Image24Regular />}
-                  onClick={() => setMode("image")}
-                />
-              </HoverTooltip>
+                {!hideImage && (
+                  <HoverTooltip content="图片" positioning="below-center" inline>
+                    <Button
+                      appearance={previewMode === "image" ? "primary" : "subtle"}
+                      size="small"
+                      icon={<Image24Regular />}
+                      onClick={() => setMode("image")}
+                    />
+                  </HoverTooltip>
+                )}
                 <HoverTooltip content="三段图" positioning="below-center" inline>
                   <Button
-                    appearance={mode === "image_split" ? "primary" : "subtle"}
+                    appearance={previewMode === "image_split" ? "primary" : "subtle"}
                     size="small"
                     icon={<ChartMultiple24Regular />}
                     onClick={() => setMode("image_split")}
@@ -1470,19 +1545,24 @@ function LceTab({
                 </HoverTooltip>
                 <HoverTooltip content="二段图" positioning="below-center" inline>
                   <Button
-                    appearance={mode === "image_table" ? "primary" : "subtle"}
+                    appearance={previewMode === "image_table" ? "primary" : "subtle"}
                     size="small"
                     icon={<TableSimple24Regular />}
                     onClick={() => setMode("image_table")}
                   />
                 </HoverTooltip>
               </div>
-              {mode === "image" && <LceImagePreview entry={entry} />}
-              {mode === "image_table" && <LceImageTableMode entry={entry} schema={schema} tomlData={tomlData} />}
-              {mode === "image_split" && <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} />}
+              {previewMode === "image" && <LceImagePreview entry={entry} />}
+              {previewMode === "image_table" && (
+                <LceImageTableMode entry={entry} schema={schema} tomlData={tomlData} hideImage={hideImage} />
+              )}
+              {previewMode === "image_split" && (
+                <ImageSplitMode entry={entry} schema={schema} tomlData={tomlData} hideImage={hideImage} />
+              )}
             </div>
           </div>
-        </Panel>
+        )}
+      </Panel>
       <ResizeHandle direction="horizontal" size={10} />
       <Panel minSize={30}>
         <div className="h-full w-full">
@@ -1505,7 +1585,7 @@ function LceTab({
   );
 }
 
-function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
+export function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
   const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
 
   if (!entry) {
@@ -1541,13 +1621,18 @@ function LceImageTableMode({
   entry,
   schema,
   tomlData,
+  hideImage = false,
 }: {
   entry: ImageEntry | undefined;
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
+  hideImage?: boolean;
 }) {
   const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
-  const items = schema.preview_info?.items ?? [];
+
+  if (hideImage) {
+    return <LcePreviewInfoTable schema={schema} tomlData={tomlData} />;
+  }
 
   return (
     <PanelGroup direction="horizontal" autoSaveId="isp6s-lce-image-table" className="h-full w-full">
@@ -1562,89 +1647,72 @@ function LceImageTableMode({
       <ResizeHandle direction="horizontal" size={8} />
 
       <Panel defaultSize={54} minSize={28}>
-        <div className="h-full w-full overflow-auto p-3">
-          <table className="w-full text-xs"
-                 style={{ fontFamily: "ui-monospace, monospace" }}>
-            <tbody>
-              {(items as Array<{ label: string; toml_key: string }>).map((it, i) => (
-                <tr key={`${it.label}-${i}`}
-                    style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
-                  <td className="px-3 py-1.5 align-top font-semibold"
-                      style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
-                    {it.label}
-                  </td>
-                  <td className="px-3 py-1.5"
-                      style={{ color: "var(--colorNeutralForeground1)" }}>
-                    {tomlData[it.toml_key] ?? "—"}
-                  </td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr><td className="p-3 text-center text-xs"
-                        style={{ color: "var(--colorNeutralForeground3)" }} colSpan={2}>
-                  Isp6s.toml 未配置 [[preview_info.items]]
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <LcePreviewInfoTable schema={schema} tomlData={tomlData} />
       </Panel>
     </PanelGroup>
   );
 }
 
-function DraggableTabButton({
-  id,
-  label,
-  active,
-  onClick,
+function LcePreviewInfoTable({
+  schema,
+  tomlData,
 }: {
-  id: TabId;
-  label: string;
-  active: boolean;
-  onClick: () => void;
+  schema: Isp6sSchemaRoot;
+  tomlData: Record<string, string>;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
-
+  const items = schema.preview_info?.items ?? [];
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      onClick={onClick}
-      className="rounded-md border px-2.5 py-1.5 text-xs transition-colors"
-      style={{
-        transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
-        transition,
-        background: active ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground1)",
-        borderColor: active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)",
-        color: active
-          ? "var(--colorNeutralForegroundOnBrand)"
-          : "var(--colorNeutralForeground2)",
-        fontWeight: active ? 600 : 500,
-        opacity: isDragging ? 0.72 : 1,
-        cursor: "grab",
-        touchAction: "none",
-        flexShrink: 0,
-      }}
-      onMouseEnter={(event) => {
-        if (!active) event.currentTarget.style.background = "var(--colorSubtleBackgroundHover)";
-      }}
-      onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = "var(--colorNeutralBackground1)";
-      }}
-      {...attributes}
-      {...listeners}
-    >
-      {label}
-    </button>
+    <div className="h-full w-full overflow-auto p-3">
+      <table className="w-full text-xs" style={{ fontFamily: "ui-monospace, monospace" }}>
+        <tbody>
+          {(items as LcePreviewInfoItem[]).map((it, i) => (
+            <tr key={`${it.label}-${i}`} style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
+              <td className="px-3 py-1.5 align-top font-semibold"
+                  style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
+                {it.label}
+              </td>
+              <td className="px-3 py-1.5" style={{ color: "var(--colorNeutralForeground1)" }}>
+                {formatLcePreviewInfoValue(it, tomlData)}
+              </td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr><td className="p-3 text-center text-xs"
+                    style={{ color: "var(--colorNeutralForeground3)" }} colSpan={2}>
+              Isp6s.toml 未配置 [[preview_info.items]]
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+type LcePreviewInfoItem = {
+  label: string;
+  toml_key?: string;
+  toml_keys?: string[];
+};
+
+function formatLcePreviewInfoValue(
+  item: LcePreviewInfoItem,
+  tomlData: Record<string, string>,
+): string {
+  const keys = item.toml_keys?.filter(Boolean) ?? [];
+  if (keys.length >= 3) {
+    const [valueKey, lowKey, highKey] = keys;
+    return `${tomlLookup(tomlData, valueKey)} [${tomlLookup(tomlData, lowKey)}, ${tomlLookup(tomlData, highKey)}]`;
+  }
+  if (keys.length > 0) {
+    return keys.map((key) => tomlLookup(tomlData, key)).join(" / ");
+  }
+  return tomlLookup(tomlData, item.toml_key);
+}
+
+function tomlLookup(tomlData: Record<string, string>, key: string | undefined): string {
+  if (!key) return "-";
+  const value = tomlData[key] ?? tomlData[key.toLowerCase()];
+  return value === undefined || value === "" ? "-" : value;
 }
 
 function getOverlayChrome(): React.CSSProperties {
@@ -1653,25 +1721,6 @@ function getOverlayChrome(): React.CSSProperties {
     background: isLight ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.18)",
     borderColor: isLight ? "rgba(138,132,151,0.24)" : "rgba(255,255,255,0.08)",
     backdropFilter: "blur(6px)",
-  };
-}
-
-function getCurrentImageLabelChrome(): React.CSSProperties {
-  const isLight = document.documentElement.classList.contains("light");
-  return {
-    background: isLight
-      ? "rgba(103, 80, 164, 0.14)"
-      : "rgba(123, 97, 255, 0.22)",
-    color: isLight ? "#5B3FA0" : "#D9CBFF",
-    border: `1px solid ${isLight ? "rgba(103, 80, 164, 0.18)" : "rgba(160, 140, 255, 0.24)"}`,
-  };
-}
-
-function getCurrentImageConnectorChrome(): React.CSSProperties {
-  const isLight = document.documentElement.classList.contains("light");
-  return {
-    border: `1px dashed ${isLight ? "rgba(103, 80, 164, 0.34)" : "rgba(160, 140, 255, 0.38)"}`,
-    background: isLight ? "rgba(103, 80, 164, 0.04)" : "rgba(123, 97, 255, 0.08)",
   };
 }
 
@@ -1703,6 +1752,52 @@ function clampImageColumnWidth(value: number, min: number, max: number): number 
   return Math.min(max, Math.max(min, Math.ceil(value)));
 }
 
+function readImageTableColumnOrder(): string[] {
+  try {
+    const stored = window.localStorage.getItem(IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeImageTableColumnOrder(order: string[]) {
+  try {
+    window.localStorage.setItem(IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY, JSON.stringify(order));
+  } catch {
+    // Ignore storage failures; the in-memory order still works for this mount.
+  }
+}
+
+function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string[] {
+  const next = saved.filter((id, index) => defaults.includes(id) && saved.indexOf(id) === index);
+  for (const id of defaults) {
+    if (next.includes(id)) continue;
+    const defaultIndex = defaults.indexOf(id);
+    const precedingId = defaults
+      .slice(0, defaultIndex)
+      .reverse()
+      .find((candidate) => next.includes(candidate));
+    if (precedingId) {
+      next.splice(next.indexOf(precedingId) + 1, 0, id);
+      continue;
+    }
+    const followingId = defaults
+      .slice(defaultIndex + 1)
+      .find((candidate) => next.includes(candidate));
+    next.splice(followingId ? next.indexOf(followingId) : next.length, 0, id);
+  }
+  return next;
+}
+
+function areImageTableColumnOrdersEqual(first: string[], second: string[]): boolean {
+  return first.length === second.length && first.every((id, index) => id === second[index]);
+}
+
 function readImageTableSortControlsEnabled(): boolean {
   try {
     const stored = window.localStorage.getItem(IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY);
@@ -1718,48 +1813,6 @@ function writeImageTableSortControlsEnabled(enabled: boolean) {
   } catch {
     // Ignore storage failures; the in-memory state still works for this mount.
   }
-}
-
-function readImageListTab(): TabId {
-  try {
-    const stored = window.localStorage.getItem(IMAGE_LIST_TAB_STORAGE_KEY);
-    return isImageListTab(stored) ? stored : "image";
-  } catch {
-    return "image";
-  }
-}
-
-function writeImageListTab(tab: TabId) {
-  try {
-    window.localStorage.setItem(IMAGE_LIST_TAB_STORAGE_KEY, tab);
-  } catch {
-    // Ignore storage failures; the in-memory state still works for this mount.
-  }
-}
-
-function isImageListTab(value: string | null): value is TabId {
-  return value === "image" || value === "normal" || value === "face" || value === "lce";
-}
-
-function readLcePreviewMode(): LcePreviewMode {
-  try {
-    const stored = window.localStorage.getItem(LCE_PREVIEW_MODE_STORAGE_KEY);
-    return isLcePreviewMode(stored) ? stored : "image";
-  } catch {
-    return "image";
-  }
-}
-
-function writeLcePreviewMode(mode: LcePreviewMode) {
-  try {
-    window.localStorage.setItem(LCE_PREVIEW_MODE_STORAGE_KEY, mode);
-  } catch {
-    // Ignore storage failures; the in-memory state still works for this mount.
-  }
-}
-
-function isLcePreviewMode(value: string | null): value is LcePreviewMode {
-  return value === "image" || value === "image_table" || value === "image_split";
 }
 
 function parseImageSortNumber(value: string | undefined): number | null {
@@ -1872,14 +1925,50 @@ function ImageSortHeader({
 function Th({
   children,
   align = "left",
+  onResizeStart,
+  columnId,
+  dragOver = false,
+  onPointerDown,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
+  onResizeStart?: (event: ReactPointerEvent<HTMLSpanElement>) => void;
+  columnId?: string;
+  dragOver?: boolean;
+  onPointerDown?: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
 }) {
   return (
-    <th className="overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 text-xs font-semibold uppercase"
-        style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+    <th
+        className="relative overflow-hidden text-ellipsis whitespace-nowrap px-2 py-1 text-xs font-semibold"
+        data-image-table-column-id={columnId}
+        onPointerDown={onPointerDown}
+        style={{
+          border: "1px solid var(--colorNeutralStroke2)",
+          height: IMAGE_TABLE_HEADER_HEIGHT,
+          boxSizing: "border-box",
+          background: dragOver ? "var(--colorBrandBackground2)" : undefined,
+          boxShadow: dragOver ? "inset 2px 0 0 var(--colorBrandForeground1)" : undefined,
+          cursor: onPointerDown ? "grab" : undefined,
+        }}>
       <span style={{ display: "block", textAlign: align }}>{children}</span>
+      {onResizeStart && (
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          title="拖拽调整列宽"
+          onPointerDown={onResizeStart}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: -3,
+            zIndex: 2,
+            width: 7,
+            height: "100%",
+            cursor: "col-resize",
+            touchAction: "none",
+          }}
+        />
+      )}
     </th>
   );
 }
@@ -1892,11 +1981,13 @@ function Td({
   align?: "left" | "center";
 }) {
   return (
-    <td className="px-2 py-1.5"
+    <td className="px-2 py-1"
         style={{
-          color: "var(--colorNeutralForeground2)",
+          border: "1px solid var(--colorNeutralStroke2)",
           textAlign: align,
           whiteSpace: "nowrap",
+          height: IMAGE_TABLE_ROW_HEIGHT,
+          boxSizing: "border-box",
         }}>
       <span className="block min-w-0 truncate">{children}</span>
     </td>

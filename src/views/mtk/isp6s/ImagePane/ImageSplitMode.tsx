@@ -9,6 +9,7 @@ interface Props {
   entry:    ImageEntry | undefined;
   schema:   Isp6sSchemaRoot;
   tomlData: Record<string, string>;
+  hideImage?: boolean;
 }
 
 type HistogramData = {
@@ -40,7 +41,7 @@ const HISTOGRAM_TICKS = [0, 51, 102, 153, 204, 255] as const;
  * `image_split` mode: three horizontal sections from left to right:
  * histogram + image preview + preview info table.
  */
-export function ImageSplitMode({ entry, schema, tomlData }: Props) {
+export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: Props) {
   const histRef = useRef<HTMLCanvasElement | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [histogram, setHistogram] = useState<HistogramData | null>(null);
@@ -113,7 +114,7 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
 
   return (
     <PanelGroup direction="horizontal" autoSaveId="isp6s-image-split" className="h-full w-full">
-      <Panel defaultSize={24} minSize={18}>
+      <Panel defaultSize={hideImage ? 46 : 24} minSize={18}>
         <div className="flex h-full w-full items-center justify-center p-3">
           <canvas
             ref={histRef}
@@ -124,20 +125,23 @@ export function ImageSplitMode({ entry, schema, tomlData }: Props) {
         </div>
       </Panel>
 
+      {!hideImage && (
+        <>
+          <ResizeHandle direction="horizontal" size={8} />
+          <Panel defaultSize={38} minSize={24}>
+            <div className="flex h-full w-full items-center justify-center overflow-hidden p-3">
+              {url
+                ? <img src={url} alt={entry?.name ?? ""}
+                       className="max-h-full max-w-full object-contain" draggable={false} />
+                : <span className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>请先选择图片文件</span>}
+            </div>
+          </Panel>
+        </>
+      )}
+
       <ResizeHandle direction="horizontal" size={8} />
 
-      <Panel defaultSize={38} minSize={24}>
-        <div className="flex h-full w-full items-center justify-center overflow-hidden p-3">
-          {url
-            ? <img src={url} alt={entry?.name ?? ""}
-                   className="max-h-full max-w-full object-contain" draggable={false} />
-            : <span className="text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>请先选择图片文件</span>}
-        </div>
-      </Panel>
-
-      <ResizeHandle direction="horizontal" size={8} />
-
-      <Panel defaultSize={38} minSize={24}>
+      <Panel defaultSize={hideImage ? 54 : 38} minSize={24}>
         <div className="h-full w-full overflow-auto p-3">
           <table className="w-full text-xs"
                  style={{ fontFamily: "ui-monospace, monospace" }}>

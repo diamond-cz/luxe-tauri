@@ -5,7 +5,6 @@ import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ChartMapMode } from "./ChartMapMode";
-import { ParaCheckMode } from "./ParaCheckMode";
 import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
 import {
   normalizeSourceText,
@@ -14,7 +13,6 @@ import {
   type SourceCodeDraft,
 } from "../SourceCodeView";
 import {
-  PreviewLink24Regular,
   ChartMultiple24Regular,
   Code24Regular,
   CodeBlock24Regular,
@@ -41,7 +39,6 @@ interface CardJumpTarget {
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
   { id: "param_map",   label: "源码映射", Icon: Code24Regular },
   { id: "chart_map",   label: "图表映射", Icon: ChartMultiple24Regular },
-  { id: "para_check",  label: "参数对比", Icon: PreviewLink24Regular },
 ];
 
 export function ImagePane({
@@ -56,8 +53,8 @@ export function ImagePane({
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
-  const effectiveMode: PreviewMode =
-    mode === "image" || mode === "image_split" ? "param_map" : mode;
+  const effectiveMode: Exclude<PreviewMode, "para_check"> =
+    mode === "chart_map" ? "chart_map" : "param_map";
   const draftDirty = sourceDraftDirty(sourceDraft);
   const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
   const draftResolvePath = draftDirty && tempDraftReady ? tempDraft!.path : filePath;
@@ -221,7 +218,7 @@ export function ImagePane({
            overflow: "hidden",
          }}>
       <div ref={headerRef}
-           className="flex h-11 shrink-0 items-center justify-between gap-3 px-4"
+           className="flex h-8 shrink-0 items-center justify-between gap-3 px-4"
            style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
         <div className="flex shrink-0 items-center gap-2 text-xs"
              style={{ color: "var(--colorNeutralForeground2)" }}>
@@ -239,7 +236,7 @@ export function ImagePane({
                   appearance={active ? "primary" : "subtle"}
                   icon={<Icon />}
                   onClick={() => handleMode(id)}
-                  className="h-8"
+                  className="h-7"
                   style={{
                     minWidth: showModeLabels ? undefined : 32,
                     paddingLeft: showModeLabels ? undefined : 8,
@@ -256,7 +253,6 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {effectiveMode === "para_check"  && <ParaCheckMode  filePath={filePath} schema={schema} tomlData={tomlData} />}
         {effectiveMode === "chart_map" && chartFilePath && (
           <ChartMapMode
             filePath={chartFilePath}

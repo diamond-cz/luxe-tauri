@@ -20,7 +20,7 @@
 # ─────────────────────────────────────────────────────────────────────────
 
 [card.Normal]
-CWR = "AE_TAG_PURE_AE_CWR"
+CWR = "AE_TAG_PURE_AE_CWR_STABLE"
 
 [card.Normal.wt]
 MainT    = "AE_TAG_HSV6_MAINT_WET"
@@ -103,7 +103,8 @@ avgfdy      = "AE_TAG_FACE_AVGFDY_0"
 gaufdy      = "AE_TAG_FACE_GAU_FDY_0"
 FDY     = "AE_TAG_FLT_FDY"
 Normal  = "AE_TAG_PURE_AE_CWR_STABLE"
-Link_AE = "AE_TAG_LINK_AE_CWR_STABLE"
+LINK_AE = "AE_TAG_LINK_AE_CWR_STABLE"
+FACE_Prob = "AE_TAG_FACE_PROB"
 SZ_RA       = "AE_TAG_FLT_FDSZ_RA"
 NS_Prob     = "AE_TAG_NS_PROB"
 Link_Face   = "AE_TAG_LINK_FACE_CWR_STABLE"
@@ -207,36 +208,36 @@ toml_key = "AE_TAG_BV_OFFSET"
 # ─────────────────────────────────────────────────────────────────────────
 
 [[preview_info.items]]
-label = "bv"
-toml_key = "AE_TAG_REALBVX1000"
+label = "LV"
+toml_keys = ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"]
 
 [[preview_info.items]]
-label = "hsevd"
-toml_key = "AE_TAG_HS_EVD"
+label = "DR"
+toml_keys = ["SW_LCE_CurrDR", "SW_LCE_DRIdx_L", "SW_LCE_DRIdx_H"]
 
 [[preview_info.items]]
-label = "nsevd"
-toml_key = "AE_TAG_NS_EVD"
+label = "Target"
+toml_key = "SW_LCE_FinalTarget"
 
 [[preview_info.items]]
-label = "B2D"
-toml_key = "AE_TAG_DRV6_B2D"
+label = "DStrenth"
+toml_key = "SW_LCE_FinalDStrength"
 
 [[preview_info.items]]
-label = "B2M"
-toml_key = "AE_TAG_DRV6_B2M"
+label = "BStrenth"
+toml_key = "SW_LCE_FinalBStrength"
 
 [[preview_info.items]]
-label = "CorrB2M"
-toml_key = "AE_TAG_DRV6_CORR_B2M"
+label = "AEGain"
+toml_key = "SW_LCE_AEGain"
 
 [[preview_info.items]]
-label = "M2D"
-toml_key = "AE_TAG_DRV6_M2D"
+label = "FaceLoBound"
+toml_key = "SW_LCE_FaceLoBound"
 
 [[preview_info.items]]
-label = "FDR"
-toml_key = "AE_TAG_FLT_DR"
+label = "FaceHiBound"
+toml_key = "SW_LCE_FaceHiBound"
 
 # [[preview_info.items]]
 # label = "LCE_LV"

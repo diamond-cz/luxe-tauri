@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { ChevronDown24Regular } from "@fluentui/react-icons";
 
 interface Props {
@@ -8,11 +8,14 @@ interface Props {
   /** Optional extra actions placed between badges and chevron. Click events
    *  are stopped so they don't toggle the card. */
   headerExtra?: ReactNode;
+  /** Hide the extra action slot while preserving callers that still provide it. */
+  hideHeaderExtra?: boolean;
   /** Whether the card is collapsed initially. */
   defaultCollapsed?: boolean;
   /** Controlled-mode collapsed state. */
   collapsed?: boolean;
   onToggle?:  (collapsed: boolean) => void;
+  onToggleContextMenu?: (event: MouseEvent<HTMLElement>) => void;
   children:   ReactNode;
   className?: string;
   surface?: "default" | "panel";
@@ -27,7 +30,8 @@ interface Props {
  */
 export function CollapsibleCard({
   title, badges, headerExtra, defaultCollapsed = false,
-  collapsed, onToggle, children, className, surface = "default",
+  collapsed, onToggle, onToggleContextMenu, children, className, surface = "default",
+  hideHeaderExtra = false,
 }: Props) {
   const [internal, setInternal] = useState(defaultCollapsed);
   const isControlled = collapsed !== undefined;
@@ -79,16 +83,26 @@ export function CollapsibleCard({
           {badges && (
             <span className="flex items-center gap-1.5">{badges}</span>
           )}
-          {headerExtra && (
+          {headerExtra && !hideHeaderExtra && (
             <span className="flex items-center gap-1.5"
                   onClick={(e) => e.stopPropagation()}>
               {headerExtra}
             </span>
           )}
-          <ChevronDown24Regular
-            className="transition-transform"
-            style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
-          />
+          <span
+            className="inline-flex h-6 w-6 items-center justify-center"
+            onContextMenu={(event) => {
+              if (!onToggleContextMenu) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleContextMenu(event);
+            }}
+          >
+            <ChevronDown24Regular
+              className="transition-transform"
+              style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
+            />
+          </span>
         </span>
       </button>
       <div

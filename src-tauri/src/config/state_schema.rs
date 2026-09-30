@@ -99,11 +99,15 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub image_inner_ratios:         Vec<f32>,
     #[serde(default = "default_preview_mode")]
     pub preview_mode:                                 String,           // image / image_split / para_check / param_map / chart_map
+    #[serde(default = "default_workspace_card_order")]
+    pub workspace_card_order:                         Vec<String>,
+    #[serde(default = "default_workspace_column_ratios")]
+    pub workspace_column_ratios:                      Vec<f32>,
     #[serde(default)] pub top_card_order:             Vec<String>,
     #[serde(default)] pub normal_collapsed:           bool,
     #[serde(default)] pub face_collapsed:             bool,
-    #[serde(default)] pub normal_wf_row_mode:         bool,
-    #[serde(default)] pub face_wf_row_mode:           bool,
+    #[serde(default = "default_true")] pub normal_wf_row_mode: bool,
+    #[serde(default = "default_true")] pub face_wf_row_mode:   bool,
     #[serde(default)] pub normal_card_order:          Vec<String>,
     #[serde(default)] pub face_card_order:            Vec<String>,
     #[serde(default)] pub normal_col_ratios:          Vec<f32>,
@@ -136,6 +140,10 @@ fn default_split_ratio() -> f32 { 0.7 }
 fn default_image_splitter_ratio() -> f32 { 0.5 }
 fn default_image_splitter_orientation() -> String { "V".into() }
 fn default_preview_mode() -> String { "image".into() }
+fn default_workspace_card_order() -> Vec<String> {
+    vec!["imageList".into(), "imageInfo".into(), "sourceCode".into()]
+}
+fn default_workspace_column_ratios() -> Vec<f32> { vec![34.0, 33.0, 33.0] }
 fn default_table_header_ratios() -> Vec<f32> { vec![24.0, 18.0, 58.0] }
 fn default_chart_main_t_card_order() -> Vec<String> {
     vec!["mainThd".into(), "mtwv".into(), "mainTarget".into()]
@@ -161,17 +169,19 @@ impl Default for Isp6sAeVisual {
             image_splitter_orientation: default_image_splitter_orientation(),
             image_inner_ratios: vec![],
             preview_mode: default_preview_mode(),
+            workspace_card_order: default_workspace_card_order(),
+            workspace_column_ratios: default_workspace_column_ratios(),
             top_card_order: vec![],
             normal_collapsed: false,
             face_collapsed: false,
-            normal_wf_row_mode: false,
-            face_wf_row_mode: false,
+            normal_wf_row_mode: true,
+            face_wf_row_mode: true,
             normal_card_order: vec![],
             face_card_order: vec![],
             normal_col_ratios: vec![],
             face_col_ratios: vec![],
             normal_sub_order: NormalSubOrder::default(),
-            table_collapsed: true,
+            table_collapsed: false,
             table_header_ratios: default_table_header_ratios(),
             chart_main_t_card_order: default_chart_main_t_card_order(),
             chart_main_t_card_collapsed: vec![],
