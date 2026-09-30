@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { saveStateSection } from "@/ipc/stateIo";
 import { parseCppFile } from "@/ipc/cppParser";
@@ -24,6 +24,8 @@ export function MtkView() {
   const setCurrentIsp  = useMtkStore((s) => s.setCurrentIsp);
   const setCurrentTab  = useMtkStore((s) => s.setCurrentTab);
   const setInnerSplit  = useMtkStore((s) => s.setInnerSplit);
+  const debugParserPath = useMtkStore((s) => s.debugParserPath);
+  const setDebugParserPath = useMtkStore((s) => s.setDebugParserPath);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -52,6 +54,16 @@ export function MtkView() {
     detail?: string;
     duration?: number;
   } | null>(null);
+  const workspaceDividerXRef = useRef<number | null>(null);
+  const alignWorkspaceDividerRef = useRef<((x: number) => void) | null>(null);
+  const registerWorkspaceDividerAlign = useCallback((align: ((x: number) => void) | null) => {
+    alignWorkspaceDividerRef.current = align;
+    if (align && workspaceDividerXRef.current !== null) align(workspaceDividerXRef.current);
+  }, []);
+  const reportWorkspaceDivider = useCallback((x: number) => {
+    workspaceDividerXRef.current = x;
+    alignWorkspaceDividerRef.current?.(x);
+  }, []);
 
   const onCppPathChange = async (path: string) => {
     setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
@@ -110,10 +122,13 @@ export function MtkView() {
         tabIdx={tabIdx}
         cppFileHint={tab.fileHint}
         cppPath={imports.filePath}
+        debugParserPath={debugParserPath}
         pickerRatios={mtk.inner_splitter}
+        onRegisterWorkspaceDividerAlign={registerWorkspaceDividerAlign}
         onIspChange={(id) => setCurrentIsp(ISP_LIST.findIndex((i) => i.id === id))}
         onTabChange={setCurrentTab}
         onCppPathChange={onCppPathChange}
+        onDebugParserPathChange={setDebugParserPath}
         onPickerRatiosChange={setInnerSplit}
         onToast={setToast}
       />
@@ -135,6 +150,7 @@ export function MtkView() {
                   filePath={imports.filePath}
                   parsed={parsedReady}
                   onImageDirChange={onImageDirChange}
+                  onWorkspaceDividerChange={reportWorkspaceDivider}
                 />
               </Suspense>
             ) : parsedReady ? (

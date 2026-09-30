@@ -62,6 +62,12 @@ export function CollapsibleCard({
       <button
         type="button"
         onClick={flip}
+        onContextMenu={(event) => {
+          if (!onToggleContextMenu || !(event.target as Element).closest("[data-collapse-chevron]")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleContextMenu(event);
+        }}
         className={
           "flex h-11 w-full items-center justify-between gap-2 pl-7 pr-3 transition-colors " +
           (open ? "rounded-t-xl" : "rounded-xl")
@@ -90,13 +96,9 @@ export function CollapsibleCard({
             </span>
           )}
           <span
-            className="inline-flex h-6 w-6 items-center justify-center"
-            onContextMenu={(event) => {
-              if (!onToggleContextMenu) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onToggleContextMenu(event);
-            }}
+            data-collapse-chevron
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center"
+            title={onToggleContextMenu ? "右键切换网格和单行显示" : undefined}
           >
             <ChevronDown24Regular
               className="transition-transform"

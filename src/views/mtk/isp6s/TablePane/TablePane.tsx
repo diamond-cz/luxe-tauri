@@ -163,21 +163,19 @@ export function TablePane({
 
   return (
     <div ref={rootRef}
-         className="relative flex h-full w-full flex-col transition-colors"
+         className="relative flex h-full w-full min-w-0 flex-col transition-colors"
          style={{
            background,
            border: `1px solid ${borderColor}`,
            borderRadius: 12,
            overflow: "hidden",
          }}>
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 px-4"
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2 pl-10 pr-10"
            style={{
              background: "var(--colorNeutralBackground2)",
            }}>
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          <TableSimple24Regular className="h-4 w-4 shrink-0"
-                                style={{ color: "var(--colorBrandForeground1)" }} />
-          <span style={{ color: "var(--colorNeutralForeground2)" }}>图片列表卡片</span>
+        <div className="flex min-w-0 items-center text-xs">
+          <span className="truncate" style={{ color: "var(--colorNeutralForeground2)" }}>图片列表卡片</span>
         </div>
       </div>
       <div className="absolute right-2 top-1 z-10">
@@ -641,8 +639,9 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
   );
 }
 
-function ImageTableThumbnail({ entry }: { entry: ImageEntry }) {
+function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; columnWidth: number }) {
   const [url, setUrl] = useState<string | null>(null);
+  const thumbnailSize = Math.max(1, Math.min(48, columnWidth - 18));
 
   useEffect(() => {
     let cancelled = false;
@@ -659,8 +658,8 @@ function ImageTableThumbnail({ entry }: { entry: ImageEntry }) {
   return (
     <span style={{
       display: "inline-flex",
-      width: 48,
-      height: 48,
+      width: thumbnailSize,
+      height: thumbnailSize,
       alignItems: "center",
       justifyContent: "center",
       overflow: "hidden",
@@ -1098,7 +1097,7 @@ export function ImageTab({
   }
 
   function swapImageTableColumns(firstId: string, secondId: string) {
-    if (firstId === secondId) return;
+    if (firstId === secondId || firstId === "idx" || secondId === "idx") return;
     setColumnOrder((current) => {
       const next = mergeImageTableColumnOrder(
         current,
@@ -1376,7 +1375,7 @@ export function ImageTab({
         <thead style={{
            background: "var(--colorNeutralBackground2)",
           color: "var(--colorNeutralForeground2)",
-          position: "sticky", top: 0, zIndex: 1,
+          position: "sticky", top: 0, zIndex: 3,
           }}>
           <tr>
             {orderedColumns.map((column) => {
@@ -1394,7 +1393,8 @@ export function ImageTab({
                   columnId={column.id}
                   align={column.align}
                   dragOver={dragOverColumnId === column.id}
-                  onPointerDown={startImageTableColumnDrag(column.id)}
+                  stickyLeft={column.kind === "idx"}
+                  onPointerDown={column.kind === "idx" ? undefined : startImageTableColumnDrag(column.id)}
                   onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
                 >
                   {column.kind === "idx" ? (
@@ -1446,11 +1446,16 @@ export function ImageTab({
                      color: i === current ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground1)",
                    }}>
                  {orderedColumns.map((column) => (
-                   <Td key={column.id} align={column.align}>
+                   <Td
+                     key={column.id}
+                     align={column.align}
+                     stickyLeft={column.kind === "idx"}
+                     stickyBackground={i === current ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground3)"}
+                   >
                      {column.kind === "idx"
                        ? i + 1
                        : column.kind === "thumbnail"
-                         ? <ImageTableThumbnail entry={e} />
+                         ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
                            : data[column.key ?? ""] ?? "-"}
@@ -1791,6 +1796,7 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
       .find((candidate) => next.includes(candidate));
     next.splice(followingId ? next.indexOf(followingId) : next.length, 0, id);
   }
+  if (defaults.includes("idx")) return ["idx", ...next.filter((id) => id !== "idx")];
   return next;
 }
 
@@ -1928,6 +1934,7 @@ function Th({
   onResizeStart,
   columnId,
   dragOver = false,
+  stickyLeft = false,
   onPointerDown,
 }: {
   children: React.ReactNode;
@@ -1935,6 +1942,7 @@ function Th({
   onResizeStart?: (event: ReactPointerEvent<HTMLSpanElement>) => void;
   columnId?: string;
   dragOver?: boolean;
+  stickyLeft?: boolean;
   onPointerDown?: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
 }) {
   return (
@@ -1946,7 +1954,10 @@ function Th({
           border: "1px solid var(--colorNeutralStroke2)",
           height: IMAGE_TABLE_HEADER_HEIGHT,
           boxSizing: "border-box",
-          background: dragOver ? "var(--colorBrandBackground2)" : undefined,
+          position: stickyLeft ? "sticky" : undefined,
+          left: stickyLeft ? 0 : undefined,
+          zIndex: stickyLeft ? 4 : undefined,
+          background: dragOver ? "var(--colorBrandBackground2)" : stickyLeft ? "var(--colorNeutralBackground3)" : undefined,
           boxShadow: dragOver ? "inset 2px 0 0 var(--colorBrandForeground1)" : undefined,
           cursor: onPointerDown ? "grab" : undefined,
         }}>
@@ -1976,9 +1987,13 @@ function Th({
 function Td({
   children,
   align = "left",
+  stickyLeft = false,
+  stickyBackground,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
+  stickyLeft?: boolean;
+  stickyBackground?: string;
 }) {
   return (
     <td className="px-2 py-1"
@@ -1988,6 +2003,11 @@ function Td({
           whiteSpace: "nowrap",
           height: IMAGE_TABLE_ROW_HEIGHT,
           boxSizing: "border-box",
+          position: stickyLeft ? "sticky" : undefined,
+          left: stickyLeft ? 0 : undefined,
+          zIndex: stickyLeft ? 2 : undefined,
+          background: stickyLeft ? stickyBackground : undefined,
+          boxShadow: stickyLeft ? "inset -2px 0 0 var(--colorNeutralStroke1), 2px 0 4px rgba(0,0,0,0.08)" : undefined,
         }}>
       <span className="block min-w-0 truncate">{children}</span>
     </td>

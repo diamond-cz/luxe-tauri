@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { ChevronDown16Regular, DocumentText24Regular } from "@fluentui/react-icons";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
+import { AppGeneric24Regular, ChevronDown16Regular, DocumentText24Regular } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Panel, PanelGroup } from "react-resizable-panels";
+import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
@@ -14,43 +14,73 @@ interface Props {
   tabIdx: number;
   cppFileHint: string | null;
   cppPath: string | null;
+  debugParserPath: string | null;
   pickerRatios: number[];
+  onRegisterWorkspaceDividerAlign: (align: ((x: number) => void) | null) => void;
   onIspChange: (id: IspId) => void;
   onTabChange: (idx: number) => void;
   onCppPathChange: (path: string) => void;
+  onDebugParserPathChange: (path: string) => void;
   onPickerRatiosChange: (sizes: number[]) => void;
   onToast: (toast: { kind: ToastKind; title: string; detail?: string; duration?: number }) => void;
 }
 
 const CPP_EXTS = ["cpp", "c", "h", "hpp", "cxx", "cc"];
-const DEFAULT_PICKER_RATIOS = [68, 32];
+const DEFAULT_PICKER_RATIOS = [40, 60];
+type PickerSlot = "cpp" | "debugParser" | null;
 
 export function IspSelectBar({
   isp,
   tabIdx,
   cppFileHint,
   cppPath,
+  debugParserPath,
   pickerRatios,
+  onRegisterWorkspaceDividerAlign,
   onIspChange,
   onTabChange,
   onCppPathChange,
+  onDebugParserPathChange,
   onPickerRatiosChange,
   onToast,
 }: Props) {
   const tabs = ISP_TABS[isp];
   const selectRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
-  const lastHoverValidRef = useRef<"ok" | "bad" | null>(null);
+  const pickerGroupRef = useRef<HTMLDivElement | null>(null);
+  const tabPanelRef = useRef<ImperativePanelHandle | null>(null);
+  const debugParserRef = useRef<HTMLDivElement | null>(null);
+  const dropPathsRef = useRef<string[]>([]);
   const [selectHover, setSelectHover] = useState(false);
   const [selectFocus, setSelectFocus] = useState(false);
   const [selectOpen, setSelectOpen] = useState(false);
   const [pickerHover, setPickerHover] = useState(false);
   const [pickerDropState, setPickerDropState] = useState<"ok" | "bad" | null>(null);
+  const [debugParserHover, setDebugParserHover] = useState(false);
+  const [debugParserDropState, setDebugParserDropState] = useState<"ok" | "bad" | null>(null);
   const selectHighlighted = selectHover || selectFocus || selectOpen;
   const currentIspLabel = ISP_LIST.find((item) => item.id === isp)?.label ?? isp;
   const safeRatios = pickerRatios.length === 2 && pickerRatios.every((item) => Number.isFinite(item) && item > 0)
     ? pickerRatios
     : DEFAULT_PICKER_RATIOS;
+  const tabRatio = Math.max(16, Math.min(78, safeRatios[0]));
+
+  const alignWorkspaceDivider = useCallback((workspaceDividerX: number) => {
+    const group = pickerGroupRef.current;
+    const panel = tabPanelRef.current;
+    if (!cppFileHint || !group || !panel) return;
+    const rect = group.getBoundingClientRect();
+    const panelWidth = rect.width - 8;
+    if (panelWidth <= 0) return;
+    const ratio = ((workspaceDividerX - rect.left - 4) / panelWidth) * 100;
+    const next = Math.max(16, Math.min(78, ratio));
+    if (Math.abs(panel.getSize() - next) > 0.02) panel.resize(next);
+  }, [cppFileHint]);
+
+  useLayoutEffect(() => {
+    onRegisterWorkspaceDividerAlign(alignWorkspaceDivider);
+    return () => onRegisterWorkspaceDividerAlign(null);
+  }, [alignWorkspaceDivider, onRegisterWorkspaceDividerAlign]);
 
   useEffect(() => {
     if (!selectOpen) return;
@@ -72,50 +102,61 @@ export function IspSelectBar({
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const slotAt = (position: { x: number; y: number }): PickerSlot => {
+      if (!cppFileHint) return null;
+      if (hitTest(debugParserRef.current, position)) return "debugParser";
+      return hitTest(pickerRef.current, position) ? "cpp" : null;
+    };
+    const updateDropState = (slot: PickerSlot, paths: string[]) => {
+      setPickerDropState(slot === "cpp" ? classifyPickerDrop(slot, paths) : null);
+      setDebugParserDropState(slot === "debugParser" ? classifyPickerDrop(slot, paths) : null);
+    };
     (async () => {
       const win = getCurrentWindow();
-      unlisten = await win.onDragDropEvent((event) => {
+      const stopListening = await win.onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === "enter") {
-          const inside = hitTest(pickerRef.current, payload.position);
-          const nextState = cppFileHint ? classifyCppDrop(payload.paths) : null;
-          lastHoverValidRef.current = nextState;
-          setPickerDropState(inside ? nextState : null);
+          dropPathsRef.current = payload.paths;
+          updateDropState(slotAt(payload.position), payload.paths);
           return;
         }
         if (payload.type === "over") {
-          setPickerDropState(
-            hitTest(pickerRef.current, payload.position) && cppFileHint
-              ? lastHoverValidRef.current
-              : null,
-          );
+          updateDropState(slotAt(payload.position), dropPathsRef.current);
           return;
         }
         if (payload.type === "leave") {
-          setPickerDropState(null);
-          lastHoverValidRef.current = null;
+          dropPathsRef.current = [];
+          updateDropState(null, []);
           return;
         }
         if (payload.type === "drop") {
-          const inside = hitTest(pickerRef.current, payload.position);
-          const nextState = lastHoverValidRef.current;
-          setPickerDropState(null);
-          lastHoverValidRef.current = null;
-          if (!inside || nextState !== "ok" || !cppFileHint || payload.paths.length === 0) return;
-          const path = payload.paths.find((item) => matchExt(item, CPP_EXTS));
-          if (path) onCppPathChange(path);
+          const slot = slotAt(payload.position);
+          dropPathsRef.current = [];
+          updateDropState(null, []);
+          if (!slot || classifyPickerDrop(slot, payload.paths) !== "ok") return;
+          if (slot === "cpp") {
+            const path = payload.paths.find((item) => matchExt(item, CPP_EXTS));
+            if (path) onCppPathChange(path);
+          } else {
+            const path = payload.paths.find(isDebugParserPath);
+            if (path) onDebugParserPathChange(path);
+          }
         }
       });
-    })();
+      if (cancelled) stopListening();
+      else unlisten = stopListening;
+    })().catch((error) => console.warn("register picker drop listener failed", error));
 
     return () => {
-      setPickerDropState(null);
-      lastHoverValidRef.current = null;
+      cancelled = true;
+      dropPathsRef.current = [];
       unlisten?.();
     };
-  }, [cppFileHint, onCppPathChange]);
+  }, [cppFileHint, onCppPathChange, onDebugParserPathChange]);
 
   const pickerHighlight = pickerHover || pickerDropState !== null;
+  const debugParserHighlight = debugParserHover || debugParserDropState !== null;
 
   return (
     <div
@@ -124,7 +165,7 @@ export function IspSelectBar({
     >
       <div
         ref={selectRef}
-        className="relative flex h-full w-[140px] items-stretch transition-colors"
+        className="relative flex h-full w-[140px] shrink-0 items-stretch transition-colors"
         style={{
           background: selectHighlighted ? "var(--colorNeutralBackground3)" : "var(--colorNeutralBackground2)",
           borderRight: `1px solid ${selectHighlighted ? "var(--colorNeutralStroke1)" : "var(--colorNeutralStroke2)"}`,
@@ -183,15 +224,17 @@ export function IspSelectBar({
         )}
       </div>
 
-      <div className="min-w-0 flex-1 overflow-hidden">
+      <div ref={pickerGroupRef} className="min-w-0 flex-1 overflow-hidden">
         {cppFileHint ? (
-          <PanelGroup direction="horizontal" className="h-full w-full">
+          <PanelGroup direction="horizontal" className="h-full w-full min-w-0">
             <Panel
-              defaultSize={safeRatios[0]}
-              minSize={36}
+              ref={tabPanelRef}
+              defaultSize={tabRatio}
+              minSize={16}
+              maxSize={78}
               onResize={(size) => onPickerRatiosChange([size, 100 - size])}
             >
-              <div className="flex h-full min-w-0 items-stretch overflow-x-hidden">
+              <div className="flex h-full min-w-0 items-stretch overflow-x-auto overflow-y-hidden">
                 {tabs.map((tab, index) => (
                   <TabButton
                     key={`${tab.label}-${index}`}
@@ -206,26 +249,56 @@ export function IspSelectBar({
             <ResizeHandle direction="horizontal" size={8} alwaysVisible />
 
             <Panel
-              defaultSize={safeRatios[1]}
+              defaultSize={100 - tabRatio}
               minSize={22}
-              onResize={(size) => onPickerRatiosChange([100 - size, size])}
             >
-              <ParameterPicker
-                innerRef={pickerRef}
-                fileHint={cppFileHint}
-                path={cppPath}
-                highlighted={pickerHighlight}
-                dropState={pickerDropState}
-                onHoverChange={setPickerHover}
-                onToast={onToast}
-                onPick={async () => {
-                  const picked = await openDialog({
-                    multiple: false,
-                    filters: [{ name: "Source", extensions: CPP_EXTS }],
-                  });
-                  if (typeof picked === "string") onCppPathChange(picked);
-                }}
-              />
+              <div className="flex h-full min-w-0 items-stretch gap-2 overflow-hidden">
+                <div className="min-w-0" style={{ flex: "3 1 0" }}>
+                  <PathPicker
+                    innerRef={pickerRef}
+                    title={`${cppFileHint}参数路径`}
+                    fileLabel="参数文件"
+                    icon={<DocumentText24Regular className="h-4 w-4" />}
+                    path={cppPath}
+                    highlighted={pickerHighlight}
+                    dropState={pickerDropState}
+                    onHoverChange={setPickerHover}
+                    onToast={onToast}
+                    onPick={async () => {
+                      const picked = await openDialog({
+                        multiple: false,
+                        filters: [{ name: "Source", extensions: CPP_EXTS }],
+                      });
+                      if (typeof picked === "string") onCppPathChange(picked);
+                    }}
+                  />
+                </div>
+                <div className="min-w-0" style={{ flex: "2 1 0" }}>
+                  <PathPicker
+                    innerRef={debugParserRef}
+                    title="DP解析工具路径"
+                    fileLabel="DebugParser.exe"
+                    icon={<AppGeneric24Regular className="h-4 w-4" />}
+                    path={debugParserPath}
+                    highlighted={debugParserHighlight}
+                    dropState={debugParserDropState}
+                    onHoverChange={setDebugParserHover}
+                    onToast={onToast}
+                    onPick={async () => {
+                      const picked = await openDialog({
+                        multiple: false,
+                        filters: [{ name: "DebugParser.exe", extensions: ["exe"] }],
+                      });
+                      if (typeof picked !== "string") return;
+                      if (!isDebugParserPath(picked)) {
+                        onToast({ kind: "error", title: "请选择 DebugParser.exe" });
+                        return;
+                      }
+                      onDebugParserPathChange(picked);
+                    }}
+                  />
+                </div>
+              </div>
             </Panel>
           </PanelGroup>
         ) : (
@@ -296,7 +369,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className="relative flex h-full items-center gap-2 px-4 text-sm transition-colors"
+      className="relative flex h-full shrink-0 items-center gap-2 px-2 text-xs transition-colors"
       style={{
         color: active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground2)",
         fontWeight: active ? 600 : 500,
@@ -325,9 +398,11 @@ function TabButton({
   );
 }
 
-function ParameterPicker({
+function PathPicker({
   innerRef,
-  fileHint,
+  title,
+  fileLabel,
+  icon,
   path,
   highlighted,
   dropState,
@@ -336,7 +411,9 @@ function ParameterPicker({
   onPick,
 }: {
   innerRef: MutableRefObject<HTMLDivElement | null>;
-  fileHint: string;
+  title: string;
+  fileLabel: string;
+  icon: React.ReactNode;
   path: string | null;
   highlighted: boolean;
   dropState: "ok" | "bad" | null;
@@ -345,11 +422,10 @@ function ParameterPicker({
   onPick: () => void | Promise<void>;
 }) {
   const chrome = getPickerChrome(dropState, highlighted);
-  const title = `${fileHint}参数路径`;
   const secondary = path ?? "未加载";
   const tooltip = path
-    ? "左键单击更换参数文件，右键复制文件路径"
-    : "左键单击选择参数文件";
+    ? `左键单击更换${fileLabel}，右键复制文件路径：${path}`
+    : `左键单击选择${fileLabel}`;
   const [textHover, setTextHover] = useState(false);
 
   const copyPath = async () => {
@@ -361,7 +437,7 @@ function ParameterPicker({
       await navigator.clipboard.writeText(path);
       onToast({ kind: "success", title: "复制成功", duration: 1000 });
     } catch (error) {
-      console.warn("copy parameter path failed", error);
+      console.warn("copy file path failed", error);
       onToast({ kind: "error", title: "复制失败", duration: 1200 });
     }
   };
@@ -388,48 +464,50 @@ function ParameterPicker({
             color: "var(--colorNeutralForeground2)",
           }}
           onClick={(event) => openPicker(event)}
-          aria-label="选择参数文件"
+          aria-label={`选择${fileLabel}`}
         >
-          <DocumentText24Regular className="h-4 w-4" />
+          {icon}
         </button>
-        <HoverTooltip content={tooltip} positioning="below-start" wrap maxWidth={520} inline>
-          <span
-            className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 py-1 transition-colors"
-            style={{
-              color: "var(--colorNeutralForeground1)",
-              background: textHover ? "var(--colorSubtleBackgroundHover)" : "transparent",
-            }}
-            onMouseEnter={() => setTextHover(true)}
-            onMouseLeave={() => setTextHover(false)}
-            onFocus={() => setTextHover(true)}
-            onBlur={() => setTextHover(false)}
-            onClick={(event) => openPicker(event)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void copyPath();
-            }}
-            onMouseDown={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            role="button"
-            aria-label={tooltip}
-            tabIndex={0}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                openPicker(event);
-              }
-            }}
-          >
-            <span className="shrink-0 text-xs font-semibold">{title}</span>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <HoverTooltip content={tooltip} positioning="below-start" wrap maxWidth={520}>
             <span
-              className="min-w-0 truncate text-[11px]"
-              style={{ color: "var(--colorNeutralForeground3)" }}
+              className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 py-1 transition-colors"
+              style={{
+                color: "var(--colorNeutralForeground1)",
+                background: textHover ? "var(--colorSubtleBackgroundHover)" : "transparent",
+              }}
+              onMouseEnter={() => setTextHover(true)}
+              onMouseLeave={() => setTextHover(false)}
+              onFocus={() => setTextHover(true)}
+              onBlur={() => setTextHover(false)}
+              onClick={(event) => openPicker(event)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void copyPath();
+              }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              role="button"
+              aria-label={tooltip}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openPicker(event);
+                }
+              }}
             >
-              {secondary}
+              <span className="min-w-0 max-w-[70%] shrink truncate text-xs font-semibold">{title}</span>
+              <span
+                className="min-w-0 flex-1 truncate text-[11px]"
+                style={{ color: "var(--colorNeutralForeground3)" }}
+              >
+                {secondary}
+              </span>
             </span>
-          </span>
-        </HoverTooltip>
+          </HoverTooltip>
+        </div>
       </div>
     </div>
   );
@@ -487,4 +565,13 @@ function matchExt(path: string, exts: string[]): boolean {
 function classifyCppDrop(paths: string[]): "ok" | "bad" {
   if (paths.length === 0) return "bad";
   return paths.some((path) => matchExt(path, CPP_EXTS)) ? "ok" : "bad";
+}
+
+function isDebugParserPath(path: string): boolean {
+  return path.split(/[\\/]/).pop()?.toLowerCase() === "debugparser.exe";
+}
+
+function classifyPickerDrop(slot: Exclude<PickerSlot, null>, paths: string[]): "ok" | "bad" {
+  if (slot === "cpp") return classifyCppDrop(paths);
+  return paths.some(isDebugParserPath) ? "ok" : "bad";
 }

@@ -22,7 +22,12 @@ import { usePoetryStore } from "@/stores/poetryStore";
  * accidentally start a window move. Double-clicking the drag region toggles
  * maximize (matches native title bar behaviour).
  */
-export function TitleBar() {
+interface TitleBarProps {
+  sideNavVisible: boolean;
+  onToggleSideNav: () => void;
+}
+
+export function TitleBar({ sideNavVisible, onToggleSideNav }: TitleBarProps) {
   const navigate = useNavigate();
   const poetry = usePoetryStore((s) => s.line);
 
@@ -58,9 +63,6 @@ export function TitleBar() {
   const goShortcutSettings = useCallback(() => {
     navigate("/settings?tab=shortcut");
   }, [navigate]);
-  const goAboutSettings = useCallback(() => {
-    navigate("/settings?tab=about");
-  }, [navigate]);
   const onRefreshPoetry = useCallback(async () => {
     if (refreshingPoetry) return;
     setRefreshingPoetry(true);
@@ -88,7 +90,7 @@ export function TitleBar() {
         data-tauri-drag-region
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3"
       >
-        <BlinkingEyesButton onClick={goAboutSettings} />
+        <BlinkingEyesButton onClick={onToggleSideNav} sideNavVisible={sideNavVisible} />
         <button
           type="button"
           aria-label="进入快捷键设置"
@@ -128,7 +130,7 @@ export function TitleBar() {
   );
 }
 
-function BlinkingEyesButton({ onClick }: { onClick: () => void }) {
+function BlinkingEyesButton({ onClick, sideNavVisible }: { onClick: () => void; sideNavVisible: boolean }) {
   const [blinking, setBlinking] = useState(false);
   const [lookOffset, setLookOffset] = useState({ x: 0, y: 0 });
   const timerRef = useRef<number | null>(null);
@@ -179,7 +181,9 @@ function BlinkingEyesButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      aria-label="进入关于页面"
+      aria-label={sideNavVisible ? "隐藏侧边栏" : "显示侧边栏"}
+      title={sideNavVisible ? "隐藏侧边栏" : "显示侧边栏"}
+      aria-pressed={sideNavVisible}
       onClick={onClick}
       onContextMenu={(event) => {
         event.preventDefault();

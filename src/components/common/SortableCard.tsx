@@ -11,6 +11,9 @@ interface Props {
   fullCardHandle?: boolean;
   /** When false, hides the handle icon entirely. */
   showHandle?: boolean;
+  /** Optional icon and label for a header-integrated drag handle. */
+  handleIcon?: ReactNode;
+  handleTitle?: string;
   /** Header height in px. Used to vertically center the drag handle on the
    *  card's header. Defaults to 48 (CollapsibleCard h-12); pass 44 for
    *  AeParamCard h-11. */
@@ -31,12 +34,14 @@ export function SortableCard({
   className,
   fullCardHandle,
   showHandle = true,
+  handleIcon,
+  handleTitle = "拖拽换位",
   headerHeight = 48,
   handleLeft = 4,
   borderRadius = 12,
 }: Props) {
   const {
-    attributes, listeners, setNodeRef,
+    attributes, listeners, setNodeRef, setActivatorNodeRef,
     transform, transition, isDragging,
   } = useSortable({ id });
 
@@ -63,19 +68,22 @@ export function SortableCard({
     <div ref={setNodeRef} style={style} className={className} {...wholeCardProps}>
       {showHandle && !useWholeCardHandle && (
         <button
+          ref={setActivatorNodeRef}
           type="button"
           {...handleProps}
-          title="拖拽换位"
-          className="absolute z-10 flex h-5 w-5 cursor-grab items-center justify-center rounded transition-opacity opacity-45 hover:opacity-100"
+          title={handleTitle}
+          aria-label={handleTitle}
+          className={"absolute z-10 flex h-5 w-5 cursor-grab items-center justify-center rounded transition-opacity " +
+            (handleIcon ? "opacity-100" : "opacity-45 hover:opacity-100")}
           style={{
             top: handleTop,
             left: handleLeft,
-            color: "var(--colorNeutralForeground3)",
+            color: handleIcon ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)",
             touchAction: "none",
           }}
           onClick={(e) => { e.stopPropagation(); }}
         >
-          <ReOrderDotsVertical24Regular className="h-3.5 w-3.5" />
+          {handleIcon ?? <ReOrderDotsVertical24Regular className="h-3.5 w-3.5" />}
         </button>
       )}
       {children}

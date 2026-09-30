@@ -1728,6 +1728,7 @@ export function ChartMapMode({
       <style>
         {`
           .chart-map-scrollbar-hidden::-webkit-scrollbar { display: none; }
+          .chart-map-tab-strip::-webkit-scrollbar { display: none; }
           .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]),
           .chart-map-scrollbar-hidden button[aria-label^="Collapse"],
           .chart-map-scrollbar-hidden button[aria-label^="Expand"] {
@@ -1765,8 +1766,8 @@ export function ChartMapMode({
           }
         `}
       </style>
-      <div className="shrink-0 overflow-x-auto px-3 pt-3" style={tabStripWrapStyle}>
-        <div className="flex min-w-max items-end gap-0.5">
+      <div className="chart-map-tab-strip h-8 shrink-0 overflow-x-auto overflow-y-hidden px-3" style={tabStripWrapStyle}>
+        <div className="flex h-full min-w-max items-center gap-0.5">
           {CHART_TABS.map((item) => (
             <button
               key={item}
@@ -10006,7 +10007,10 @@ const canvasStyle: CSSProperties = {
 };
 
 const tabStripWrapStyle: CSSProperties = {
+  height: 32,
   borderBottom: "1px solid var(--colorNeutralStroke2)",
+  scrollbarWidth: "none",
+  msOverflowStyle: "none",
 };
 
 const innerCanvasStyle: CSSProperties = {
@@ -13092,7 +13096,7 @@ const faceProbTableHeaderStyle: CSSProperties = {
   justifyContent: "space-between",
   gap: 8,
   minWidth: 0,
-  padding: "10px 10px 8px",
+  padding: "2px 10px",
 };
 
 const faceProbTableHeaderActionsStyle: CSSProperties = {
@@ -13145,7 +13149,7 @@ const faceProbTableLabelStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   minWidth: 0,
-  minHeight: 26,
+  minHeight: 24,
   padding: "0 5px",
   borderTop: "1px solid var(--colorNeutralStroke3)",
   color: "var(--colorNeutralForeground2)",
@@ -13161,7 +13165,7 @@ function faceProbTableValueStyle(active: boolean): CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     minWidth: 0,
-    minHeight: 26,
+    minHeight: 24,
     padding: "0 2px",
     borderTop: "1px solid var(--colorNeutralStroke3)",
     color: "var(--colorNeutralForeground1)",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PanelResizeHandle } from "react-resizable-panels";
 
 interface Props {
+  id?: string;
   /**
    * Panel arrangement direction.
    *  - "horizontal" (default): panels sit side-by-side -> splitter is a vertical bar.
@@ -23,6 +24,7 @@ interface Props {
  * consistent across the app.
  */
 export function ResizeHandle({
+  id,
   direction = "horizontal",
   size = 8,
   className,
@@ -36,6 +38,7 @@ export function ResizeHandle({
 
   return (
     <PanelResizeHandle
+      id={id}
       className={className}
       style={{
         background: "transparent",

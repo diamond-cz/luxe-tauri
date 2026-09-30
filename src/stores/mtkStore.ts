@@ -32,6 +32,7 @@ const DEFAULT_IMAGE_DIR: ImageDirState = {
 
 interface MtkState {
   mtk: Mtk;
+  debugParserPath: string | null;
   /** Per-(ISP × tab) import state, keyed by `"${IspId}|${tabIdx}"`. */
   imports:  Record<string, ImportState>;
   imageDir: Record<string, ImageDirState>;
@@ -40,6 +41,7 @@ interface MtkState {
   setCurrentTab:  (idx: number) => void;
   setOuterSplit:  (sizes: number[]) => void;
   setInnerSplit:  (sizes: number[]) => void;
+  setDebugParserPath: (path: string) => void;
 
   setImport:   (isp: IspId, tabIdx: number, state: Partial<ImportState>) => void;
   setImageDir: (isp: IspId, tabIdx: number, state: Partial<ImageDirState>) => void;
@@ -48,6 +50,7 @@ interface MtkState {
 export const useMtkStore = create<MtkState>()(
   immer((set) => ({
     mtk: { current_isp: 1, current_tab: 0, outer_splitter: [], inner_splitter: [] },
+    debugParserPath: null,
     imports:  {},
     imageDir: {},
 
@@ -55,6 +58,7 @@ export const useMtkStore = create<MtkState>()(
     setCurrentTab:  (idx) => set((s) => { s.mtk.current_tab = idx; }),
     setOuterSplit:  (sizes) => set((s) => { s.mtk.outer_splitter = sizes; }),
     setInnerSplit:  (sizes) => set((s) => { s.mtk.inner_splitter = sizes; }),
+    setDebugParserPath: (path) => set((s) => { s.debugParserPath = path; }),
 
     setImport: (isp, tabIdx, patch) => set((s) => {
       const key = `${isp}|${tabIdx}`;

@@ -37,9 +37,11 @@ function ShellRoot() {
   const navigate = useNavigate();
   const location = useLocation();
   const [askClose, setAskClose] = useState(false);
+  const [sideNavVisible, setSideNavVisible] = useState(true);
 
   const onNavigate         = useCallback((path: string) => navigate(path), [navigate]);
   const onRequestCloseAsk  = useCallback(() => setAskClose(true), []);
+  const toggleSideNav = useCallback(() => setSideNavVisible((visible) => !visible), []);
 
   useShellBootstrap({ onNavigate, onRequestCloseAsk });
 
@@ -60,9 +62,9 @@ function ShellRoot() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <TitleBar />
+      <TitleBar sideNavVisible={sideNavVisible} onToggleSideNav={toggleSideNav} />
       <div className="flex min-h-0 flex-1">
-        <SideNav />
+        {sideNavVisible && <SideNav />}
         <main className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {/* Auto-reset on route change so a crash in one view doesn't
               persist after the user navigates away. */}
