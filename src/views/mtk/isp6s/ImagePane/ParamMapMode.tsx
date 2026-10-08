@@ -8,6 +8,7 @@ import {
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { cppResolveCardSource } from "@/ipc/cppParser";
 import type { CardSourceSpec, Isp6sSchemaRoot } from "@/ipc/cppParser";
 import {
@@ -37,6 +38,7 @@ interface Props {
 export interface SourceOverride {
   label: string;
   spec: CardSourceSpec;
+  details?: ChartSourceJumpDetails;
 }
 
 export interface ChartPreviewTarget {
@@ -216,7 +218,7 @@ export function ParamMapMode({
       .then((hit) => {
         if (cancelled) return;
         setRanges(hit.ranges.map(([a, b]) => [a, b] as [number, number]));
-        setJumpLine(hit.jump_line);
+        setJumpLine(sourceOverride?.details?.selection?.line ?? hit.jump_line);
         setJumpKey((current) => current + 1);
         setErr(null);
       })
@@ -290,6 +292,7 @@ export function ParamMapMode({
           ranges={ranges}
           jumpLine={jumpLine}
           jumpKey={jumpKey}
+          sourceSelection={sourceOverride?.details?.selection}
           onTextChange={onDraftTextChange}
           chartJumpLabel={activeLabel}
           rangeGroups={sourceRangeGroupsForLabel(activeLabel)}

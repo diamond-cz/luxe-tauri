@@ -52,6 +52,7 @@ export interface Isp6sAeVisual {
   preview_mode:               "param_map" | "chart_map" | "image_split" | "para_check" | "image";
   workspace_card_order:       string[];
   workspace_column_ratios:    number[];
+  workspace_details_ratio:    number;
   top_card_order:             string[];
   normal_collapsed:           boolean;
   face_collapsed:             boolean;
@@ -71,6 +72,7 @@ export interface Isp6sAeVisual {
   chart_ns_card_order:         string[];
   chart_ns_card_collapsed:     string[];
   chart_face_card_collapsed:   string[];
+  chart_face_heatmap_modes:    Record<string, { enabled: boolean; show_hit_counts: boolean }>;
   chart_main_t_mid_chart_mode: string;
   chart_main_t_mid_chart_source: string;
   chart_main_t_mid_readout_mode: string;

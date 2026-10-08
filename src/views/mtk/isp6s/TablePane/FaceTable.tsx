@@ -10,6 +10,13 @@ import {
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getFaceTableSchema, type FaceTableSchema } from "@/ipc/faceTable";
+import {
+  calculationCellBackground,
+  calculationCellForeground,
+  calculationTooltip,
+  formatSubstitutedValue,
+  tableCellTooltip,
+} from "./tableCellPresentation";
 
 interface Props {
   tomlData: Record<string, string>;
@@ -24,6 +31,12 @@ interface FaceCellValue {
   raw: string;
   text: string;
   formula: boolean;
+  substituted?: string;
+}
+
+interface FaceTableEvaluation {
+  display: Map<string, string>;
+  substitutions: Map<string, string>;
 }
 
 interface FaceTableUiState {
@@ -205,10 +218,11 @@ export function FaceTable({ tomlData }: Props) {
   }, [fbtExpanded, fltExpanded, detailBelowLayout, tableOrder]);
 
   const lookup = useMemo(() => withLookupAliases(tomlData), [tomlData]);
-  const display = useMemo(
-    () => schema ? evaluateFaceTable(schema, lookup) : new Map<string, string>(),
+  const evaluated = useMemo<FaceTableEvaluation>(
+    () => schema ? evaluateFaceTable(schema, lookup) : { display: new Map(), substitutions: new Map() },
     [schema, lookup],
   );
+  const { display, substitutions } = evaluated;
   const tableRows: FaceTableId[][] = detailBelowLayout ? tableOrder.map((id) => [id]) : [tableOrder];
   const canvasSize = faceCanvasBaseSize(tableRows, fbtExpanded, fltExpanded);
   const fitWidthLayout = detailBelowLayout;
@@ -276,7 +290,7 @@ export function FaceTable({ tomlData }: Props) {
                   id,
                   schema,
                   display,
-                  lookup,
+                  substitutions,
                   detailBelowLayout,
                   fbtExpanded,
                   fltExpanded,
@@ -301,7 +315,7 @@ function renderFaceTableById({
   id,
   schema,
   display,
-  lookup,
+  substitutions,
   detailBelowLayout,
   fbtExpanded,
   fltExpanded,
@@ -316,7 +330,7 @@ function renderFaceTableById({
   id: FaceTableId;
   schema: FaceTableSchema;
   display: Map<string, string>;
-  lookup: Record<string, string>;
+  substitutions: Map<string, string>;
   detailBelowLayout: boolean;
   fbtExpanded: boolean;
   fltExpanded: boolean;
@@ -334,7 +348,7 @@ function renderFaceTableById({
       <FaceKvTable
         schema={schema}
         display={display}
-        lookup={lookup}
+        substitutions={substitutions}
         detailBelowLayout={detailBelowLayout}
         onToggleDetailLayout={onToggleDetailLayout}
         dragHandleProps={dragHandleProps}
@@ -349,7 +363,7 @@ function renderFaceTableById({
         groups={id === "FBT" ? FACE_GROUPS_FBT : FACE_GROUPS_FLT}
         schema={schema}
         display={display}
-        lookup={lookup}
+        substitutions={substitutions}
         expanded={expanded}
         onToggle={id === "FBT" ? onToggleFbt : onToggleFlt}
         rowHeight={FACE_INLINE_SECTION_ROW_HEIGHT}
@@ -410,7 +424,7 @@ function FaceTableShell({
 function FaceKvTable({
   schema,
   display,
-  lookup,
+  substitutions,
   detailBelowLayout,
   onToggleDetailLayout,
   dragHandleProps,
@@ -418,7 +432,7 @@ function FaceKvTable({
 }: {
   schema: FaceTableSchema;
   display: Map<string, string>;
-  lookup: Record<string, string>;
+  substitutions: Map<string, string>;
   detailBelowLayout: boolean;
   onToggleDetailLayout: () => void;
   dragHandleProps: FaceDragHandleProps;
@@ -431,9 +445,9 @@ function FaceKvTable({
         {FACE_TOP_KV.map(([leftLabel, midLabel, rightLabel], rowIdx) => {
           const left = leftLabel === LIMIT_LABEL
             ? limitRangeCell(schema, display)
-            : faceValue(schema, display, "TOP", leftLabel);
-          const middle = faceValue(schema, display, "TOP", midLabel);
-          const right = faceValue(schema, display, "TOP", rightLabel);
+            : faceValue(schema, display, substitutions, "TOP", leftLabel);
+          const middle = faceValue(schema, display, substitutions, "TOP", midLabel);
+          const right = faceValue(schema, display, substitutions, "TOP", rightLabel);
 
           return (
             <tr key={`top-${rowIdx}`}>
@@ -449,9 +463,9 @@ function FaceKvTable({
               <FaceCell kind="kvLabel" strong align="left" rowHeight={FACE_KV_ROW_HEIGHT}>
                 {leftLabel}
               </FaceCell>
-              <FaceValueCell cell={left} rowHeight={FACE_KV_ROW_HEIGHT} tooltip={leftLabel === LIMIT_LABEL
-                ? limitRangeTooltip(schema, display, lookup)
-                : cellTooltip(left.raw, left.text, lookup)}
+              <FaceValueCell cell={left} kind={leftLabel === LIMIT_LABEL ? "formula" : undefined} rowHeight={FACE_KV_ROW_HEIGHT} tooltip={leftLabel === LIMIT_LABEL
+                ? limitRangeTooltip(schema, display, substitutions)
+                : tableCellTooltip(left.raw, left.text, left.substituted)}
               />
               <FaceCell kind="kvLabel" strong align="left" rowHeight={FACE_KV_ROW_HEIGHT}>
                 {midLabel}
@@ -460,12 +474,12 @@ function FaceKvTable({
                 cell={middle}
                 rowHeight={FACE_KV_ROW_HEIGHT}
                 forceDataFg
-                tooltip={cellTooltip(middle.raw, middle.text, lookup)}
+                tooltip={tableCellTooltip(middle.raw, middle.text, middle.substituted)}
               />
               <FaceCell kind="title" strong align="left" rowHeight={FACE_KV_ROW_HEIGHT}>
                 {rightLabel}
               </FaceCell>
-              <FaceValueCell cell={right} rowHeight={FACE_KV_ROW_HEIGHT} tooltip={cellTooltip(right.raw, right.text, lookup)} />
+              <FaceValueCell cell={right} rowHeight={FACE_KV_ROW_HEIGHT} tooltip={tableCellTooltip(right.raw, right.text, right.substituted)} />
             </tr>
           );
         })}
@@ -479,7 +493,7 @@ function FaceSectionTable({
   groups,
   schema,
   display,
-  lookup,
+  substitutions,
   expanded,
   onToggle,
   rowHeight,
@@ -490,7 +504,7 @@ function FaceSectionTable({
   groups: readonly (readonly FaceGroupItem[])[];
   schema: FaceTableSchema;
   display: Map<string, string>;
-  lookup: Record<string, string>;
+  substitutions: Map<string, string>;
   expanded: boolean;
   onToggle: () => void;
   rowHeight: number;
@@ -501,7 +515,7 @@ function FaceSectionTable({
     <table style={faceTableStyle(expanded, fitWidth)}>
       <FaceColGroup collapsed={!expanded} fitWidth={fitWidth} />
       <tbody>
-        {renderFaceSectionRows(scope, groups, schema, display, lookup, expanded, onToggle, rowHeight, dragHandleProps)}
+        {renderFaceSectionRows(scope, groups, schema, display, substitutions, expanded, onToggle, rowHeight, dragHandleProps)}
       </tbody>
     </table>
   );
@@ -529,7 +543,7 @@ function renderFaceSectionRows(
   groups: readonly (readonly FaceGroupItem[])[],
   schema: FaceTableSchema,
   display: Map<string, string>,
-  lookup: Record<string, string>,
+  substitutions: Map<string, string>,
   expanded: boolean,
   onToggle: () => void,
   rowHeight: number,
@@ -572,7 +586,7 @@ function renderFaceSectionRows(
         return;
       }
 
-      const cell = faceValue(schema, display, scope, name);
+      const cell = faceValue(schema, display, substitutions, scope, name);
       const paired = YELLOW_PAIR.has(name);
       const forceDataFg = WHITE_FG.has(name);
       rows[rowCursor].push(
@@ -593,7 +607,7 @@ function renderFaceSectionRows(
           rowSpan={rowSpan}
           kind={paired ? "kvLabel" : undefined}
           forceDataFg={forceDataFg && !cell.formula}
-          tooltip={cellTooltip(cell.raw, cell.text, lookup)}
+          tooltip={tableCellTooltip(cell.raw, cell.text, cell.substituted)}
           rowHeight={rowHeight}
         />,
       );
@@ -623,10 +637,10 @@ function FaceValueCell({
 }) {
   return (
     <FaceCell
-      kind={kind ?? (cell.formula ? "formula" : "data")}
+      kind={cell.formula ? "formula" : kind ?? "data"}
       rowSpan={rowSpan}
       title={tooltip}
-      forceDataFg={forceDataFg}
+      forceDataFg={cell.formula ? false : forceDataFg}
       rowHeight={rowHeight}
     >
       {cell.text}
@@ -975,8 +989,8 @@ function faceCellStyle(
       fg: "var(--face-sheet-data-fg, var(--normal-sheet-cream-fg, #242424))",
     },
     formula: {
-      bg: "var(--face-sheet-formula-bg, rgba(80, 120, 180, 0.24))",
-      fg: "var(--face-sheet-formula-fg, #5b87c7)",
+      bg: calculationCellBackground,
+      fg: calculationCellForeground,
     },
     blank: {
       bg: "var(--face-sheet-blank-bg, var(--normal-sheet-bg, #ffffff))",
@@ -1024,7 +1038,7 @@ function limitRangeCell(schema: FaceTableSchema, display: Map<string, string>): 
 function limitRangeTooltip(
   schema: FaceTableSchema,
   display: Map<string, string>,
-  lookup: Record<string, string>,
+  substitutions: Map<string, string>,
 ): string {
   const lowKey = `${LIMIT_LABEL}_low`;
   const highKey = `${LIMIT_LABEL}_high`;
@@ -1032,21 +1046,13 @@ function limitRangeTooltip(
   const highRaw = rawOf(schema, "TOP", highKey);
   const result = limitRangeCell(schema, display).text;
   if (!lowRaw && !highRaw) return "";
-  const lowValue = display.get(qual("TOP", lowKey)) ?? "-";
-  const highValue = display.get(qual("TOP", highKey)) ?? "-";
-  return [
-    "\u516c\u5f0f",
-    `low: ${formatTooltipFormula(lowRaw)}`,
-    `high: ${formatTooltipFormula(highRaw)}`,
-    "",
-    "\u7ed3\u679c",
-    `${result}  (low=${lowValue}, high=${highValue})`,
-    "",
-    "\u6570\u636e\u6e90",
-    `AE_TAG_AE_TARGET = ${lookupValue(lookup, "AE_TAG_AE_TARGET") ?? "(missing)"}`,
-    `AE_TAG_FACE_LOW_BOUND = ${lookupValue(lookup, "AE_TAG_FACE_LOW_BOUND") ?? "(missing)"}`,
-    `AE_TAG_FACE_HIGH_BOUND = ${lookupValue(lookup, "AE_TAG_FACE_HIGH_BOUND") ?? "(missing)"}`,
-  ].join("\n");
+  const expression = `low: ${formatTooltipFormula(lowRaw)}\nhigh: ${formatTooltipFormula(highRaw)}`;
+  const lowSubstituted = substitutions.get(qual("TOP", lowKey));
+  const highSubstituted = substitutions.get(qual("TOP", highKey));
+  const substituted = lowSubstituted && highSubstituted
+    ? `low: ${lowSubstituted}\nhigh: ${highSubstituted}`
+    : undefined;
+  return calculationTooltip(expression, result, substituted);
 }
 
 function formatTooltipFormula(raw: string): string {
@@ -1057,6 +1063,7 @@ function formatTooltipFormula(raw: string): string {
 function faceValue(
   schema: FaceTableSchema,
   display: Map<string, string>,
+  substitutions: Map<string, string>,
   scope: FaceScope,
   name: string,
 ): FaceCellValue {
@@ -1065,6 +1072,7 @@ function faceValue(
     raw,
     text: display.get(qual(scope, name)) ?? "-",
     formula: raw.trim().startsWith("="),
+    substituted: substitutions.get(qual(scope, name)),
   };
 }
 
@@ -1082,7 +1090,7 @@ function symbolsForScope(schema: FaceTableSchema, scope: FaceScope): Record<stri
 function evaluateFaceTable(
   schema: FaceTableSchema,
   lookup: Record<string, string>,
-): Map<string, string> {
+): FaceTableEvaluation {
   const scopes: Record<FaceScope, Record<string, string>> = {
     TOP: schema.top_kv ?? {},
     FBT: schema.FBT ?? {},
@@ -1128,12 +1136,17 @@ function evaluateFaceTable(
   });
 
   const display = new Map<string, string>();
+  const substitutions = new Map<string, string>();
   (Object.keys(scopes) as FaceScope[]).forEach((scope) => {
     Object.entries(scopes[scope]).forEach(([name, raw]) => {
       const key = qual(scope, name);
       const value = cache.get(key);
       const s = String(raw).trim();
       const isFormula = s.startsWith("=");
+      if (isFormula) {
+        const substituted = substituteFaceExpression(s.slice(1).trim(), scope, resolve);
+        if (substituted !== null) substitutions.set(key, substituted);
+      }
 
       if (typeof value === "number" && Number.isFinite(value)) {
         display.set(key, formatFaceNumber(value, isFormula, scope, name));
@@ -1156,7 +1169,42 @@ function evaluateFaceTable(
     });
   });
 
-  return display;
+  return { display, substitutions };
+}
+
+function substituteFaceExpression(
+  expr: string,
+  scope: FaceScope,
+  resolve: (scope: FaceScope, name: string) => number | string | null,
+): string | null {
+  try {
+    const tokens = tokenize(expr);
+    let substituted = "";
+    let cursor = 0;
+    tokens.forEach((token, index) => {
+      if (token.type !== "ident" || tokens[index + 1]?.value === "(") return;
+      let symbolScope = scope;
+      let symbolName = token.value;
+      let end = token.end;
+      if (tokens[index + 1]?.value === "." && tokens[index + 2]?.type === "ident") {
+        if (symbolName !== "TOP" && symbolName !== "FBT" && symbolName !== "FLT") return;
+        symbolScope = symbolName;
+        symbolName = tokens[index + 2].value;
+        end = tokens[index + 2].end;
+      } else if (index > 0 && tokens[index - 1].value === ".") {
+        return;
+      }
+      const resolved = resolve(symbolScope, symbolName);
+      const value = typeof resolved === "number" ? resolved : toNumber(resolved);
+      if (value === null) return;
+      substituted += expr.slice(cursor, token.start);
+      substituted += formatSubstitutedValue(value);
+      cursor = end;
+    });
+    return substituted + expr.slice(cursor);
+  } catch {
+    return null;
+  }
 }
 
 function evalFaceExpression(
@@ -1313,11 +1361,11 @@ class FaceExpressionParser {
   }
 
   private peek(): Token {
-    return this.tokens[this.pos] ?? { type: "eof", value: "" };
+    return this.tokens[this.pos] ?? { type: "eof", value: "", start: 0, end: 0 };
   }
 }
 
-type Token = { type: "number" | "ident" | "op" | "eof"; value: string };
+type Token = { type: "number" | "ident" | "op" | "eof"; value: string; start: number; end: number };
 
 function tokenize(expr: string): Token[] {
   const tokens: Token[] = [];
@@ -1331,25 +1379,25 @@ function tokenize(expr: string): Token[] {
     const rest = expr.slice(i);
     const number = rest.match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/);
     if (number) {
-      tokens.push({ type: "number", value: number[0] });
+      tokens.push({ type: "number", value: number[0], start: i, end: i + number[0].length });
       i += number[0].length;
       continue;
     }
     const ident = rest.match(/^[A-Za-z_\u0080-\uFFFF][A-Za-z0-9_\u0080-\uFFFF]*/);
     if (ident) {
-      tokens.push({ type: "ident", value: ident[0] });
+      tokens.push({ type: "ident", value: ident[0], start: i, end: i + ident[0].length });
       i += ident[0].length;
       continue;
     }
     const op = rest.startsWith("**") || rest.startsWith("//") ? rest.slice(0, 2) : ch;
     if ("+-*/%(),.".includes(op) || op === "**" || op === "//") {
-      tokens.push({ type: "op", value: op });
+      tokens.push({ type: "op", value: op, start: i, end: i + op.length });
       i += op.length;
       continue;
     }
     throw new Error(`invalid token at ${i}`);
   }
-  tokens.push({ type: "eof", value: "" });
+  tokens.push({ type: "eof", value: "", start: i, end: i });
   return tokens;
 }
 
@@ -1397,15 +1445,4 @@ function toNumber(value: unknown): number | null {
 
 function isDataKey(value: string): boolean {
   return value.startsWith("AE_TAG_") || value.startsWith("SW_");
-}
-
-function cellTooltip(raw: string, value: string, lookup: Record<string, string>): string {
-  const s = String(raw).trim();
-  if (!s || s === "-") return "";
-  if (s.startsWith("=")) return `\u516c\u5f0f\n${s.slice(1).trim()}\n\n\u7ed3\u679c\n${value}`;
-  if (isDataKey(s)) {
-    const current = lookupValue(lookup, s);
-    return `\u6570\u636e\u6e90\n${s}\n\n\u5f53\u524d\u503c\n${current === undefined || current === "" ? "(missing)" : current}`;
-  }
-  return `\u56fa\u5b9a\u503c\n${s}`;
 }

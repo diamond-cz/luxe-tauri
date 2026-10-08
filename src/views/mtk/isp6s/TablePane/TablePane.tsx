@@ -29,7 +29,7 @@ type ImageSortState = {
   key: string;
   direction: ImageSortDirection;
 };
-type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "extra";
+type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "cwr" | "delta" | "extra";
 type ImageTableColumn = {
   id: string;
   kind: ImageTableColumnKind;
@@ -49,8 +49,10 @@ type ImageTableColumnDragState = {
 };
 interface Props {
   schema:    Isp6sSchemaRoot;
+  filePath:  string | null;
   entries:   ImageEntry[];
   current:   number;
+  selectedHeatmapPaths: string[];
   imageDir:  string | null;
   onPickImage: (idx: number) => void;
   onImageDirChange: (dir: string) => void;
@@ -81,10 +83,22 @@ const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-contr
 const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
+const FACE_LINK_TARGET_IMAGE_KEYS = [
+  "AE_TAG_FACE_20_CWV", "AE_TAG_CWV", "AE_TAG_FLT_FDY", "AE_TAG_FLT_DR",
+  "AE_TAG_NS_PROB", "AE_TAG_FACE_20_NORMAL_TARGET", "AE_TAG_FLT_OE_SYS",
+  "AE_TAG_FLT_FDDR", "AE_TAG_FLT_FDSZ", "AE_TAG_FLT_TARGET",
+  "AE_TAG_FLT_FDSZ_RA",
+] as const;
+type FaceLinkTargetCalculator = (
+  tomlData: Record<string, string>, bvKey: string,
+) => { exif: number; calculated: number };
+
 export function TablePane({
   schema,
+  filePath,
   entries,
   current,
+  selectedHeatmapPaths,
   imageDir,
   onPickImage,
   onImageDirChange,
@@ -174,8 +188,13 @@ export function TablePane({
            style={{
              background: "var(--colorNeutralBackground2)",
            }}>
-        <div className="flex min-w-0 items-center text-xs">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
           <span className="truncate" style={{ color: "var(--colorNeutralForeground2)" }}>图片列表卡片</span>
+          {selectedHeatmapPaths.length > 0 && (
+            <span style={{ color: "var(--colorPaletteGreenForeground1)", whiteSpace: "nowrap" }}>
+              已选中 {selectedHeatmapPaths.length} 张
+            </span>
+          )}
         </div>
       </div>
       <div className="absolute right-2 top-1 z-10">
@@ -243,7 +262,7 @@ export function TablePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ImageTab schema={schema} entries={entries} current={current} onPick={onPickImage} />
+        <ImageTab schema={schema} filePath={filePath} entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
       </div>
     </div>
   );
@@ -672,11 +691,13 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 }
 
 export function ImageTab({
-  schema, entries, current, onPick,
+  schema, filePath, entries, current, selectedHeatmapPaths, onPick,
 }: {
   schema:   Isp6sSchemaRoot;
+  filePath: string | null;
   entries:  ImageEntry[];
   current:  number;
+  selectedHeatmapPaths: string[];
   onPick:   (idx: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -696,11 +717,14 @@ export function ImageTab({
     () => Object.entries(schema.Image ?? {}),
     [schema],
   );
+  const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   const tableColumns = useMemo<ImageTableColumn[]>(
     () => [
       { id: "idx", kind: "idx", label: "idx", align: "center" },
       { id: "thumbnail", kind: "thumbnail", label: "Thumbnail", align: "center" },
       { id: "name", kind: "name", label: "FileName", align: "left" },
+      { id: "cwr", kind: "cwr", label: "CWR", align: "center" },
+      { id: "delta", kind: "delta", label: "∆E", align: "center" },
       ...extraCols.map(([label, key], index) => ({
         id: `extra:${key}`,
         kind: "extra" as const,
@@ -724,14 +748,22 @@ export function ImageTab({
     [columnOrder, tableColumns],
   );
   const imageTomlKeys = useMemo(
-    () => extraCols.map(([, key]) => key).filter((key) => key.length > 0),
-    [extraCols],
+    () => [...new Set([...extraCols.map(([, key]) => key), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
+      .filter((key) => key.length > 0),
+    [extraCols, faceBvKey],
   );
   const imageTomlKeySignature = useMemo(
     () => imageTomlKeys.join("\u001f"),
     [imageTomlKeys],
   );
   const [tomls, setTomls] = useState<Record<string, Record<string, string>>>({});
+  const [faceLinkTargetState, setFaceLinkTargetState] = useState<{
+    filePath: string | null;
+    calculate: FaceLinkTargetCalculator;
+  } | null>(null);
+  const faceLinkTargetCalculator = faceLinkTargetState?.filePath === filePath
+    ? faceLinkTargetState.calculate
+    : null;
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
@@ -740,6 +772,19 @@ export function ImageTab({
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    import("../ImagePane/ChartMapMode")
+      .then(({ loadFaceLinkTargetCalculator }) => loadFaceLinkTargetCalculator(filePath))
+      .then((calculate) => {
+        if (!cancelled) setFaceLinkTargetState({ filePath, calculate });
+      })
+      .catch(() => {
+        if (!cancelled) setFaceLinkTargetState(null);
+      });
+    return () => { cancelled = true; };
+  }, [filePath]);
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }));
@@ -761,6 +806,7 @@ export function ImageTab({
     () => sortedRows.findIndex((row) => row.i === current),
     [current, sortedRows],
   );
+  const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -1187,6 +1233,12 @@ export function ImageTab({
   }, [currentDisplayIndex]);
 
   useEffect(() => {
+    const firstPath = selectedHeatmapPaths[0];
+    if (!firstPath) return;
+    ensureImageTableRowVisible(sortedRows.findIndex(({ e }) => e.toml_path === firstPath));
+  }, [selectedHeatmapPaths, sortedRows]);
+
+  useEffect(() => {
     if (imageTomlKeys.length === 0 || tableWindowPaths.length === 0) {
       setTomls({});
       return;
@@ -1296,6 +1348,8 @@ export function ImageTab({
       idx: idxWidth,
       thumbnail: thumbnailWidth,
       name: nameWidth,
+      cwr: 108,
+      delta: 62,
     };
     extraCols.forEach(([, key], index) => {
       byId[`extra:${key}`] = extraWidths[index];
@@ -1409,6 +1463,8 @@ export function ImageTab({
                       onToggle={toggleImageSortControls}
                       label={column.label}
                     />
+                  ) : column.kind !== "extra" ? (
+                    column.label
                   ) : sortControlsEnabled ? (
                     <ImageSortHeader
                       label={column.label}
@@ -1432,9 +1488,17 @@ export function ImageTab({
             </tr>
           )}
           {visible.rows.map(({ e, i }) => {
+            const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
             const data = tomls[e.toml_path] ?? {};
+            const target = faceLinkTargetCalculator && e.toml_path in tomls
+              ? faceLinkTargetCalculator(data, faceBvKey)
+              : null;
+            const exif = target && Number.isFinite(target.exif) ? Math.round(target.exif) : null;
+            const calculated = target && Number.isFinite(target.calculated) ? Math.round(target.calculated) : null;
+            const delta = exif !== null && calculated !== null ? calculated - exif : null;
             return (
               <tr key={e.jpg_path}
+                  aria-selected={heatmapSelected || i === current}
                   onClick={() => {
                     scrollRef.current?.focus({ preventScroll: true });
                     onPick(i);
@@ -1442,7 +1506,7 @@ export function ImageTab({
                    style={{
                      cursor: "pointer",
                      height: IMAGE_TABLE_ROW_HEIGHT,
-                     background: i === current ? "var(--colorBrandBackground2)" : "transparent",
+                     background: i === current ? "var(--colorBrandBackground2)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "transparent",
                      color: i === current ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground1)",
                    }}>
                  {orderedColumns.map((column) => (
@@ -1450,7 +1514,7 @@ export function ImageTab({
                      key={column.id}
                      align={column.align}
                      stickyLeft={column.kind === "idx"}
-                     stickyBackground={i === current ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground3)"}
+                     stickyBackground={i === current ? "var(--colorBrandBackground)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "var(--colorNeutralBackground3)"}
                    >
                      {column.kind === "idx"
                        ? i + 1
@@ -1458,7 +1522,13 @@ export function ImageTab({
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
-                           : data[column.key ?? ""] ?? "-"}
+                           : column.kind === "cwr"
+                             ? `${exif ?? "-"}(${calculated ?? "-"})`
+                             : column.kind === "delta"
+                               ? <span style={delta !== null && Math.abs(delta) > 2
+                                 ? { color: "var(--colorPaletteRedForeground1)" }
+                                 : undefined}>{delta === null ? "-" : `${delta >= 0 ? "+" : ""}${delta}`}</span>
+                               : data[column.key ?? ""] ?? "-"}
                    </Td>
                  ))}
               </tr>

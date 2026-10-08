@@ -49,6 +49,11 @@ html.dark {
   --face-sheet-formula-bg:       rgba(58, 112, 176, 0.28);
   --face-sheet-formula-fg:       #9dccff;
   --face-sheet-blank-bg:         #12161b;
+  --face-target-header-bg:       #2b2731;
+  --face-target-header-border:   #484251;
+  --face-heat-low:               #214454;
+  --face-heat-high:              #b95338;
+  --face-heat-fg:                #ffffff;
 }
 html.light {
   color-scheme: light;
@@ -91,6 +96,11 @@ html.light {
   --face-sheet-formula-bg:       #e8f1ff;
   --face-sheet-formula-fg:       #235fa5;
   --face-sheet-blank-bg:         #ffffff;
+  --face-target-header-bg:       #f5f3fa;
+  --face-target-header-border:   #e3deed;
+  --face-heat-low:               #d7edf3;
+  --face-heat-high:              #d45940;
+  --face-heat-fg:                #202027;
 }
 /* Default to dark until App.tsx attaches the class. */
 html:not(.light):not(.dark) {
@@ -134,6 +144,11 @@ html:not(.light):not(.dark) {
   --face-sheet-formula-bg:       rgba(58, 112, 176, 0.28);
   --face-sheet-formula-fg:       #9dccff;
   --face-sheet-blank-bg:         #12161b;
+  --face-target-header-bg:       #2b2731;
+  --face-target-header-border:   #484251;
+  --face-heat-low:               #214454;
+  --face-heat-high:              #b95338;
+  --face-heat-fg:                #ffffff;
 }
 
 html, body, #root {
@@ -194,5 +209,29 @@ html.light .luxe-update-log-backdrop {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+.isp6s-info-card-container {
+  container-type: inline-size;
+}
+
+.normal-sheet-viewport {
+  scrollbar-width: none;
+}
+
+.normal-sheet-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.isp6s-info-normal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+@container (min-width: 640px) {
+  .isp6s-info-normal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -6,6 +6,12 @@ import {
   type NormalTableSchema,
 } from "@/ipc/normalTable";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import {
+  calculationCellBackground,
+  calculationCellForeground,
+  formatSubstitutedValue,
+  tableCellTooltip,
+} from "./tableCellPresentation";
 
 interface Props {
   tomlData: Record<string, string>;
@@ -21,89 +27,31 @@ type CellTone =
   | "green"
   | "paleGreen"
   | "softGreen"
+  | "formula"
   | "blank";
 
 interface CellData {
   text: string;
   raw: string;
+  substituted?: string;
 }
 
 interface SheetModel {
   blocks: NormalTableBlock[];
   lookup: Record<string, string>;
   display: Map<string, string>;
+  substitutions: Map<string, string>;
   blockByTitle: Map<string, number>;
   kvBlockIdx: number;
 }
 
-interface NormalTableUiState {
-  topTripletExpanded: boolean;
-  mainTExpanded: boolean;
-  hsExpanded: boolean;
-  nsExpanded: boolean;
-  detailBelowLayout: boolean;
-}
-
 const DETAIL_SECTION_ROWS = 4;
+const DETAIL_LABEL_COLUMN_WIDTH = "clamp(40px, 12cqw, 96px)";
 const SHEET_ROW_HEIGHT = 23;
-const SHEET_BORDER_WIDTH = 1;
-const NORMAL_TABLE_UI_STATE_KEY = "luxe:isp6s:normal-table-ui:v1";
-const DEFAULT_NORMAL_TABLE_UI_STATE: NormalTableUiState = {
-  topTripletExpanded: true,
-  mainTExpanded: true,
-  hsExpanded: true,
-  nsExpanded: true,
-  detailBelowLayout: false,
-};
-
-function loadNormalTableUiState(): NormalTableUiState {
-  if (typeof window === "undefined") return DEFAULT_NORMAL_TABLE_UI_STATE;
-
-  try {
-    const raw = window.localStorage.getItem(NORMAL_TABLE_UI_STATE_KEY);
-    if (!raw) return DEFAULT_NORMAL_TABLE_UI_STATE;
-    const parsed = JSON.parse(raw) as Partial<NormalTableUiState>;
-    return {
-      topTripletExpanded: typeof parsed.topTripletExpanded === "boolean"
-        ? parsed.topTripletExpanded
-        : DEFAULT_NORMAL_TABLE_UI_STATE.topTripletExpanded,
-      mainTExpanded: typeof parsed.mainTExpanded === "boolean"
-        ? parsed.mainTExpanded
-        : DEFAULT_NORMAL_TABLE_UI_STATE.mainTExpanded,
-      hsExpanded: typeof parsed.hsExpanded === "boolean"
-        ? parsed.hsExpanded
-        : DEFAULT_NORMAL_TABLE_UI_STATE.hsExpanded,
-      nsExpanded: typeof parsed.nsExpanded === "boolean"
-        ? parsed.nsExpanded
-        : DEFAULT_NORMAL_TABLE_UI_STATE.nsExpanded,
-      detailBelowLayout: typeof parsed.detailBelowLayout === "boolean"
-        ? parsed.detailBelowLayout
-        : DEFAULT_NORMAL_TABLE_UI_STATE.detailBelowLayout,
-    };
-  } catch {
-    return DEFAULT_NORMAL_TABLE_UI_STATE;
-  }
-}
-
-function saveNormalTableUiState(state: NormalTableUiState): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(NORMAL_TABLE_UI_STATE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage failures; UI state should not block table rendering.
-  }
-}
 
 export function NormalTable({ tomlData }: Props) {
   const [schema, setSchema] = useState<NormalTableSchema | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [initialUiState] = useState<NormalTableUiState>(() => loadNormalTableUiState());
-  const [topTripletExpanded, setTopTripletExpanded] = useState(initialUiState.topTripletExpanded);
-  const [mainTExpanded, setMainTExpanded] = useState(initialUiState.mainTExpanded);
-  const [hsExpanded, setHsExpanded] = useState(initialUiState.hsExpanded);
-  const [nsExpanded, setNsExpanded] = useState(initialUiState.nsExpanded);
-  const [detailBelowLayout, setDetailBelowLayout] = useState(initialUiState.detailBelowLayout);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,16 +64,6 @@ export function NormalTable({ tomlData }: Props) {
       });
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    saveNormalTableUiState({
-      topTripletExpanded,
-      mainTExpanded,
-      hsExpanded,
-      nsExpanded,
-      detailBelowLayout,
-    });
-  }, [topTripletExpanded, mainTExpanded, hsExpanded, nsExpanded, detailBelowLayout]);
 
   const blocks = schema?.block ?? [];
   const lookup = useMemo(() => withLookupAliases(tomlData), [tomlData]);
@@ -158,112 +96,63 @@ export function NormalTable({ tomlData }: Props) {
     );
   }
 
-  return renderFixedSheet(
-    model,
-    topTripletExpanded,
-    () => setTopTripletExpanded((expanded) => !expanded),
-    mainTExpanded,
-    () => setMainTExpanded((expanded) => !expanded),
-    hsExpanded,
-    () => setHsExpanded((expanded) => !expanded),
-    nsExpanded,
-    () => setNsExpanded((expanded) => !expanded),
-    detailBelowLayout,
-    () => setDetailBelowLayout((below) => !below),
-  );
+  return renderFixedSheet(model);
 }
 
-function renderFixedSheet(
-  model: SheetModel,
-  topTripletExpanded: boolean,
-  onToggleTopTriplet: () => void,
-  mainTExpanded: boolean,
-  onToggleMainT: () => void,
-  hsExpanded: boolean,
-  onToggleHs: () => void,
-  nsExpanded: boolean,
-  onToggleNs: () => void,
-  detailBelowLayout: boolean,
-  onToggleDetailLayout: () => void,
-) {
+function renderFixedSheet(model: SheetModel) {
   const cwr = kvCell(model, "CWR(目标亮度)");
   const finalTarget = kvCell(model, "Final_Target");
   const targetAblMtHs = kvCell(model, "Target_ABL_MT_HS");
   const prob = gridCell(model, "NS_Prob", "Prob", "Value");
+  const nsNorTCal = gridCell(model, "NS+ABL", "NorT", "Cal");
   const minCwr = lookupValue(model.lookup, "AE_TAG_MIN_CWV_RECMD") ?? "-";
   const maxCwr = lookupValue(model.lookup, "AE_TAG_MAX_CWV_RECMD") ?? "-";
   const range = `[${minCwr}, ${maxCwr}]`;
-  const detailHasBody = mainTExpanded || hsExpanded;
 
   return (
     <div
-      className="h-full w-full overflow-auto"
+      className="normal-sheet-viewport h-full w-full min-w-0 overflow-x-hidden overflow-y-auto"
       style={{
         backgroundColor: "var(--normal-sheet-bg, #ffffff)",
+        containerType: "inline-size",
       }}
     >
-      <div style={sheetCanvasStyle(detailBelowLayout)}>
-        <SheetTable fillWidth={detailBelowLayout}>
+      <div style={sheetCanvasStyle}>
+        <SheetTable>
           <tr>
-            <SheetCell tone="peach" strong title={cellTooltip(cwr.raw, cwr.text, model.lookup)}>
-              <LayoutToggleHeader
-                belowLayout={detailBelowLayout}
-                onToggle={onToggleDetailLayout}
-              />
+            <SheetCell tone="peach" strong width="24%">
+              CWR(目标亮度)
             </SheetCell>
-            <SheetCell tone="cream" strong title={cellTooltip(cwr.raw, cwr.text, model.lookup)}>
+            <SheetCell tone="cream" strong width="16%" title={tableCellTooltip(cwr.raw, cwr.text)}>
               {cwr.text}
             </SheetCell>
             <SheetCell tone="orange">
-              <div style={headerToggleWrapStyle()}>
-                <span>MainT+HS</span>
-                <button
-                  type="button"
-                  title={topTripletExpanded ? "折叠 BT/MT/DT" : "展开 BT/MT/DT"}
-                  aria-label={topTripletExpanded ? "折叠 BT/MT/DT" : "展开 BT/MT/DT"}
-                  onClick={onToggleTopTriplet}
-                  style={toggleButtonStyle()}
-                >
-                  {topTripletExpanded ? "−" : "+"}
-                </button>
-              </div>
+              MainT+HS
             </SheetCell>
             <SheetCell tone="yellow">MainT</SheetCell>
             <SheetCell tone="yellow">HS</SheetCell>
-            {topTripletExpanded && (
-              <>
-                <SheetCell tone="cream">BT</SheetCell>
-                <SheetCell tone="cream">MT</SheetCell>
-                <SheetCell tone="cream">DT</SheetCell>
-              </>
-            )}
             <SheetCell tone="yellow">ABL</SheetCell>
             <SheetCell tone="yellow">NS</SheetCell>
-            <SheetCell tone="yellow" colSpan={2}>Prob</SheetCell>
           </tr>
           <tr>
-            <SheetCell tone="orange" strong title={cellTooltip(finalTarget.raw, finalTarget.text, model.lookup)}>
-              Normal Final Target_cal
+            <SheetCell tone="green" strong>
+              Cal_final_target
             </SheetCell>
-            <SheetCell tone="cream" title={cellTooltip(finalTarget.raw, finalTarget.text, model.lookup)}>
+            <SheetCell tone="formula" title={tableCellTooltip(finalTarget.raw, finalTarget.text, finalTarget.substituted)}>
               {finalTarget.text}
             </SheetCell>
             <SheetCell tone="yellow">Wt</SheetCell>
-            {topValueCells(model, "Wt", false, topTripletExpanded)}
-            <SheetCell tone="yellow">BV Prob</SheetCell>
-            <SheetCell tone="yellow">CDF Prob</SheetCell>
+            {topValueCells(model, "Wt")}
           </tr>
           <tr>
-            <SheetCell tone="orange" strong title={cellTooltip(targetAblMtHs.raw, targetAblMtHs.text, model.lookup)}>
-              Target_ABL_MT_HS_cal
+            <SheetCell tone="green" strong>
+              Cal_mt+hs+abl_target
             </SheetCell>
-            <SheetCell tone="cream" title={cellTooltip(targetAblMtHs.raw, targetAblMtHs.text, model.lookup)}>
+            <SheetCell tone="formula" title={tableCellTooltip(targetAblMtHs.raw, targetAblMtHs.text, targetAblMtHs.substituted)}>
               {targetAblMtHs.text}
             </SheetCell>
             <SheetCell tone="yellow">Tar</SheetCell>
-            {topValueCells(model, "Tar", false, topTripletExpanded)}
-            {dataCell(model, "NS_Prob", "BV Prob", "Value")}
-            {dataCell(model, "NS_Prob", "CDF Prob", "Value")}
+            {topValueCells(model, "Tar")}
           </tr>
           <tr>
             <SheetCell tone="peach" strong>极值限制</SheetCell>
@@ -271,169 +160,108 @@ function renderFixedSheet(
               {range}
             </SheetCell>
             <SheetCell tone="green">Cal</SheetCell>
-            {topValueCells(model, "Cal", true, topTripletExpanded)}
-            <SheetCell tone="softGreen" colSpan={2} title={cellTooltip(prob.raw, prob.text, model.lookup)}>
-              {prob.text}
-            </SheetCell>
+            {topValueCells(model, "Cal", true)}
           </tr>
         </SheetTable>
 
-        {detailBelowLayout && <div style={sheetDividerStyle()} />}
+        <div style={sheetDividerStyle()} />
 
-        <div style={sheetSideStackStyle(detailBelowLayout)}>
+        <div style={sheetSideStackStyle}>
           <SheetTable>
             <tr>
               <SheetCell
                 tone="orange"
                 rowSpan={DETAIL_SECTION_ROWS}
-                heightRows={!mainTExpanded ? DETAIL_SECTION_ROWS : undefined}
+                width={DETAIL_LABEL_COLUMN_WIDTH}
               >
-                <ToggleHeader
-                  label="MainT"
-                  expanded={mainTExpanded}
-                  onToggle={onToggleMainT}
-                />
+                MainT
               </SheetCell>
-              {mainTExpanded && (
-                <>
-                  <SheetCell tone="cream">THD</SheetCell>
-                  <SheetCell tone="cream">MTWV</SheetCell>
-                  <SheetCell tone="cream">CWV</SheetCell>
-                  <SheetCell tone="cream">DR_Midratio</SheetCell>
-                </>
-              )}
-              <SheetCell
-                tone="orange"
-                rowSpan={!hsExpanded ? DETAIL_SECTION_ROWS : undefined}
-                heightRows={!hsExpanded ? DETAIL_SECTION_ROWS : undefined}
-              >
-                <ToggleHeader
-                  label="HS"
-                  expanded={hsExpanded}
-                  onToggle={onToggleHs}
-                />
-              </SheetCell>
-              {hsExpanded && (
-                <>
-                  <SheetCell tone="cream">THD</SheetCell>
-                  <SheetCell tone="cream">_Final_Y</SheetCell>
-                </>
-              )}
+              <SheetCell tone="cream">THD</SheetCell>
+              <SheetCell tone="cream">MTWV</SheetCell>
+              <SheetCell tone="cream">CWV</SheetCell>
+              <SheetCell tone="cream">DR_Midratio</SheetCell>
+              <SheetCell tone="orange">HS</SheetCell>
+              <SheetCell tone="cream">THD</SheetCell>
+              <SheetCell tone="cream">_Final_Y</SheetCell>
+              <SheetCell tone="cream">Tar</SheetCell>
+              <SheetCell tone="green">Cal</SheetCell>
             </tr>
-            {detailHasBody && (
-              <>
-                <tr>
-                  {mainTExpanded && (
-                    <>
-                      {dataCell(model, "MainT", "THD", "Value")}
-                      {dataCell(model, "MainT", "MTWV", "Value")}
-                      {dataCell(model, "MainT", "CWV", "Value")}
-                      {dataCell(model, "MainT", "DR_Midratio", "Value")}
-                    </>
-                  )}
-                  {hsExpanded && (
-                    <>
-                      <SheetCell tone="yellow">BT</SheetCell>
-                      {hsDetailCells(model, "BT")}
-                    </>
-                  )}
-                </tr>
-                <tr>
-                  {mainTExpanded && (
-                    <>
-                      <SheetCell tone="green">THD_Cal</SheetCell>
-                      <SheetCell tone="cream">BASE</SheetCell>
-                      <SheetCell tone="cream">EXP</SheetCell>
-                      <SheetCell tone="green">THD_MAX</SheetCell>
-                    </>
-                  )}
-                  {hsExpanded && (
-                    <>
-                      <SheetCell tone="yellow">MT</SheetCell>
-                      {hsDetailCells(model, "MT")}
-                    </>
-                  )}
-                </tr>
-                <tr>
-                  {mainTExpanded && (
-                    <>
-                      {dataCell(model, "MainT", "THD", "Cal", "softGreen")}
-                      {dataCell(model, "MainT", "BASE", "Value")}
-                      {dataCell(model, "MainT", "EXP", "Value")}
-                      {dataCell(model, "MainT", "BASE", "Cal", "softGreen")}
-                    </>
-                  )}
-                  {hsExpanded && (
-                    <>
-                      <SheetCell tone="yellow">DT</SheetCell>
-                      {hsDetailCells(model, "DT")}
-                    </>
-                  )}
-                </tr>
-              </>
-            )}
+            <tr>
+              {dataCell(model, "MainT", "THD", "Value")}
+              {dataCell(model, "MainT", "MTWV", "Value")}
+              {dataCell(model, "MainT", "CWV", "Value")}
+              {dataCell(model, "MainT", "DR_Midratio", "Value")}
+              <SheetCell tone="yellow">BT</SheetCell>
+              {hsDetailCells(model, "BT")}
+            </tr>
+            <tr>
+              <SheetCell tone="green">THD_Cal</SheetCell>
+              <SheetCell tone="cream">BASE</SheetCell>
+              <SheetCell tone="cream">EXP</SheetCell>
+              <SheetCell tone="green">THD_MAX</SheetCell>
+              <SheetCell tone="yellow">MT</SheetCell>
+              {hsDetailCells(model, "MT")}
+            </tr>
+            <tr>
+              {dataCell(model, "MainT", "THD", "Cal", "softGreen")}
+              {dataCell(model, "MainT", "BASE", "Value")}
+              {dataCell(model, "MainT", "EXP", "Value")}
+              {dataCell(model, "MainT", "BASE", "Cal", "softGreen")}
+              <SheetCell tone="yellow">DT</SheetCell>
+              {hsDetailCells(model, "DT")}
+            </tr>
           </SheetTable>
 
           <SheetTable>
             <tr>
-              <SheetCell
-                tone="orange"
-                heightRows={!nsExpanded ? DETAIL_SECTION_ROWS : undefined}
-              >
-                <ToggleHeader
-                  label="NS"
-                  expanded={nsExpanded}
-                  onToggle={onToggleNs}
-                />
-              </SheetCell>
-              {nsExpanded && (
-                <>
-                  <SheetCell tone="cream">THD</SheetCell>
-                  <SheetCell tone="cream">_Final_Y</SheetCell>
-                  <SheetCell tone="cream">NorT</SheetCell>
-                  <SheetCell tone="cream">BT</SheetCell>
-                  <SheetCell tone="cream">DT</SheetCell>
-                  <SheetCell tone="cream">DT_Limit</SheetCell>
-                </>
-              )}
+              <SheetCell tone="orange" width={DETAIL_LABEL_COLUMN_WIDTH} rowSpan={DETAIL_SECTION_ROWS}>NS</SheetCell>
+              <SheetCell tone="yellow" colSpan={2}>Prob</SheetCell>
+              <SheetCell tone="cream" colSpan={2}>THD</SheetCell>
+              <SheetCell tone="cream">_Final_Y</SheetCell>
+              <SheetCell tone="cream">NorT</SheetCell>
+              <SheetCell tone="cream">BT</SheetCell>
+              <SheetCell tone="cream">DT</SheetCell>
+              <SheetCell tone="cream">DT_Limit</SheetCell>
             </tr>
-            {nsExpanded && (
-              <>
-                <tr>
-                  <SheetCell tone="yellow">NorT</SheetCell>
-                  {dataCell(model, "NS", "NorT_THD", "Value")}
-                  {dataCell(model, "NS", "NorT_Y", "Value")}
-                  <SheetCell tone="softGreen" rowSpan={3}>
-                    {gridCell(model, "NS+ABL", "NorT", "Cal").text}
-                  </SheetCell>
-                  {dataCell(model, "NS+ABL", "BT", "Tar")}
-                  {dataCell(model, "NS+ABL", "DT", "Tar")}
-                  <SheetCell
-                    tone="grey"
-                    rowSpan={3}
-                    title={cellTooltip(
-                      gridCell(model, "NS+ABL", "DT_Limit", "Tar").raw,
-                      gridCell(model, "NS+ABL", "DT_Limit", "Tar").text,
-                      model.lookup,
-                    )}
-                  >
-                    {gridCell(model, "NS+ABL", "DT_Limit", "Tar").text}
-                  </SheetCell>
-                </tr>
-                <tr>
-                  <SheetCell tone="yellow">BT</SheetCell>
-                  {dataCell(model, "NS", "BT_THD", "Value")}
-                  {dataCell(model, "NS", "BT_Y", "Value")}
-                  {dataCell(model, "NS+ABL", "BT", "Cal", "softGreen", false, 2)}
-                  {dataCell(model, "NS+ABL", "DT", "Cal", "softGreen", false, 2)}
-                </tr>
-                <tr>
-                  <SheetCell tone="yellow">DT</SheetCell>
-                  {dataCell(model, "NS", "DT_THD", "Value")}
-                  {dataCell(model, "NS", "DT_Y", "Value")}
-                </tr>
-              </>
-            )}
+            <tr>
+              <SheetCell tone="yellow">BV Prob</SheetCell>
+              <SheetCell tone="yellow">CDF Prob</SheetCell>
+              <SheetCell tone="yellow">NorT</SheetCell>
+              {dataCell(model, "NS", "NorT_THD", "Value")}
+              {dataCell(model, "NS", "NorT_Y", "Value")}
+              <SheetCell tone="formula" rowSpan={3} title={tableCellTooltip(nsNorTCal.raw, nsNorTCal.text, nsNorTCal.substituted)}>
+                {nsNorTCal.text}
+              </SheetCell>
+              {dataCell(model, "NS+ABL", "BT", "Tar")}
+              {dataCell(model, "NS+ABL", "DT", "Tar")}
+              <SheetCell
+                tone="grey"
+                rowSpan={3}
+                title={tableCellTooltip(
+                  gridCell(model, "NS+ABL", "DT_Limit", "Tar").raw,
+                  gridCell(model, "NS+ABL", "DT_Limit", "Tar").text,
+                )}
+              >
+                {gridCell(model, "NS+ABL", "DT_Limit", "Tar").text}
+              </SheetCell>
+            </tr>
+            <tr>
+              {dataCell(model, "NS_Prob", "BV Prob", "Value")}
+              {dataCell(model, "NS_Prob", "CDF Prob", "Value")}
+              <SheetCell tone="yellow">BT</SheetCell>
+              {dataCell(model, "NS", "BT_THD", "Value")}
+              {dataCell(model, "NS", "BT_Y", "Value")}
+              {dataCell(model, "NS+ABL", "BT", "Cal", "softGreen", false, 2)}
+              {dataCell(model, "NS+ABL", "DT", "Cal", "softGreen", false, 2)}
+            </tr>
+            <tr>
+              <SheetCell tone="formula" colSpan={2} title={tableCellTooltip(prob.raw, prob.text, prob.substituted)}>
+                {prob.text}
+              </SheetCell>
+              <SheetCell tone="yellow">DT</SheetCell>
+              {dataCell(model, "NS", "DT_THD", "Value")}
+              {dataCell(model, "NS", "DT_Y", "Value")}
+            </tr>
           </SheetTable>
         </div>
       </div>
@@ -441,16 +269,17 @@ function renderFixedSheet(
   );
 }
 
-function SheetTable({ children, fillWidth = false }: { children: ReactNode; fillWidth?: boolean }) {
+function SheetTable({ children }: { children: ReactNode }) {
   return (
     <table
       style={{
         borderCollapse: "collapse",
         color: "var(--normal-sheet-text, #202020)",
         fontFamily: '"Microsoft YaHei", "Segoe UI", Arial, sans-serif',
-        fontSize: 12,
-        tableLayout: "auto",
-        width: fillWidth ? "100%" : "max-content",
+        fontSize: "clamp(8px, 2.2cqw, 12px)",
+        tableLayout: "fixed",
+        width: "100%",
+        minWidth: 0,
       }}
     >
       <tbody>{children}</tbody>
@@ -458,37 +287,21 @@ function SheetTable({ children, fillWidth = false }: { children: ReactNode; fill
   );
 }
 
-function sheetCanvasStyle(detailBelowLayout: boolean): CSSProperties {
-  if (detailBelowLayout) {
-    return {
-      display: "inline-grid",
-      gridTemplateColumns: "max-content",
-      gridAutoRows: "max-content",
-      alignItems: "stretch",
-      gap: 0,
-      minWidth: "max-content",
-    };
-  }
+const sheetCanvasStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  width: "100%",
+  minWidth: 0,
+};
 
-  return {
-    display: "inline-flex",
-    alignItems: "flex-start",
-    gap: 0,
-    minWidth: "max-content",
-  };
-}
-
-function sheetSideStackStyle(detailBelowLayout: boolean): CSSProperties {
-  return {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 0,
-    marginLeft: detailBelowLayout ? 0 : -1,
-    width: detailBelowLayout ? "100%" : "max-content",
-    minWidth: "max-content",
-  };
-}
+const sheetSideStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "stretch",
+  gap: 6,
+  width: "100%",
+  minWidth: 0,
+};
 
 function sheetDividerStyle(): CSSProperties {
   return {
@@ -506,7 +319,6 @@ function topValueCells(
   model: SheetModel,
   row: "Wt" | "Tar" | "Cal",
   strong = false,
-  includeTriplet = true,
 ) {
   const tone = row === "Cal" ? "paleGreen" : "grey";
   const mappedRow = row === "Wt" ? "Prob" : row;
@@ -514,13 +326,6 @@ function topValueCells(
     <>
       {dataCell(model, "MainT+HS", "MainT", row, tone, strong)}
       {dataCell(model, "MainT+HS", "HS", row, tone, strong)}
-      {includeTriplet && (
-        <>
-          {dataCell(model, "MainT+HS", "BT", row, tone, strong)}
-          {dataCell(model, "MainT+HS", "MT", row, tone, strong)}
-          {dataCell(model, "MainT+HS", "DT", row, tone, strong)}
-        </>
-      )}
       {dataCell(model, "NS+ABL", "ABL", mappedRow, tone, strong)}
       {dataCell(model, "NS+ABL", "NS", mappedRow, tone, strong)}
     </>
@@ -534,6 +339,8 @@ function hsDetailCells(model: SheetModel, name: "BT" | "MT" | "DT") {
     <>
       {dataCell(model, "HS", thdCol, "Value")}
       {dataCell(model, "HS", yCol, "Value")}
+      {dataCell(model, "MainT+HS", name, "Tar")}
+      {dataCell(model, "MainT+HS", name, "Cal", "softGreen")}
     </>
   );
 }
@@ -549,7 +356,7 @@ function dataCell(
 ) {
   const cell = gridCell(model, title, col, row);
   return (
-    <SheetCell tone={tone} strong={strong} rowSpan={rowSpan} title={cellTooltip(cell.raw, cell.text, model.lookup)}>
+    <SheetCell tone={cell.raw.trim().startsWith("=") ? "formula" : tone} strong={strong} rowSpan={rowSpan} title={tableCellTooltip(cell.raw, cell.text, cell.substituted)}>
       {cell.text}
     </SheetCell>
   );
@@ -565,6 +372,7 @@ function kvCell(model: SheetModel, label: string): CellData {
   return {
     raw,
     text: model.display.get(displayKey(model.kvBlockIdx, name)) ?? "-",
+    substituted: model.substitutions.get(displayKey(model.kvBlockIdx, name)),
   };
 }
 
@@ -581,6 +389,7 @@ function gridCell(model: SheetModel, title: string, col: string, row: string): C
   return {
     raw,
     text: model.display.get(displayKey(bi, name)) ?? "-",
+    substituted: model.substitutions.get(displayKey(bi, name)),
   };
 }
 
@@ -591,10 +400,12 @@ function buildSheetModel(blocks: NormalTableBlock[], lookup: Record<string, stri
     if (block.type === "grid") blockByTitle.set(String(block.title ?? ""), idx);
     if (block.type === "kv" && kvBlockIdx === 0) kvBlockIdx = idx;
   });
+  const evaluated = evaluateNormalTable(blocks, lookup);
   return {
     blocks,
     lookup,
-    display: evaluateNormalTable(blocks, lookup),
+    display: evaluated.display,
+    substitutions: evaluated.substitutions,
     blockByTitle,
     kvBlockIdx,
   };
@@ -606,16 +417,16 @@ function SheetCell({
   strong,
   colSpan,
   rowSpan,
-  heightRows,
   title,
+  width,
 }: {
   children?: ReactNode;
   tone: CellTone;
   strong?: boolean;
   colSpan?: number;
   rowSpan?: number;
-  heightRows?: number;
   title?: string;
+  width?: CSSProperties["width"];
 }) {
   const body = title ? (
     <HoverTooltip content={title} positioning="below-start" wrap maxWidth={520} inline>
@@ -627,7 +438,10 @@ function SheetCell({
     <td
       colSpan={colSpan}
       rowSpan={rowSpan}
-      style={sheetCellStyle(tone, strong, heightRows)}
+      style={{
+        ...sheetCellStyle(tone, strong),
+        ...(width === undefined ? {} : { width, minWidth: width, boxSizing: "border-box" as const }),
+      }}
     >
       {body}
     </td>
@@ -636,91 +450,17 @@ function SheetCell({
 
 function sheetCellContentStyle(): CSSProperties {
   return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: "inline-block",
+    maxWidth: "100%",
     minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    verticalAlign: "middle",
   };
 }
 
-function LayoutToggleHeader({
-  belowLayout,
-  onToggle,
-}: {
-  belowLayout: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div style={headerToggleWrapStyle()}>
-      <span>CWR(目标亮度)</span>
-      <button
-        type="button"
-        title={belowLayout ? "切换为一行显示" : "切换为下方两行显示"}
-        aria-label={belowLayout ? "切换为一行显示" : "切换为下方两行显示"}
-        onClick={onToggle}
-        style={toggleButtonStyle()}
-      >
-        {belowLayout ? "↔" : "↧"}
-      </button>
-    </div>
-  );
-}
-
-function ToggleHeader({
-  label,
-  expanded,
-  onToggle,
-}: {
-  label: string;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div style={headerToggleWrapStyle()}>
-      <span>{label}</span>
-      <button
-        type="button"
-        title={expanded ? `折叠 ${label}` : `展开 ${label}`}
-        aria-label={expanded ? `折叠 ${label}` : `展开 ${label}`}
-        onClick={onToggle}
-        style={toggleButtonStyle()}
-      >
-        {expanded ? "−" : "+"}
-      </button>
-    </div>
-  );
-}
-
-function headerToggleWrapStyle(): CSSProperties {
-  return {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    minWidth: 0,
-  };
-}
-
-function toggleButtonStyle(): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 20,
-    height: 18,
-    padding: 0,
-    border: "1px solid currentColor",
-    borderRadius: 4,
-    background: "var(--normal-sheet-button-bg, rgba(255, 255, 255, 0.28))",
-    color: "inherit",
-    cursor: "pointer",
-    font: "inherit",
-    fontWeight: 700,
-    lineHeight: 1,
-  };
-}
-
-function sheetCellStyle(tone: CellTone, strong = false, heightRows = 1): CSSProperties {
+function sheetCellStyle(tone: CellTone, strong = false): CSSProperties {
   const palette: Record<CellTone, { bg: string; fg: string; border?: string; style?: "solid" | "dotted" }> = {
     peach:     { bg: "var(--normal-sheet-peach-bg, #f7cda0)", fg: "var(--normal-sheet-peach-fg, #111111)" },
     orange:    { bg: "var(--normal-sheet-orange-bg, #ff8a00)", fg: "var(--normal-sheet-orange-fg, #111111)" },
@@ -730,13 +470,14 @@ function sheetCellStyle(tone: CellTone, strong = false, heightRows = 1): CSSProp
     green:     { bg: "var(--normal-sheet-green-bg, #bee32b)", fg: "var(--normal-sheet-green-fg, #202020)" },
     paleGreen: { bg: "var(--normal-sheet-palegreen-bg, #eef5cd)", fg: "var(--normal-sheet-palegreen-fg, #202020)", style: "dotted" },
     softGreen: { bg: "var(--normal-sheet-softgreen-bg, #ddf2d8)", fg: "var(--normal-sheet-softgreen-fg, #202020)", style: "dotted" },
+    formula:   { bg: calculationCellBackground, fg: calculationCellForeground, style: "dotted" },
     blank:     { bg: "transparent", fg: "var(--normal-sheet-text, #202020)", border: "transparent" },
   };
   const color = palette[tone];
   return {
-    height: SHEET_ROW_HEIGHT * heightRows + SHEET_BORDER_WIDTH * Math.max(0, heightRows - 1),
-    minWidth: tone === "blank" ? 0 : 48,
-    padding: tone === "blank" ? 0 : "0 8px",
+    height: SHEET_ROW_HEIGHT,
+    minWidth: 0,
+    padding: tone === "blank" ? 0 : "2px clamp(2px, 0.5cqw, 8px)",
     border: `1px ${color.style ?? "solid"} ${color.border ?? "var(--normal-sheet-line, #303030)"}`,
     background: color.bg,
     color: color.fg,
@@ -744,14 +485,16 @@ function sheetCellStyle(tone: CellTone, strong = false, heightRows = 1): CSSProp
     textAlign: "center",
     verticalAlign: "middle",
     whiteSpace: "nowrap",
-    lineHeight: `${SHEET_ROW_HEIGHT}px`,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    lineHeight: 1.2,
   };
 }
 
 function evaluateNormalTable(
   blocks: NormalTableBlock[],
   lookup: Record<string, string>,
-): Map<string, string> {
+): { display: Map<string, string>; substitutions: Map<string, string> } {
   const perBlock: SymbolTable[] = [];
   const globalSyms: SymbolTable = {};
 
@@ -833,15 +576,20 @@ function evaluateNormalTable(
   });
 
   const display = new Map<string, string>();
+  const substitutions = new Map<string, string>();
   perBlock.forEach((syms, bi) => {
     for (const [name, raw] of Object.entries(syms)) {
+      const s = String(raw).trim();
+      if (s.startsWith("=")) {
+        const substituted = substituteExpression(s.slice(1).trim(), (ident) => resolve(bi, ident));
+        if (substituted !== null) substitutions.set(displayKey(bi, name), substituted);
+      }
       const value = cache.get(displayKey(bi, name));
       if (value !== undefined && value !== null) {
-        display.set(displayKey(bi, name), formatNumber(value, String(raw).trim().startsWith("=")));
+        display.set(displayKey(bi, name), formatNumber(value, s.startsWith("=")));
         continue;
       }
 
-      const s = String(raw).trim();
       if (!s || s === "-" || s.startsWith("=")) {
         display.set(displayKey(bi, name), "-");
       } else if (isDataKey(s)) {
@@ -853,7 +601,26 @@ function evaluateNormalTable(
     }
   });
 
-  return display;
+  return { display, substitutions };
+}
+
+function substituteExpression(expr: string, resolveIdent: (name: string) => number | null): string | null {
+  try {
+    const tokens = tokenize(expr);
+    let substituted = "";
+    let cursor = 0;
+    tokens.forEach((token, index) => {
+      if (token.type !== "ident" || tokens[index + 1]?.value === "(") return;
+      const value = resolveIdent(token.value);
+      if (value === null) return;
+      substituted += expr.slice(cursor, token.start);
+      substituted += formatSubstitutedValue(value);
+      cursor = token.end;
+    });
+    return substituted + expr.slice(cursor);
+  } catch {
+    return null;
+  }
 }
 
 function evalExpression(expr: string, resolveIdent: (name: string) => number | null): number | null {
@@ -988,11 +755,11 @@ class ExpressionParser {
   }
 
   private peek(): Token {
-    return this.tokens[this.pos] ?? { type: "eof", value: "" };
+    return this.tokens[this.pos] ?? { type: "eof", value: "", start: 0, end: 0 };
   }
 }
 
-type Token = { type: "number" | "ident" | "op" | "eof"; value: string };
+type Token = { type: "number" | "ident" | "op" | "eof"; value: string; start: number; end: number };
 
 function tokenize(expr: string): Token[] {
   const tokens: Token[] = [];
@@ -1006,25 +773,25 @@ function tokenize(expr: string): Token[] {
     const rest = expr.slice(i);
     const number = rest.match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/);
     if (number) {
-      tokens.push({ type: "number", value: number[0] });
+      tokens.push({ type: "number", value: number[0], start: i, end: i + number[0].length });
       i += number[0].length;
       continue;
     }
     const ident = rest.match(/^[A-Za-z_][A-Za-z0-9_]*/);
     if (ident) {
-      tokens.push({ type: "ident", value: ident[0] });
+      tokens.push({ type: "ident", value: ident[0], start: i, end: i + ident[0].length });
       i += ident[0].length;
       continue;
     }
     const op = rest.startsWith("**") || rest.startsWith("//") ? rest.slice(0, 2) : ch;
     if ("+-*/%(),".includes(op) || op === "**" || op === "//") {
-      tokens.push({ type: "op", value: op });
+      tokens.push({ type: "op", value: op, start: i, end: i + op.length });
       i += op.length;
       continue;
     }
     throw new Error(`invalid token at ${i}`);
   }
-  tokens.push({ type: "eof", value: "" });
+  tokens.push({ type: "eof", value: "", start: i, end: i });
   return tokens;
 }
 
@@ -1077,15 +844,4 @@ function displayKey(blockIdx: number, name: string): string {
 
 function isDataKey(value: string): boolean {
   return value.startsWith("AE_TAG_") || value.startsWith("SW_");
-}
-
-function cellTooltip(raw: string, value: string, lookup: Record<string, string>): string {
-  const s = String(raw).trim();
-  if (!s || s === "-") return "";
-  if (s.startsWith("=")) return `公式\n${s.slice(1).trim()}\n\n结果\n${value}`;
-  if (isDataKey(s)) {
-    const current = lookupValue(lookup, s);
-    return `数据源\n${s}\n\n当前值\n${current === undefined || current === "" ? "(missing)" : current}`;
-  }
-  return `固定值\n${s}`;
 }

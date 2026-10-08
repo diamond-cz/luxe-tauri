@@ -4,7 +4,7 @@ import type { ImageEntry } from "@/ipc/imageScan";
 import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
-import { ChartMapMode } from "./ChartMapMode";
+import { ChartMapMode, type ChartSourceJumpDetails } from "./ChartMapMode";
 import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
 import {
   normalizeSourceText,
@@ -26,7 +26,9 @@ interface Props {
   filePath:    string;
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
+  entries:     ImageEntry[];
   tomlData:    Record<string, string>;
+  onSelectHeatmapImages?: (paths: string[]) => void;
   chartCardTarget?: CardJumpTarget;
   sourceCardTarget?: CardJumpTarget;
 }
@@ -42,7 +44,7 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 ];
 
 export function ImagePane({
-  mode, onMode, filePath, schema, entry, tomlData, chartCardTarget, sourceCardTarget,
+  mode, onMode, filePath, schema, entry, entries, tomlData, onSelectHeatmapImages, chartCardTarget, sourceCardTarget,
 }: Props) {
   const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
@@ -51,10 +53,15 @@ export function ImagePane({
   const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
   const [tempDraftPending, setTempDraftPending] = useState(false);
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
+  const [chartMounted, setChartMounted] = useState(mode === "chart_map");
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: Exclude<PreviewMode, "para_check"> =
     mode === "chart_map" ? "chart_map" : "param_map";
+
+  useEffect(() => {
+    if (effectiveMode === "chart_map") setChartMounted(true);
+  }, [effectiveMode]);
   const draftDirty = sourceDraftDirty(sourceDraft);
   const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
   const draftResolvePath = draftDirty && tempDraftReady ? tempDraft!.path : filePath;
@@ -149,8 +156,8 @@ export function ImagePane({
     onMode(nextMode);
   };
 
-  const handleSourceJump = (label: string, spec: CardSourceSpec) => {
-    setSourceOverride({ label, spec });
+  const handleSourceJump = (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => {
+    setSourceOverride({ label, spec, details });
     onMode("param_map");
   };
 
@@ -253,19 +260,25 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {effectiveMode === "chart_map" && chartFilePath && (
-          <ChartMapMode
-            filePath={chartFilePath}
-            schema={schema}
-            tomlData={tomlData}
-            activeCard={chartCardTarget?.label}
-            activeCardKey={chartCardTarget?.key}
-            focusTarget={chartFocus}
-            sourceRevision={chartSourceRevision}
-            sourceDraftText={sourceDraft?.text ?? null}
-            onSourceDraftTextChange={handleDraftTextChange}
-            onSourceJump={handleSourceJump}
-          />
+        {chartMounted && chartFilePath && (
+          <div style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}>
+            <ChartMapMode
+              filePath={chartFilePath}
+              schema={schema}
+              entries={entries}
+              tomlData={tomlData}
+              active={effectiveMode === "chart_map"}
+              onSelectHeatmapImages={onSelectHeatmapImages}
+              activeCard={chartCardTarget?.label}
+              activeCardKey={chartCardTarget?.key}
+              focusTarget={chartFocus}
+              onFocusHandled={(key) => setChartFocus((current) => current?.key === key ? null : current)}
+              sourceRevision={chartSourceRevision}
+              sourceDraftText={sourceDraft?.text ?? null}
+              onSourceDraftTextChange={handleDraftTextChange}
+              onSourceJump={handleSourceJump}
+            />
+          </div>
         )}
         {effectiveMode === "chart_map" && !chartFilePath && (
           <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>

@@ -25,6 +25,7 @@ interface Props {
   /** Line to scroll to (1-indexed). */
   jumpLine?: number;
   jumpKey?: number;
+  sourceSelection?: { line: number; value: string; ordinal: number };
   onTextChange: (text: string) => void;
   onPreviewChart?: (targetLabel?: string) => void;
   chartJumpLabel?: string;
@@ -82,6 +83,7 @@ export function SourceCodeView({
   ranges,
   jumpLine,
   jumpKey,
+  sourceSelection,
   onTextChange,
   onPreviewChart,
   chartJumpLabel,
@@ -264,6 +266,31 @@ export function SourceCodeView({
     const top = (jumpLine - 6) * LINE_H;
     scrollerRef.current.scrollTo({ top: Math.max(0, top), behavior: "auto" });
   }, [jumpLine, jumpKey, draft?.loadVersion]);
+
+  useLayoutEffect(() => {
+    if (!sourceSelection || !draft || !textareaRef.current) return;
+    const lineText = lines[sourceSelection.line - 1];
+    if (lineText === undefined) return;
+    const commentAt = [lineText.indexOf("//"), lineText.indexOf("/*")]
+      .filter((index) => index >= 0)
+      .reduce((first, index) => Math.min(first, index), lineText.length);
+    const tokens = Array.from(lineText.slice(0, commentAt).matchAll(/[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?/g));
+    const token = tokens[sourceSelection.ordinal]?.[0] === sourceSelection.value
+      ? tokens[sourceSelection.ordinal]
+      : tokens.find((match) => match[0] === sourceSelection.value);
+    if (token?.index === undefined) return;
+    const lineOffset = lines.slice(0, sourceSelection.line - 1)
+      .reduce((offset, line) => offset + line.length + 1, 0);
+    const start = lineOffset + token.index;
+    textareaRef.current.focus({ preventScroll: true });
+    textareaRef.current.setSelectionRange(start, start + token[0].length);
+    scrollerRef.current?.scrollTo({
+      top: Math.max(0, (sourceSelection.line - 6) * LINE_H),
+      left: Math.max(0, (token.index - 12) * 7),
+      behavior: "auto",
+    });
+    setActiveLine(sourceSelection.line);
+  }, [jumpKey, draft?.loadVersion, sourceSelection]);
 
   useEffect(() => {
     if (!jumpLine) return;

@@ -7,6 +7,8 @@ import {
   FolderAdd24Regular,
   PanelLeftExpand20Filled,
   PanelRightExpand20Filled,
+  PanelBottomContract20Regular,
+  PanelBottomExpand20Filled,
   Search24Regular,
   TableSimple24Regular,
 } from "@fluentui/react-icons";
@@ -32,7 +34,7 @@ import { SortableCard } from "@/components/common/SortableCard";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
-import { loadImageToml } from "@/ipc/imageScan";
+import { loadImageToml, type ImageEntry } from "@/ipc/imageScan";
 import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
@@ -71,6 +73,8 @@ const NORMAL_SUB_NAMES = ["MainT", "HS", "ABL", "NS"] as const;
 const FACE_SUB_NAMES   = ["Face", "Touch"] as const;
 const TOP_NAMES        = ["Normal", "Face"] as const;
 const CARD_GAP_PX      = 12;
+const DETAILS_DEFAULT_SIZE = 42;
+const DETAILS_MIN_SIZE = 25;
 const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 const WORKSPACE_CARD_IDS = ["imageList", "imageInfo", "sourceCode"] as const;
 const UPPER_WORKSPACE_CARD_IDS = ["imageList", "imageInfo"] as const;
@@ -142,6 +146,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [detailsTab, setDetailsTab] = useState<"normal" | "face" | "lce" | "bcompare">("normal");
   const [imageSearchQuery, setImageSearchQuery] = useState("");
+  const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
   const [showImageMetadata, setShowImageMetadata] = useState(false);
   const [captureMetadata, setCaptureMetadata] = useState<CaptureMetadata | null>(null);
@@ -218,6 +223,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
    * lives in the image-list card. */
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
+    setHeatmapSelection(null);
     setImageDir(isp, tabIdx, { current: idx, status: "loading", message: null });
     try {
       const tomlData = await loadImageToml(imageDir.entries[idx].toml_path);
@@ -232,6 +238,17 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
       });
     }
   };
+
+  const onSelectHeatmapImages = (paths: string[]) => {
+    const matchingPaths = new Set(paths);
+    const selected = imageDir.entries.filter((entry) => matchingPaths.has(entry.toml_path));
+    if (selected.length > 0) {
+      const firstIndex = imageDir.entries.indexOf(selected[0]);
+      void onPickImage(firstIndex);
+    }
+    setHeatmapSelection({ entries: imageDir.entries, paths: selected.map((entry) => entry.toml_path) });
+  };
+  const selectedHeatmapPaths = heatmapSelection?.entries === imageDir.entries ? heatmapSelection.paths : [];
 
   const handleImageSearch = async () => {
     const query = imageSearchQuery.trim();
@@ -317,8 +334,14 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
     return values.map((value) => (value / total) * 100);
   }, [upperWorkspaceOrder, workspaceRatioById]);
   const sourceColumnSize = Math.min(70, Math.max(24, workspaceRatioById.sourceCode || 33));
+  const detailsSize = Number.isFinite(visual.workspace_details_ratio)
+    ? Math.min(70, Math.max(DETAILS_MIN_SIZE, visual.workspace_details_ratio))
+    : DETAILS_DEFAULT_SIZE;
   const upperPanelRefs = useRef<Record<string, ImperativePanelHandle | null>>({});
-  const [collapsedUpperCards, setCollapsedUpperCards] = useState<Set<string>>(new Set());
+  const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
+  const [collapsedUpperCards, setCollapsedUpperCards] = useState<Set<string>>(
+    () => new Set(upperWorkspaceOrder.filter((id) => (workspaceRatioById[id] ?? 0) === 0)),
+  );
 
   const markUpperCardCollapsed = (cardId: string) => {
     setCollapsedUpperCards((current) => {
@@ -340,6 +363,14 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   const restoreUpperCard = (cardId: string) => {
     upperPanelRefs.current[cardId]?.expand(24);
     markUpperCardExpanded(cardId);
+  };
+
+  const hideDetailsPanel = () => {
+    const panel = detailsPanelRef.current;
+    if (!panel) return;
+    const size = panel.getSize();
+    if (size >= DETAILS_MIN_SIZE) patchVis({ workspace_details_ratio: size });
+    panel.collapse();
   };
 
   const sensors = useSensors(
@@ -574,12 +605,18 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
                 {tab.label}
               </button>
             );
-            return tab.id === "bcompare" ? (
-              <HoverTooltip key={tab.id} content="bmcompare" positioning="above-center" inline>
-                {button}
-              </HoverTooltip>
-            ) : button;
+            return button;
           })}
+          <button
+            type="button"
+            title="隐藏图片详情卡片"
+            aria-label="隐藏图片详情卡片"
+            onClick={hideDetailsPanel}
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
+            style={{ color: "var(--colorNeutralForeground2)" }}
+          >
+            <PanelBottomContract20Regular />
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {detailsTab === "normal" && <NormalTable tomlData={imageDir.tomlData} />}
@@ -612,6 +649,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
           onToggleContextMenu={() => patchVis({ normal_wf_row_mode: !visual.normal_wf_row_mode })}
           hideHeaderExtra
           surface="panel"
+          className="isp6s-info-card-container"
           badges={
             <BadgeStrip
               items={[
@@ -640,7 +678,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
             >
               <div className={visual.normal_wf_row_mode
                 ? "flex flex-row gap-2.5"
-                : "grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4"}>
+                : "isp6s-info-normal-grid"}>
                 {normalOrder.map((sub) => (
                   <SortableCard
                     key={sub}
@@ -699,7 +737,7 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
             >
               <div className={visual.face_wf_row_mode
                 ? "flex flex-row gap-2.5"
-                : "grid grid-cols-1 gap-2.5 md:grid-cols-2"}>
+                : "grid grid-cols-1 gap-2.5"}>
                 {faceOrder.map((sub) => (
                   <SortableCard
                     key={sub}
@@ -730,8 +768,10 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
       <Suspense fallback={<PaneFallback label="正在加载图片列表..." />}>
         <TablePane
           schema={schema}
+          filePath={filePath}
           entries={imageDir.entries}
           current={imageDir.current}
+          selectedHeatmapPaths={selectedHeatmapPaths}
           imageDir={imageDir.dir}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
@@ -757,7 +797,9 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
           filePath={filePath ?? ""}
           schema={schema}
           entry={currentEntry}
+          entries={imageDir.entries}
           tomlData={imageDir.tomlData}
+          onSelectHeatmapImages={onSelectHeatmapImages}
           chartCardTarget={chartCardTarget}
           sourceCardTarget={sourceCardTarget}
         />
@@ -800,24 +842,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
     });
   };
 
-  const updateUpperWorkspaceSize = (cardId: string, size: number) => {
-    const nextCardSize = Math.max(0, size);
+  const updateUpperWorkspaceLayout = (sizes: number[]) => {
     const upperTotal = Math.max(1, 100 - sourceColumnSize);
-    const nextRatios = upperWorkspaceOrder.map((id) =>
-      id === cardId
-        ? (nextCardSize / 100) * upperTotal
-        : workspaceRatioById[id] ?? 0,
-    );
-    const currentUpperTotal = nextRatios.reduce((sum, value) => sum + value, 0);
-    const normalizedRatios = currentUpperTotal > 0
-      ? nextRatios.map((value) => (value / currentUpperTotal) * upperTotal)
-      : upperWorkspaceOrder.map(() => upperTotal / upperWorkspaceOrder.length);
+    const nextRatios = upperWorkspaceOrder.map((_, index) => ((sizes[index] ?? 0) / 100) * upperTotal);
+    if (upperWorkspaceOrder.every((id, index) => Math.abs((workspaceRatioById[id] ?? 0) - nextRatios[index]) < 0.05)) return;
     patchVis({
       workspace_card_order: [...upperWorkspaceOrder, "sourceCode"],
-      workspace_column_ratios: [
-        ...upperWorkspaceOrder.map((_, index) => normalizedRatios[index] ?? 0),
-        sourceColumnSize,
-      ],
+      workspace_column_ratios: [...nextRatios, sourceColumnSize],
     });
   };
 
@@ -825,9 +856,9 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
     <div ref={workspaceRootRef} className="h-full w-full min-w-0">
     <PanelGroup direction="horizontal" className="h-full w-full min-w-0">
       <Panel defaultSize={100 - sourceColumnSize} minSize={30} className="min-w-0 overflow-hidden">
-        <div ref={workspaceLeftRef} className="h-full w-full min-w-0">
+        <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
         <PanelGroup direction="vertical" className="h-full w-full min-w-0">
-          <Panel defaultSize={58} minSize={30}>
+          <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWorkspaceDragEnd}>
               <SortableContext items={upperWorkspaceOrder} strategy={horizontalListSortingStrategy}>
                 <div className="relative h-full w-full min-w-0">
@@ -835,12 +866,19 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
                     key={upperWorkspaceOrder.join("|")}
                     direction="horizontal"
                     className="h-full w-full"
+                    onLayout={updateUpperWorkspaceLayout}
                   >
                     {upperWorkspaceOrder.map((id, index) => {
                       const cardId = id as (typeof UPPER_WORKSPACE_CARD_IDS)[number];
                       return (
                         <Fragment key={cardId}>
-                          {index > 0 && <ResizeHandle direction="horizontal" size={CARD_GAP_PX} />}
+                          {index > 0 && (
+                            <ResizeHandle
+                              direction="horizontal"
+                              size={collapsedUpperCards.size > 0 ? 0 : CARD_GAP_PX}
+                              className="overflow-hidden"
+                            />
+                          )}
                           <Panel
                             ref={(panel) => { upperPanelRefs.current[cardId] = panel; }}
                             id={cardId}
@@ -851,7 +889,6 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
                             collapsedSize={0}
                             onCollapse={() => markUpperCardCollapsed(cardId)}
                             onExpand={() => markUpperCardExpanded(cardId)}
-                            onResize={(size) => updateUpperWorkspaceSize(cardId, size)}
                           >
                             <SortableCard
                               id={cardId}
@@ -910,11 +947,41 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
               </SortableContext>
             </DndContext>
           </Panel>
-          <ResizeHandle direction="vertical" size={CARD_GAP_PX} />
-          <Panel defaultSize={42} minSize={25}>
+          <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
+          <Panel
+            ref={detailsPanelRef}
+            defaultSize={visual.table_collapsed ? 0 : detailsSize}
+            minSize={DETAILS_MIN_SIZE}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => patchVis({ table_collapsed: true })}
+            onExpand={() => patchVis({ table_collapsed: false })}
+            onResize={(size) => {
+              if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) {
+                patchVis({ workspace_details_ratio: size });
+              }
+            }}
+          >
             {renderDetailsPanel()}
           </Panel>
         </PanelGroup>
+        {visual.table_collapsed && (
+          <button
+            type="button"
+            title="显示图片详情卡片"
+            aria-label="显示图片详情卡片"
+            onClick={() => detailsPanelRef.current?.expand(detailsSize)}
+            className="absolute bottom-1 left-1/2 z-20 flex h-7 w-7 -translate-x-1/2 items-center justify-center"
+            style={{
+              border: "1px solid var(--colorNeutralStroke2)",
+              borderRadius: 8,
+              background: "var(--colorNeutralBackground1)",
+              color: "var(--colorBrandForeground1)",
+            }}
+          >
+            <PanelBottomExpand20Filled />
+          </button>
+        )}
         </div>
       </Panel>
       <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />

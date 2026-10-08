@@ -2,6 +2,7 @@
 //! a straight-through copy.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StateRoot {
@@ -103,6 +104,8 @@ pub struct Isp6sAeVisual {
     pub workspace_card_order:                         Vec<String>,
     #[serde(default = "default_workspace_column_ratios")]
     pub workspace_column_ratios:                      Vec<f32>,
+    #[serde(default = "default_workspace_details_ratio")]
+    pub workspace_details_ratio:                      f32,
     #[serde(default)] pub top_card_order:             Vec<String>,
     #[serde(default)] pub normal_collapsed:           bool,
     #[serde(default)] pub face_collapsed:             bool,
@@ -113,7 +116,7 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub normal_col_ratios:          Vec<f32>,
     #[serde(default)] pub face_col_ratios:            Vec<f32>,
     #[serde(default)] pub normal_sub_order:           NormalSubOrder,
-    #[serde(default = "default_true")] pub table_collapsed: bool,
+    #[serde(default)] pub table_collapsed: bool,
     #[serde(default = "default_table_header_ratios")]
     pub table_header_ratios:                          Vec<f32>,
     #[serde(default = "default_chart_main_t_card_order")]
@@ -126,6 +129,7 @@ pub struct Isp6sAeVisual {
     pub chart_ns_card_order:                           Vec<String>,
     #[serde(default)] pub chart_ns_card_collapsed:     Vec<String>,
     #[serde(default)] pub chart_face_card_collapsed:   Vec<String>,
+    #[serde(default)] pub chart_face_heatmap_modes:    BTreeMap<String, FaceHeatmapMode>,
     #[serde(default = "default_chart_main_t_mid_chart_mode")]
     pub chart_main_t_mid_chart_mode:                   String,
     #[serde(default = "default_chart_main_t_mid_chart_source")]
@@ -144,6 +148,7 @@ fn default_workspace_card_order() -> Vec<String> {
     vec!["imageList".into(), "imageInfo".into(), "sourceCode".into()]
 }
 fn default_workspace_column_ratios() -> Vec<f32> { vec![34.0, 33.0, 33.0] }
+fn default_workspace_details_ratio() -> f32 { 42.0 }
 fn default_table_header_ratios() -> Vec<f32> { vec![24.0, 18.0, 58.0] }
 fn default_chart_main_t_card_order() -> Vec<String> {
     vec!["mainThd".into(), "mtwv".into(), "mainTarget".into()]
@@ -171,6 +176,7 @@ impl Default for Isp6sAeVisual {
             preview_mode: default_preview_mode(),
             workspace_card_order: default_workspace_card_order(),
             workspace_column_ratios: default_workspace_column_ratios(),
+            workspace_details_ratio: default_workspace_details_ratio(),
             top_card_order: vec![],
             normal_collapsed: false,
             face_collapsed: false,
@@ -190,12 +196,23 @@ impl Default for Isp6sAeVisual {
             chart_ns_card_order: default_chart_ns_card_order(),
             chart_ns_card_collapsed: vec![],
             chart_face_card_collapsed: vec![],
+            chart_face_heatmap_modes: BTreeMap::new(),
             chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
             chart_map_tab: default_chart_map_tab(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceHeatmapMode {
+    #[serde(default)] pub enabled: bool,
+    #[serde(default = "default_true")] pub show_hit_counts: bool,
+}
+
+impl Default for FaceHeatmapMode {
+    fn default() -> Self { Self { enabled: false, show_hit_counts: true } }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
