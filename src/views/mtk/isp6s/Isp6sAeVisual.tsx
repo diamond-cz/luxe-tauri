@@ -60,6 +60,7 @@ interface Props {
   filePath:  string | null;
   /** true once the parameter file has been successfully parsed. */
   parsed:    boolean;
+  cppImportRevision: number;
   onImageDirChange: (dir: string) => void;
   onCppPathChange: (path: string) => void;
   debugParserPath: string | null;
@@ -144,7 +145,7 @@ function formatImageMetadata(path: string, data: Record<string, string>, capture
 }
 
 export function Isp6sAeVisual({
-  isp, tabIdx, filePath, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
+  isp, tabIdx, filePath, cppImportRevision, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
 }: Props) {
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
@@ -859,6 +860,8 @@ export function Isp6sAeVisual({
     <div className="h-full w-full min-w-0">
       <Suspense fallback={<PaneFallback label="正在加载源代码卡片..." />}>
         <ImagePane
+          key={`${filePath ?? ""}|${cppImportRevision}`}
+          importRevision={cppImportRevision}
           mode={visual.preview_mode ?? "param_map"}
           onMode={setPreviewMode}
           filePath={filePath ?? ""}

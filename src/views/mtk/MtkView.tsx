@@ -48,7 +48,7 @@ export function MtkView() {
   }, [mtk]);
 
   const importsEntry = useMtkStore((s) => s.imports[key]);
-  const imports = importsEntry ?? { filePath: null, parsed: null, status: "idle" as const, message: null };
+  const imports = importsEntry ?? { filePath: null, parsed: null, revision: 0, status: "idle" as const, message: null };
   const setImport = useMtkStore((s) => s.setImport);
 
   const setImageDir = useMtkStore((s) => s.setImageDir);
@@ -83,6 +83,7 @@ export function MtkView() {
       if (requestId !== cppRequestId.current) return;
       setImport(ispId, tabIdx, {
         parsed:  result,
+        revision: (useMtkStore.getState().imports[`${ispId}|${tabIdx}`]?.revision ?? 0) + 1,
         status:  "done",
         message: null,
       });
@@ -214,6 +215,7 @@ export function MtkView() {
                   tabIdx={tabIdx}
                   filePath={imports.filePath}
                   parsed={parsedReady}
+                  cppImportRevision={imports.revision}
                   onImageDirChange={onImageDirChange}
                   onCppPathChange={onCppPathChange}
                   debugParserPath={debugParserPath}

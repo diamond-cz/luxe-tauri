@@ -8,6 +8,7 @@ import type { ImageEntry } from "@/ipc/imageScan";
 type ImportState = {
   filePath: string | null;
   parsed:   ParseResult | null;
+  revision: number;
   status:   "idle" | "parsing" | "done" | "error";
   message:  string | null;
 };
@@ -24,7 +25,7 @@ type ImageDirState = {
 };
 
 const DEFAULT_IMPORT: ImportState = {
-  filePath: null, parsed: null, status: "idle", message: null,
+  filePath: null, parsed: null, revision: 0, status: "idle", message: null,
 };
 const DEFAULT_IMAGE_DIR: ImageDirState = {
   dir: null, entries: [], current: 0, tomlData: {}, status: "idle", message: null,

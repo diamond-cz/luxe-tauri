@@ -7,7 +7,7 @@ import {
   SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import {
@@ -48,6 +48,7 @@ type HsAreaCellTarget =
 
 interface Props {
   filePath: string;
+  sourceBasePath: string;
   schema:   Isp6sSchemaRoot;
   entries: ImageEntry[];
   tomlData: Record<string, string>;
@@ -59,7 +60,10 @@ interface Props {
   onFocusHandled?: (key: number) => void;
   sourceRevision?: number;
   sourceDraftText?: string | null;
+  sourceInitialText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
+  onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
 }
 
@@ -776,6 +780,7 @@ const MAIN_TARGET_THRESHOLD_ROWS: Array<{ label: MainTargetThresholdRow["label"]
 export function ChartMapMode({
   onFocusHandled,
   filePath,
+  sourceBasePath,
   schema,
   entries,
   tomlData,
@@ -786,7 +791,10 @@ export function ChartMapMode({
   focusTarget,
   sourceRevision,
   sourceDraftText,
+  sourceInitialText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
 }: Props) {
   const visual = useIsp6sVisualStore((state) => state.visual);
@@ -903,10 +911,12 @@ export function ChartMapMode({
       setHeatmapRequested(true);
     }
   }, [isFaceTab, tab, visual.chart_face_heatmap_modes]);
-  const sourceIdentity = useMemo(
-    () => filePath ? `${filePath}\u0000${sourceRevision ?? 0}` : null,
-    [filePath, sourceRevision],
-  );
+  const sourceIdentity = useMemo(() => {
+    if (!filePath) return null;
+    return isFaceTab
+      ? `${sourceBasePath}\u0000${tab}`
+      : `${filePath}\u0000${sourceRevision ?? 0}`;
+  }, [filePath, isFaceTab, sourceBasePath, sourceRevision, tab]);
   const heatmapBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   useEffect(() => {
     if (!heatmapRequested || entries.length === 0) return;
@@ -1564,7 +1574,7 @@ export function ChartMapMode({
           setNsBTSource({ identity: null, source: null });
         }
         if (isFaceTab) {
-          setFaceFbtSource({ identity: null, source: null });
+          setFaceFbtSource((current) => current.identity === sourceIdentity ? current : { identity: null, source: null });
         }
         if (tab === "HS" || isFaceTab) {
           setHsWeightSource(null);
@@ -2013,7 +2023,7 @@ export function ChartMapMode({
 
       <div className="chart-map-scrollbar-hidden min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2" style={hiddenScrollbarStyle}>
         <div style={innerCanvasStyle}>
-          {loading && (
+          {loading && (!isFaceTab || !currentFaceFbtSource) && (
             <div className="mb-2 text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
               loading...
             </div>
@@ -2111,7 +2121,10 @@ export function ChartMapMode({
               fdMinThValue={tab === "Face_FLT" ? faceFltFdMinThValue : faceFbtFdMinThValue}
               oethValue={tab === "Face_FLT" ? faceFltOethValue : faceFbtOethValue}
               sourceDraftText={sourceDraftText}
+              sourceInitialText={sourceInitialText}
+              sourceSavedText={sourceSavedText}
               onSourceDraftTextChange={onSourceDraftTextChange}
+              onSaveSourceDraft={onSaveSourceDraft}
               collapsedIds={visual.chart_face_card_collapsed}
               onCollapsedIdsChange={(next) => patchVis({ chart_face_card_collapsed: next })}
               onSourceJump={onSourceJump}
@@ -6002,7 +6015,10 @@ function FaceTabContent({
   fdMinThValue,
   oethValue,
   sourceDraftText,
+  sourceInitialText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   collapsedIds,
   onCollapsedIdsChange,
   onSourceJump,
@@ -6036,7 +6052,10 @@ function FaceTabContent({
   fdMinThValue: string | null;
   oethValue: string | null;
   sourceDraftText?: string | null;
+  sourceInitialText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
+  onSaveSourceDraft?: () => Promise<void>;
   collapsedIds: string[];
   onCollapsedIdsChange: (next: string[]) => void;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
@@ -6047,14 +6066,35 @@ function FaceTabContent({
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
 
   useEffect(() => {
-    setEditableSource(source);
-  }, [source]);
+    if (!source || !sourceDraftText) {
+      setEditableSource(source);
+      return;
+    }
+    let next = source;
+    const tableKeys: FaceFbtTableKey[] = ["fdTh", "nsFdTh", "fdMinTh", "nsFdMinTh", "oeth", "nsOeth"];
+    for (const tableKey of tableKeys) {
+      for (const field of source[tableKey].fields) {
+        const value = sourceFieldToken(sourceDraftText, field, source.fields);
+        if (value !== null && value !== field.value) next = updateFaceFbtSourceField(next, tableKey, field, value);
+      }
+    }
+    for (const axisKey of ["faceProb", "fddrRa", "fdszRa"] as const) {
+      for (const field of source[axisKey].fields) {
+        const value = sourceFieldToken(sourceDraftText, field, source.fields);
+        if (value !== null && value !== field.value) next = updateFaceFbtFaceProbSourceField(next, axisKey, field, value);
+      }
+    }
+    setEditableSource(next);
+  }, [source, sourceDraftText]);
   useEffect(() => {
     sourceDraftTextRef.current = sourceDraftText ?? "";
   }, [sourceDraftText]);
 
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
   const currentSource = editableSource ?? source;
+  const historicalSourceText = sourceInitialText ?? "";
+  const savedSourceText = sourceSavedText ?? "";
+  const currentSourceText = sourceDraftText ?? "";
   const bv = parseFiniteNumber(bvValue);
   const dr = parseFiniteNumber(drValue);
   const cwv = parseFiniteNumber(cwvValue);
@@ -6140,6 +6180,7 @@ function FaceTabContent({
     setEditableSource((current) => current ? updateFaceFbtSourceField(current, tableKey, field, trimmed) : current);
     return true;
   };
+
 
   const previewFaceAxisCell = (sourceKey: "faceProb" | "fddrRa" | "fdszRa", target: FaceProbCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
@@ -6236,6 +6277,10 @@ function FaceTabContent({
                 onCellPreview={(target, value) => previewFaceAxisCell("fdszRa", target, value)}
                 onCellCommit={(target, value) => updateFaceAxisCell("fdszRa", target, value)}
                 onSourceJump={onSourceJump}
+                sourceInitialText={historicalSourceText}
+                sourceDraftText={currentSourceText}
+                sourceSavedText={savedSourceText}
+                onSaveSourceDraft={onSaveSourceDraft}
               />
             )}
             {!fltMode && (
@@ -6246,6 +6291,10 @@ function FaceTabContent({
                 onCellPreview={(target, value) => previewFaceAxisCell("faceProb", target, value)}
                 onCellCommit={(target, value) => updateFaceAxisCell("faceProb", target, value)}
                 onSourceJump={onSourceJump}
+                sourceInitialText={historicalSourceText}
+                sourceDraftText={currentSourceText}
+                sourceSavedText={savedSourceText}
+                onSaveSourceDraft={onSaveSourceDraft}
               />
             )}
           </div>
@@ -6307,6 +6356,10 @@ function FaceTabContent({
               onCellPreview={(target, value) => previewFaceAxisCell("fddrRa", target, value)}
               onCellCommit={(target, value) => updateFaceAxisCell("fddrRa", target, value)}
               onSourceJump={onSourceJump}
+              sourceInitialText={historicalSourceText}
+              sourceDraftText={currentSourceText}
+              sourceSavedText={savedSourceText}
+              onSaveSourceDraft={onSaveSourceDraft}
             />}
             <FaceFbtTableGroup
               cardId="fdThGroup"
@@ -6325,6 +6378,7 @@ function FaceTabContent({
               sourceKey={fltMode ? FACE_FLT_FDTH_KEY : FACE_FBT_FDTH_KEY}
               sourceValue={fdThValue}
               secondarySource={{ key: NS_PROB_KEY, value: nsProbValue }}
+              showImageCoordinates
               computedValue={computedFdTh}
               normalTableValue={fdThInterpolated}
               nsTableValue={nsFdThInterpolated}
@@ -6337,6 +6391,10 @@ function FaceTabContent({
               onCellPreview={previewCell}
               onCellCommit={updateCell}
               onSourceJump={onSourceJump}
+              sourceInitialText={historicalSourceText}
+              sourceDraftText={currentSourceText}
+              sourceSavedText={savedSourceText}
+              onSaveSourceDraft={onSaveSourceDraft}
             />
             <FaceFbtTableGroup
               cardId="fdMinThGroup"
@@ -6354,6 +6412,8 @@ function FaceTabContent({
               metricLabel="FDMINTH"
               sourceKey={fltMode ? FACE_FLT_FDMINTH_KEY : FACE_FBT_FDMINTH_KEY}
               sourceValue={fdMinThValue}
+              secondarySource={{ key: NS_PROB_KEY, value: nsProbValue }}
+              showImageCoordinates
               computedValue={computedFdMinTh}
               normalTableValue={fdMinThInterpolated}
               nsTableValue={nsFdMinThInterpolated}
@@ -6366,6 +6426,10 @@ function FaceTabContent({
               onCellPreview={previewCell}
               onCellCommit={updateCell}
               onSourceJump={onSourceJump}
+              sourceInitialText={historicalSourceText}
+              sourceDraftText={currentSourceText}
+              sourceSavedText={savedSourceText}
+              onSaveSourceDraft={onSaveSourceDraft}
             />
             <FaceFbtTableGroup
               cardId="oethGroup"
@@ -6395,6 +6459,10 @@ function FaceTabContent({
               onCellPreview={previewCell}
               onCellCommit={updateCell}
               onSourceJump={onSourceJump}
+              sourceInitialText={historicalSourceText}
+              sourceDraftText={currentSourceText}
+              sourceSavedText={savedSourceText}
+              onSaveSourceDraft={onSaveSourceDraft}
             />
         </div>
       </section>
@@ -6409,6 +6477,10 @@ function FaceProbTableCard({
   onCellPreview,
   onCellCommit,
   onSourceJump,
+  sourceInitialText,
+  sourceDraftText,
+  sourceSavedText,
+  onSaveSourceDraft,
 }: {
   source: FaceProbSource | null;
   bv: number;
@@ -6416,6 +6488,10 @@ function FaceProbTableCard({
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  sourceInitialText?: string | null;
+  sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
+  onSaveSourceDraft?: () => Promise<void>;
 }) {
   const rows = source?.rows ?? FACE_PROB_TABLE_ROWS.map(({ label, path }) => ({
     label,
@@ -6432,6 +6508,7 @@ function FaceProbTableCard({
   const sourcePaths = FACE_PROB_TABLE_ROWS.map(({ path }) => path);
   const canJumpToSource = Boolean(onSourceJump);
   const canEdit = editable && Boolean(source);
+  const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
 
   return (
     <div style={faceProbTableCardStyle}>
@@ -6439,6 +6516,7 @@ function FaceProbTableCard({
         <span style={faceProbTableTitleStyle}>FaceProb</span>
         <div style={faceProbTableHeaderActionsStyle}>
           <strong title={resultText} style={faceProbTableHeaderResultStyle}>{resultText}</strong>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
           type="button"
           title="跳转到 FaceProb 源码"
@@ -6473,6 +6551,7 @@ function FaceProbTableCard({
                       value={value}
                       editable={canEdit && Boolean(field)}
                       active={active}
+                      historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], value)}
                       ariaLabel={`FaceProb.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                       onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
                       onCommit={(nextValue) => onCellCommit?.(target, nextValue)}
@@ -6498,6 +6577,7 @@ function FaceProbTableCard({
 function FaceFdszTableCard({
   source, fdszValue, fdszRaValue, editable,
   onCellPreview, onCellCommit, onSourceJump,
+  sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
 }: {
   source: FaceProbSource | null;
   fdszValue: string | null;
@@ -6506,6 +6586,10 @@ function FaceFdszTableCard({
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  sourceInitialText?: string | null;
+  sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
+  onSaveSourceDraft?: () => Promise<void>;
 }) {
   const rows = source?.rows ?? FACE_FLT_FDSZ_TABLE_ROWS.map(({ label, path }) => ({
     label, path, values: [], fields: [],
@@ -6514,6 +6598,7 @@ function FaceFdszTableCard({
   const faceSz = parseFiniteNumber(fdszValue) / 100;
   const { axis, points, result } = selectFaceFddrRa(source, faceSz);
   const activeColumns = selectFaceProbActiveColumns(faceSz, axis, points);
+  const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
 
   return (
     <div style={faceProbTableCardStyle}>
@@ -6529,6 +6614,7 @@ function FaceFdszTableCard({
         </div>
         <div style={faceCardHeaderActionsStyle}>
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -6556,6 +6642,7 @@ function FaceFdszTableCard({
                     value={row.values[columnIndex] ?? "-"}
                     editable={editable && Boolean(field)}
                     active={activeColumns.has(columnIndex)}
+                    historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], row.values[columnIndex] ?? "-")}
                     ariaLabel={`Face_FLT.FDSZ_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
                     onCommit={(value) => onCellCommit?.(target, value)}
@@ -6576,6 +6663,7 @@ function FaceFdszTableCard({
 function FaceFddrTableCard({
   source, fltMode, fddrValue, fddrRaValue, editable,
   onCellPreview, onCellCommit, onSourceJump,
+  sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
 }: {
   source: FaceProbSource | null;
   fltMode: boolean;
@@ -6585,6 +6673,10 @@ function FaceFddrTableCard({
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  sourceInitialText?: string | null;
+  sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
+  onSaveSourceDraft?: () => Promise<void>;
 }) {
   const rows = source?.rows ?? (fltMode ? FACE_FLT_FDDR_TABLE_ROWS : FACE_FDDR_TABLE_ROWS).map(({ label, path }) => ({
     label, path, values: [], fields: [],
@@ -6600,6 +6692,7 @@ function FaceFddrTableCard({
       ]
     : FACE_FDDR_TABLE_ROWS.map(({ path }) => path);
   const prefix = fltMode ? "Face_FLT" : "Face";
+  const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
   return (
     <section style={faceFddrCardStyle}>
       <div style={faceFddrHeaderStyle}>
@@ -6610,6 +6703,7 @@ function FaceFddrTableCard({
         </div>
         <div style={faceCardHeaderActionsStyle}>
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -6636,6 +6730,7 @@ function FaceFddrTableCard({
                     value={row.values[columnIndex] ?? "-"}
                     editable={editable && Boolean(source) && Boolean(field)}
                     active={activeColumns.has(columnIndex)}
+                    historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], row.values[columnIndex] ?? "-")}
                     ariaLabel={`${prefix}.FDDR_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
                     onCommit={(value) => onCellCommit?.(target, value)}
@@ -6657,6 +6752,7 @@ function FaceProbEditableCell({
   value,
   editable,
   active,
+  historyDelta,
   ariaLabel,
   onPreview,
   onCommit,
@@ -6665,6 +6761,7 @@ function FaceProbEditableCell({
   value: string;
   editable: boolean;
   active: boolean;
+  historyDelta?: number;
   ariaLabel: string;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
@@ -6677,7 +6774,11 @@ function FaceProbEditableCell({
       active={active}
       ariaLabel={ariaLabel}
       frameStyle={({ focused }) => editableCellFrameStyle(faceProbTableValueStyle(active), focused)}
-      inputStyle={({ editable: cellEditable }) => faceProbTableInputStyle(cellEditable)}
+      inputStyle={({ editable: cellEditable }) => ({
+        ...faceProbTableInputStyle(cellEditable),
+        ...(historyDelta === undefined || historyDelta === 0 ? {}
+          : { color: historyDelta > 0 ? "var(--colorPaletteRedForeground1)" : "var(--colorPaletteBlueForeground2)" }),
+      })}
       onPreview={onPreview}
       onCommit={onCommit}
       onSourceJump={onSourceJump}
@@ -6699,6 +6800,7 @@ function FaceFbtTableGroup({
   sourceKey,
   sourceValue,
   secondarySource,
+  showImageCoordinates,
   computedValue,
   normalTableValue,
   nsTableValue,
@@ -6711,6 +6813,10 @@ function FaceFbtTableGroup({
   onCellPreview,
   onCellCommit,
   onSourceJump,
+  sourceInitialText,
+  sourceDraftText,
+  sourceSavedText,
+  onSaveSourceDraft,
 }: {
   cardId: FaceMetricCardId;
   faceTab: "Face" | "Face_FLT";
@@ -6725,6 +6831,7 @@ function FaceFbtTableGroup({
   sourceKey: string;
   sourceValue: string | null;
   secondarySource?: { key: string; value: string | null };
+  showImageCoordinates?: boolean;
   computedValue: number;
   normalTableValue: number;
   nsTableValue: number;
@@ -6737,6 +6844,10 @@ function FaceFbtTableGroup({
   onCellPreview?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => void;
   onCellCommit?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+  sourceInitialText?: string | null;
+  sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
+  onSaveSourceDraft?: () => Promise<void>;
 }) {
   return (
     <section id={`face-card-${cardId}`} style={faceFbtGroupCardStyle}>
@@ -6746,6 +6857,7 @@ function FaceFbtTableGroup({
           <span style={faceMetricSourceStyle}>
             {sourceKey}: {sourceValue ?? "-"}
             {secondarySource && <> | {secondarySource.key}: {secondarySource.value ?? "-"}</>}
+            {showImageCoordinates && <> | bv: {formatComputedNumber(bv)}, DR: {formatComputedNumber(dr)}</>}
           </span>
         </div>
         <div style={faceMetricGroupActionsStyle}>
@@ -6793,6 +6905,10 @@ function FaceFbtTableGroup({
               onCellPreview={onCellPreview}
               onCellCommit={onCellCommit}
               onSourceJump={onSourceJump}
+              sourceInitialText={sourceInitialText}
+              sourceDraftText={sourceDraftText}
+              sourceSavedText={sourceSavedText}
+              onSaveSourceDraft={onSaveSourceDraft}
             />
           ))}
         </div>
@@ -6902,6 +7018,10 @@ function FaceBvDrTableCard({
   onCellPreview,
   onCellCommit,
   onSourceJump,
+  sourceInitialText,
+  sourceDraftText,
+  sourceSavedText,
+  onSaveSourceDraft,
 }: {
   tableKey: FaceFbtTableKey;
   faceTab: "Face" | "Face_FLT";
@@ -6919,6 +7039,10 @@ function FaceBvDrTableCard({
   onCellPreview?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => void;
   onCellCommit?: (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+  sourceInitialText?: string | null;
+  sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
+  onSaveSourceDraft?: () => Promise<void>;
 }) {
   const heatmapModes = useIsp6sVisualStore((state) => state.visual.chart_face_heatmap_modes);
   const patchVis = useIsp6sVisualStore((state) => state.patch);
@@ -6954,6 +7078,7 @@ function FaceBvDrTableCard({
     : [];
   const canJumpToSource = Boolean(onSourceJump && sourcePaths.length > 0);
   const canEdit = editable && Boolean(source);
+  const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
   const jumpToCellSource = (field: FieldEntry, target: FaceBvDrCellTarget, currentValue: string) => {
     if (!source || !onSourceJump) return;
     const fieldsOnLine = source.fields
@@ -6977,6 +7102,7 @@ function FaceBvDrTableCard({
           <strong style={faceBvDrInterpolatedResultStyle}>{formatOneDecimalNumber(result)}</strong>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+        <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
         <button
           type="button"
           style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
@@ -7045,6 +7171,7 @@ function FaceBvDrTableCard({
                   active={activeColumns.has(columnIndex)}
                   ariaLabel={`${title}.columnHeader.${columnIndex}${field ? `.${field.path}` : ""}`}
                   variant="columnHeader"
+                  historyDelta={sourceFieldDelta(sourceInitialText, field, source.fields, formatComputedNumber(value))}
                   onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
                   onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
                   onSourceJump={field && onSourceJump
@@ -7065,6 +7192,7 @@ function FaceBvDrTableCard({
                     active={activeRows.has(rowIndex)}
                     ariaLabel={`${title}.rowHeader.${rowIndex}${rowField ? `.${rowField.path}` : ""}`}
                     variant="rowHeader"
+                    historyDelta={sourceFieldDelta(sourceInitialText, rowField, source.fields, formatComputedNumber(rowValue))}
                     onPreview={(nextValue) => onCellPreview?.(tableKey, rowTarget, nextValue)}
                     onCommit={(nextValue) => onCellCommit?.(tableKey, rowTarget, nextValue)}
                     onSourceJump={rowField && onSourceJump
@@ -7103,6 +7231,7 @@ function FaceBvDrTableCard({
                         active={active}
                         ariaLabel={`${title}.value.${rowIndex}.${columnIndex}${field ? `.${field.path}` : ""}`}
                         variant="value"
+                        historyDelta={sourceFieldDelta(sourceInitialText, field, source.fields, formatComputedNumber(value))}
                         heatmapStyle={showHeatmap ? faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active) : undefined}
                         onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
                         onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
@@ -7131,6 +7260,7 @@ function FaceBvDrEditableCell({
   ariaLabel,
   domId,
   variant,
+  historyDelta,
   heatmapStyle,
   onPreview,
   onCommit,
@@ -7142,6 +7272,7 @@ function FaceBvDrEditableCell({
   ariaLabel: string;
   domId?: string;
   variant: "columnHeader" | "rowHeader" | "value";
+  historyDelta?: number;
   heatmapStyle?: CSSProperties;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
@@ -7161,7 +7292,11 @@ function FaceBvDrEditableCell({
       ariaLabel={ariaLabel}
       domId={domId}
       frameStyle={({ focused }) => editableCellFrameStyle(baseStyle, focused)}
-      inputStyle={({ editable: cellEditable }) => faceBvDrCellInputStyle(cellEditable, variant)}
+      inputStyle={({ editable: cellEditable }) => ({
+        ...faceBvDrCellInputStyle(cellEditable, variant),
+        ...(historyDelta === undefined || historyDelta === 0 ? {}
+          : { color: historyDelta > 0 ? "var(--colorPaletteRedForeground1)" : "var(--colorPaletteBlueForeground2)" }),
+      })}
       onPreview={onPreview}
       onCommit={onCommit}
       onSourceJump={onSourceJump}
@@ -10716,11 +10851,7 @@ function replaceSourceFieldInSourceText(
   const line = lines[lineIndex];
   if (line === undefined) return null;
 
-  const fieldsOnLine = fields
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.line === field.line)
-    .sort((a, b) => a.item.index - b.item.index || a.item.path.localeCompare(b.item.path) || a.index - b.index);
-  const ordinalOnLine = fieldsOnLine.findIndex(({ item }) => sameFieldEntry(item, field));
+  const ordinalOnLine = orderedSourceFieldsOnLine(fields, field.line).findIndex((item) => sameFieldEntry(item, field));
   const replaced = replaceNumericTokenInLine(line, ordinalOnLine, field.value, nextValue);
   if (replaced === null || replaced === line) return null;
   lines[lineIndex] = replaced;
@@ -10729,6 +10860,119 @@ function replaceSourceFieldInSourceText(
 
 function sameFieldEntry(left: FieldEntry | null | undefined, right: FieldEntry | null | undefined): boolean {
   return Boolean(left && right && left.path === right.path && left.line === right.line && left.index === right.index);
+}
+
+const faceFieldsByLineCache = new WeakMap<FieldEntry[], Map<number, FieldEntry[]>>();
+
+function orderedSourceFieldsOnLine(fields: FieldEntry[], line: number): FieldEntry[] {
+  let byLine = faceFieldsByLineCache.get(fields);
+  if (!byLine) {
+    byLine = new Map();
+    faceFieldsByLineCache.set(fields, byLine);
+  }
+  const cached = byLine.get(line);
+  if (cached) return cached;
+  const ordered = fields
+    .filter((item) => item.line === line)
+    .sort((left, right) => left.index - right.index || left.path.localeCompare(right.path))
+    .filter((item, index, all) => all.findIndex((candidate) => sameFieldEntry(candidate, item)) === index);
+  byLine.set(line, ordered);
+  return ordered;
+}
+
+const faceSourceLinesCache = new Map<string, string[]>();
+const faceSourceTokensCache = new Map<string, string[]>();
+
+function faceSourceLines(sourceText: string): string[] {
+  const cached = faceSourceLinesCache.get(sourceText);
+  if (cached) return cached;
+  const lines = sourceText.split("\n");
+  if (faceSourceLinesCache.size >= 3) faceSourceLinesCache.delete(faceSourceLinesCache.keys().next().value!);
+  faceSourceLinesCache.set(sourceText, lines);
+  return lines;
+}
+
+function faceSourceTokens(line: string): string[] {
+  const cached = faceSourceTokensCache.get(line);
+  if (cached) return cached;
+  const commentStart = findLineCommentStart(line);
+  const code = commentStart < 0 ? line : line.slice(0, commentStart);
+  SOURCE_NUMBER_RE.lastIndex = 0;
+  const tokens = Array.from(code.matchAll(SOURCE_NUMBER_RE), (match) => match[0]);
+  if (faceSourceTokensCache.size >= 512) faceSourceTokensCache.clear();
+  faceSourceTokensCache.set(line, tokens);
+  return tokens;
+}
+
+function sourceFieldToken(sourceText: string | null | undefined, field: FieldEntry | null | undefined, fields: FieldEntry[]): string | null {
+  if (!sourceText || !field) return null;
+  const line = faceSourceLines(sourceText)[field.line - 1];
+  if (line === undefined) return null;
+  const ordered = orderedSourceFieldsOnLine(fields, field.line);
+  const ordinal = ordered.findIndex((item) => sameFieldEntry(item, field));
+  return faceSourceTokens(line)[ordinal] ?? null;
+}
+
+function sourceFieldNumber(sourceText: string | null | undefined, field: FieldEntry | null | undefined, fields: FieldEntry[]): number {
+  return parseFiniteNumber(sourceFieldToken(sourceText, field, fields));
+}
+
+function sourceFieldDelta(sourceText: string | null | undefined, field: FieldEntry | null | undefined, fields: FieldEntry[], currentValue: string): number | undefined {
+  const historical = sourceFieldNumber(sourceText, field, fields);
+  const current = parseFiniteNumber(currentValue);
+  return Number.isFinite(historical) && Number.isFinite(current) ? current - historical : undefined;
+}
+
+function faceTableHasUnsavedChanges(
+  source: FaceProbSource | FaceBvDrTableSource | null,
+  draftText: string | null | undefined,
+  savedText: string | null | undefined,
+): boolean {
+  if (!source || !draftText || !savedText) return false;
+  const pendingValues: Array<{ field: FieldEntry | null; value: number }> = "rows" in source
+    ? source.rows.flatMap((row) => row.values.map((value, index) => ({ field: row.fields[index] ?? null, value: parseFiniteNumber(value) })))
+    : [
+        ...source.rowHeaders.map((value, index) => ({ field: source.rowHeaderFields[index] ?? null, value })),
+        ...source.columnHeaders.map((value, index) => ({ field: source.columnHeaderFields[index] ?? null, value })),
+        ...source.values.flatMap((row, rowIndex) => row.map((value, columnIndex) => ({
+          field: source.valueFields[rowIndex]?.[columnIndex] ?? null, value,
+        }))),
+      ];
+  return pendingValues.some(({ field, value }) => {
+    if (!field) return false;
+    const draft = sourceFieldNumber(draftText, field, source.fields);
+    const saved = sourceFieldNumber(savedText, field, source.fields);
+    return Number.isFinite(saved) && ((Number.isFinite(draft) && draft !== saved) || (Number.isFinite(value) && value !== saved));
+  });
+}
+
+function FaceTableSaveButton({
+  dirty, onSave,
+}: {
+  dirty: boolean;
+  onSave?: () => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <button
+      type="button"
+      style={{ ...groupSourceButtonStyle(Boolean(dirty && onSave)), opacity: dirty ? 1 : 0.45, position: "relative" }}
+      disabled={!dirty || !onSave || saving}
+      title={error ?? (dirty ? "保存表格修改" : "表格未修改")}
+      aria-label={dirty ? "保存表格修改" : "表格未修改"}
+      onClick={() => {
+        if (!onSave) return;
+        setSaving(true);
+        setError(null);
+        void onSave().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))
+          .finally(() => setSaving(false));
+      }}
+    >
+      <Save24Regular className="h-4 w-4" />
+      {dirty && <span style={{ position: "absolute", top: -4, right: -2, color: "var(--colorPaletteRedForeground1)", fontWeight: 700 }}>*</span>}
+    </button>
+  );
 }
 
 function replaceThresholdCellInSourceText(

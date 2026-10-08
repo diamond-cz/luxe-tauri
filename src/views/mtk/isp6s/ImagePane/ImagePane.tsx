@@ -25,6 +25,7 @@ interface Props {
   mode:        PreviewMode | "image" | "image_split";
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
+  importRevision: number;
   onCppPathChange: (path: string) => void;
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
@@ -46,8 +47,10 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
   { id: "chart_map",   label: "图表映射", Icon: ChartMultiple24Regular },
 ];
 
+const sourceHistorySnapshots = new Map<string, { revision: number; text: string }>();
+
 export function ImagePane({
-  mode, onMode, filePath, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
+  mode, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
@@ -55,6 +58,8 @@ export function ImagePane({
   const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
   const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
+  const sourceDraftRef = useRef<SourceCodeDraft | null>(null);
+  const undoHistoryRef = useRef<string[]>([]);
   const [sourceDraftError, setSourceDraftError] = useState<string | null>(null);
   const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
   const [tempDraftPending, setTempDraftPending] = useState(false);
@@ -144,6 +149,8 @@ export function ImagePane({
   useEffect(() => {
     let cancelled = false;
     setSourceDraft(null);
+    sourceDraftRef.current = null;
+    undoHistoryRef.current = [];
     setSourceDraftError(null);
     setTempDraft(null);
     setTempDraftPending(false);
@@ -152,15 +159,22 @@ export function ImagePane({
       .then((rawText) => {
         if (cancelled) return;
         const normalized = normalizeSourceText(rawText);
-        setSourceDraft({
+        const previousSnapshot = sourceHistorySnapshots.get(filePath);
+        const initialText = previousSnapshot?.revision === importRevision ? previousSnapshot.text : normalized.text;
+        if (previousSnapshot?.revision !== importRevision) {
+          sourceHistorySnapshots.set(filePath, { revision: importRevision, text: normalized.text });
+        }
+        const nextDraft: SourceCodeDraft = {
           filePath,
           text: normalized.text,
           savedText: normalized.text,
-          initialText: normalized.text,
+          initialText,
           lineEnding: normalized.lineEnding,
           version: 0,
           loadVersion: 1,
-        });
+        };
+        sourceDraftRef.current = nextDraft;
+        setSourceDraft(nextDraft);
       })
       .catch((e) => {
         if (!cancelled) setSourceDraftError(e instanceof Error ? e.message : String(e));
@@ -168,7 +182,7 @@ export function ImagePane({
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, importRevision]);
 
   useEffect(() => {
     if (!sourceDraft || !draftDirty) {
@@ -222,31 +236,46 @@ export function ImagePane({
   }, [onMode]);
 
   const handleDraftTextChange = useCallback((text: string) => {
-    setSourceDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        text,
-        version: current.version + 1,
-      };
-    });
+    const current = sourceDraftRef.current;
+    if (!current || current.text === text) return;
+    undoHistoryRef.current.push(current.text);
+    if (undoHistoryRef.current.length > 100) undoHistoryRef.current.shift();
+    const nextDraft = { ...current, text, version: current.version + 1 };
+    sourceDraftRef.current = nextDraft;
+    setSourceDraft(nextDraft);
   }, []);
 
+  useEffect(() => {
+    if (effectiveMode !== "chart_map") return;
+    const onUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z" || event.shiftKey) return;
+      if (!rootRef.current?.contains(event.target as Node)) return;
+      const previous = undoHistoryRef.current.pop();
+      const current = sourceDraftRef.current;
+      if (previous === undefined || !current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextDraft = { ...current, text: previous, version: current.version + 1 };
+      sourceDraftRef.current = nextDraft;
+      setSourceDraft(nextDraft);
+    };
+    window.addEventListener("keydown", onUndo, true);
+    return () => window.removeEventListener("keydown", onUndo, true);
+  }, [effectiveMode]);
+
   const handleSaveDraft = useCallback(async () => {
-    const draft = sourceDraft;
+    const draft = sourceDraftRef.current;
     if (!draft) return;
     await writeTextFile(filePath, serializeSourceText(draft));
     await cppClearCache();
-    setSourceDraft((current) => {
-      if (!current || current.filePath !== draft.filePath || current.text !== draft.text) return current;
-      return {
-        ...current,
-        savedText: draft.text,
-        version: current.version + 1,
-      };
-    });
-    setTempDraft(null);
-  }, [filePath, sourceDraft]);
+    const current = sourceDraftRef.current;
+    if (current && current.filePath === draft.filePath) {
+      const nextDraft = { ...current, savedText: draft.text, version: current.version + 1 };
+      sourceDraftRef.current = nextDraft;
+      setSourceDraft(nextDraft);
+    }
+    if (current?.text === draft.text) setTempDraft(null);
+  }, [filePath]);
 
   const handleSaveDraftAs = useCallback(async (path: string) => {
     const draft = sourceDraft;
@@ -255,14 +284,12 @@ export function ImagePane({
   }, [sourceDraft]);
 
   const handleRestoreDraft = useCallback(() => {
-    setSourceDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        text: current.initialText,
-        version: current.version + 1,
-      };
-    });
+    const current = sourceDraftRef.current;
+    if (!current || current.text === current.initialText) return;
+    undoHistoryRef.current.push(current.text);
+    const nextDraft = { ...current, text: current.initialText, version: current.version + 1 };
+    sourceDraftRef.current = nextDraft;
+    setSourceDraft(nextDraft);
     setTempDraft(null);
   }, []);
 
@@ -314,6 +341,7 @@ export function ImagePane({
           <div style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}>
             <ChartMapMode
               filePath={chartFilePath}
+              sourceBasePath={filePath}
               schema={schema}
               entries={entries}
               tomlData={tomlData}
@@ -325,7 +353,10 @@ export function ImagePane({
               onFocusHandled={(key) => setChartFocus((current) => current?.key === key ? null : current)}
               sourceRevision={chartSourceRevision}
               sourceDraftText={sourceDraft?.text ?? null}
+              sourceInitialText={sourceDraft?.initialText ?? null}
+              sourceSavedText={sourceDraft?.savedText ?? null}
               onSourceDraftTextChange={handleDraftTextChange}
+              onSaveSourceDraft={handleSaveDraft}
               onSourceJump={handleSourceJump}
             />
           </div>
