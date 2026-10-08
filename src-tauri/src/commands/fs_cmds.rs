@@ -66,6 +66,11 @@ pub fn is_dir(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+#[tauri::command]
+pub fn is_file(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
 /// If `path` is a file → return its parent dir; if it's already a dir → return as-is.
 #[tauri::command]
 pub fn ensure_directory(path: String) -> AppResult<String> {

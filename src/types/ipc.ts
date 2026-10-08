@@ -34,6 +34,8 @@ export interface Mtk {
   current_tab:    number;
   outer_splitter: number[];
   inner_splitter: number[];
+  cpp_path?: string | null;
+  debug_parser_path?: string | null;
 }
 
 export interface NormalSubOrder {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ImageEntry } from "@/ipc/imageScan";
 import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
@@ -24,11 +25,13 @@ interface Props {
   mode:        PreviewMode | "image" | "image_split";
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
+  onCppPathChange: (path: string) => void;
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
   entries:     ImageEntry[];
   tomlData:    Record<string, string>;
   onSelectHeatmapImages?: (paths: string[]) => void;
+  onCalculatorSourcePathChange?: (path: string | null) => void;
   chartCardTarget?: CardJumpTarget;
   sourceCardTarget?: CardJumpTarget;
 }
@@ -44,8 +47,11 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 ];
 
 export function ImagePane({
-  mode, onMode, filePath, schema, entry, entries, tomlData, onSelectHeatmapImages, chartCardTarget, sourceCardTarget,
+  mode, onMode, filePath, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const dropPathsRef = useRef<string[]>([]);
+  const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
   const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
   const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
@@ -60,6 +66,46 @@ export function ImagePane({
     mode === "chart_map" ? "chart_map" : "param_map";
 
   useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const insideCard = (position: { x: number; y: number }) => {
+      const bounds = rootRef.current?.getBoundingClientRect();
+      if (!bounds) return false;
+      const scale = window.devicePixelRatio || 1;
+      const x = position.x / scale;
+      const y = position.y / scale;
+      return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+    };
+    const cppPath = (paths: string[]) => paths.find((path) => /\.(cpp|c|h|hpp|cxx|cc)$/i.test(path));
+    getCurrentWindow().onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === "leave") {
+        dropPathsRef.current = [];
+        setDropState(null);
+        return;
+      }
+      if (payload.type === "enter") dropPathsRef.current = payload.paths;
+      const hovering = insideCard(payload.position);
+      if (payload.type === "drop") {
+        dropPathsRef.current = [];
+        setDropState(null);
+        const path = hovering ? cppPath(payload.paths) : undefined;
+        if (path) onCppPathChange(path);
+        return;
+      }
+      setDropState(hovering ? (cppPath(dropPathsRef.current) ? "ok" : "bad") : null);
+    }).then((stop) => {
+      if (cancelled) stop();
+      else unlisten = stop;
+    }).catch((error) => console.warn("register source card drop listener failed", error));
+    return () => {
+      cancelled = true;
+      dropPathsRef.current = [];
+      unlisten?.();
+    };
+  }, [onCppPathChange]);
+
+  useEffect(() => {
     if (effectiveMode === "chart_map") setChartMounted(true);
   }, [effectiveMode]);
   const draftDirty = sourceDraftDirty(sourceDraft);
@@ -69,6 +115,10 @@ export function ImagePane({
   const chartSourceRevision = draftDirty
     ? (tempDraftReady ? tempDraft!.version : tempDraft?.version ?? 0)
     : sourceDraft?.version ?? 0;
+  const calculatorSourcePath = draftDirty ? (tempDraftReady ? tempDraft!.path : null) : filePath;
+  useEffect(() => {
+    onCalculatorSourcePathChange?.(calculatorSourcePath);
+  }, [calculatorSourcePath, onCalculatorSourcePathChange]);
   void internalCard;
   void entry;
 
@@ -121,7 +171,7 @@ export function ImagePane({
   }, [filePath]);
 
   useEffect(() => {
-    if (effectiveMode !== "chart_map" || !sourceDraft || !draftDirty) {
+    if (!sourceDraft || !draftDirty) {
       setTempDraftPending(false);
       return;
     }
@@ -144,7 +194,7 @@ export function ImagePane({
     return () => {
       cancelled = true;
     };
-  }, [draftDirty, effectiveMode, filePath, sourceDraft, tempDraft]);
+  }, [draftDirty, filePath, sourceDraft, tempDraft]);
 
   const handleMode = (nextMode: PreviewMode) => {
     if (nextMode === "param_map") {
@@ -217,10 +267,10 @@ export function ImagePane({
   }, []);
 
   return (
-    <div className="flex h-full w-full flex-col"
+    <div ref={rootRef} className="relative flex h-full w-full flex-col"
          style={{
-           background: "var(--colorNeutralBackground2)",
-           border: "1px solid var(--colorNeutralStroke2)",
+           background: dropState === "ok" ? "var(--colorPaletteGreenBackground1)" : "var(--colorNeutralBackground2)",
+           border: `1px solid ${dropState === "ok" ? "var(--colorPaletteGreenBorder2)" : dropState === "bad" ? "var(--colorPaletteRedBorder2)" : "var(--colorNeutralStroke2)"}`,
            borderRadius: 12,
            overflow: "hidden",
          }}>

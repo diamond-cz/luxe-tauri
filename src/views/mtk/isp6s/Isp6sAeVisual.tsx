@@ -34,7 +34,8 @@ import { SortableCard } from "@/components/common/SortableCard";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
-import { loadImageToml, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageToml, parseImageExif, scanImageDir, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
+import type { ToastKind } from "@/components/common/Toast";
 import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
@@ -60,6 +61,10 @@ interface Props {
   /** true once the parameter file has been successfully parsed. */
   parsed:    boolean;
   onImageDirChange: (dir: string) => void;
+  onCppPathChange: (path: string) => void;
+  debugParserPath: string | null;
+  onDebugParserPathChange: (path: string) => void;
+  onNotice: (toast: { kind: ToastKind; title: string; detail?: string }) => void;
   onWorkspaceDividerChange: (x: number) => void;
 }
 
@@ -138,7 +143,9 @@ function formatImageMetadata(path: string, data: Record<string, string>, capture
   return `${name}  曝光时间 ${exposure ?? "-"}  ISO ${iso ?? "-"}`;
 }
 
-export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorkspaceDividerChange }: Props) {
+export function Isp6sAeVisual({
+  isp, tabIdx, filePath, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
+}: Props) {
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
@@ -150,6 +157,11 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
   const [showImageMetadata, setShowImageMetadata] = useState(false);
   const [captureMetadata, setCaptureMetadata] = useState<CaptureMetadata | null>(null);
+  const [calculatorSourcePath, setCalculatorSourcePath] = useState<string | null>(filePath);
+  const [exifProgress, setExifProgress] = useState<ExifParseProgress | null>(null);
+  const [exifParsing, setExifParsing] = useState(false);
+  const [imageDataRevision, setImageDataRevision] = useState(0);
+  const exifParsingRef = useRef(false);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
   const reportWorkspaceDivider = useCallback(() => {
@@ -173,6 +185,56 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   const imageDir      = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
   const currentEntry = imageDir.entries[imageDir.current];
   const setImageDir   = useMtkStore((s) => s.setImageDir);
+
+  const handleParseExif = async () => {
+    if (exifParsingRef.current) return;
+    const dir = imageDir.dir;
+    if (!dir || imageDir.entries.length === 0) {
+      onNotice({ kind: "info", title: "请先导入图片文件夹" });
+      return;
+    }
+    let parserPath = debugParserPath;
+    if (!parserPath) {
+      onNotice({ kind: "info", title: "请先导入 DP 解析工具 DebugParser.exe" });
+      const picked = await openDialog({ multiple: false, filters: [{ name: "DebugParser.exe", extensions: ["exe"] }] });
+      if (typeof picked !== "string") return;
+      if (picked.split(/[\\/]/).pop()?.toLowerCase() !== "debugparser.exe") {
+        onNotice({ kind: "error", title: "请选择 DebugParser.exe" });
+        return;
+      }
+      parserPath = picked;
+      onDebugParserPathChange(picked);
+    }
+
+    exifParsingRef.current = true;
+    setExifParsing(true);
+    setExifProgress({ stage: "EXIF", completed: 0, total: imageDir.entries.length });
+    const selectedPath = currentEntry?.jpg_path;
+    try {
+      const result = await parseImageExif(parserPath, dir, (progress) => {
+        if (exifParsingRef.current) setExifProgress(progress);
+      });
+      if (useMtkStore.getState().imageDir[`${isp}|${tabIdx}`]?.dir !== dir) return;
+      const entries = await scanImageDir(dir);
+      const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedPath));
+      const tomlData = entries[current]
+        ? await loadImageToml(entries[current].toml_path).catch((): Record<string, string> => ({}))
+        : {};
+      setImageDir(isp, tabIdx, { entries, current, tomlData, status: "done", message: null });
+      setImageDataRevision((revision) => revision + 1);
+      onNotice({
+        kind: result.failed > 0 ? "error" : "success",
+        title: result.failed > 0 ? "部分图片解析失败" : "图片解析完成",
+        detail: `生成 ${result.processed} 张，跳过 ${result.skipped} 张，失败 ${result.failed} 张`,
+      });
+    } catch (error) {
+      onNotice({ kind: "error", title: "图片 EXIF 解析失败", detail: error instanceof Error ? error.message : String(error) });
+    } finally {
+      exifParsingRef.current = false;
+      setExifParsing(false);
+      setExifProgress(null);
+    }
+  };
 
   useEffect(() => {
     if (!showImageMetadata || !currentEntry) return;
@@ -224,17 +286,18 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
     setHeatmapSelection(null);
-    setImageDir(isp, tabIdx, { current: idx, status: "loading", message: null });
+    setImageDir(isp, tabIdx, { current: idx, tomlData: {}, status: "loading", message: null });
     try {
       const tomlData = await loadImageToml(imageDir.entries[idx].toml_path);
       setImageDir(isp, tabIdx, {
         tomlData, status: "done",
         message: `当前 ${imageDir.entries[idx].name}`,
       });
-    } catch (e) {
+    } catch {
       setImageDir(isp, tabIdx, {
-        status: "error",
-        message: e instanceof Error ? e.message : String(e),
+        tomlData: {},
+        status: "done",
+        message: `当前 ${imageDir.entries[idx].name}（未找到同名 TOML，暂显示 -）`,
       });
     }
   };
@@ -769,10 +832,14 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
         <TablePane
           schema={schema}
           filePath={filePath}
+          calculatorSourcePath={calculatorSourcePath}
           entries={imageDir.entries}
           current={imageDir.current}
           selectedHeatmapPaths={selectedHeatmapPaths}
           imageDir={imageDir.dir}
+          imageDataRevision={imageDataRevision}
+          exifParsing={exifParsing}
+          onParseExif={() => void handleParseExif()}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
           imageSearchQuery={imageSearchQuery}
@@ -795,11 +862,13 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
           mode={visual.preview_mode ?? "param_map"}
           onMode={setPreviewMode}
           filePath={filePath ?? ""}
+          onCppPathChange={onCppPathChange}
           schema={schema}
           entry={currentEntry}
           entries={imageDir.entries}
           tomlData={imageDir.tomlData}
           onSelectHeatmapImages={onSelectHeatmapImages}
+          onCalculatorSourcePathChange={setCalculatorSourcePath}
           chartCardTarget={chartCardTarget}
           sourceCardTarget={sourceCardTarget}
         />
@@ -853,8 +922,17 @@ export function Isp6sAeVisual({ isp, tabIdx, filePath, onImageDirChange, onWorks
   };
 
   return (
-    <div ref={workspaceRootRef} className="h-full w-full min-w-0">
-    <PanelGroup direction="horizontal" className="h-full w-full min-w-0">
+    <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
+    {exifProgress && (
+      <div className="mb-2 flex h-7 shrink-0 items-center gap-3 px-2 text-xs"
+           style={{ color: "var(--colorNeutralForeground2)", background: "var(--colorNeutralBackground2)" }}>
+        <span className="shrink-0">{exifProgress.stage} {exifProgress.completed}/{exifProgress.total}</span>
+        <progress className="h-2 min-w-0 flex-1" value={exifProgress.completed} max={Math.max(1, exifProgress.total)}
+                  style={{ accentColor: "var(--colorBrandBackground)" }}
+                  aria-label={`图片解析 ${exifProgress.stage}`} />
+      </div>
+    )}
+    <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
       <Panel defaultSize={100 - sourceColumnSize} minSize={30} className="min-w-0 overflow-hidden">
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
         <PanelGroup direction="vertical" className="h-full w-full min-w-0">

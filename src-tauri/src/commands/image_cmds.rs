@@ -3,6 +3,24 @@ use std::path::PathBuf;
 
 use crate::error::{AppError, AppResult};
 use crate::image_scan;
+use tauri::ipc::Channel;
+
+#[tauri::command]
+pub async fn parse_image_exif(
+    parser_path: String,
+    image_dir: String,
+    on_progress: Channel<image_scan::ExifParseProgress>,
+) -> AppResult<image_scan::ExifParseSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        image_scan::parse_exif_directory(
+            &PathBuf::from(parser_path),
+            &PathBuf::from(image_dir),
+            |progress| { let _ = on_progress.send(progress); },
+        )
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("EXIF task failed: {error}")))?
+}
 
 #[tauri::command]
 pub fn scan_image_dir(dir: String) -> AppResult<Vec<image_scan::ImageEntry>> {

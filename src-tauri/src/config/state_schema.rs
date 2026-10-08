@@ -83,6 +83,8 @@ pub struct Mtk {
     #[serde(default)]                         pub current_tab:    u32,
     #[serde(default)]                         pub outer_splitter: Vec<u32>,
     #[serde(default)]                         pub inner_splitter: Vec<u32>,
+    #[serde(default)]                         pub cpp_path: Option<String>,
+    #[serde(default)]                         pub debug_parser_path: Option<String>,
 }
 fn default_current_isp() -> u32 { 1 }
 

@@ -54,5 +54,8 @@ export const openUrl = (url: string) =>
 export const isDir = (path: string) =>
   call<boolean>("is_dir", { path });
 
+export const isFile = (path: string) =>
+  call<boolean>("is_file", { path });
+
 export const ensureDirectory = (path: string) =>
   call<string>("ensure_directory", { path });

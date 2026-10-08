@@ -1,17 +1,20 @@
 //! Image directory scanning + per-image TOML loading.
 //!
-//! Mirrors hiz's behaviour: each captured frame has a sidecar `.toml` file
-//! sharing the same stem (e.g. `IMG_20260318_171433.jpg` + `IMG_20260318_171433.toml`).
-//! The TOML carries flat or shallowly-nested `AE_TAG_*` keys that feed every
-//! per-image badge / table value in `Isp6sAeVisual`.
+//! Captured frames may have a sidecar `.toml` file sharing the same stem
+//! (e.g. `IMG_20260318_171433.jpg` + `IMG_20260318_171433.toml`).
+//! When present, it carries flat or shallowly-nested `AE_TAG_*` keys that feed
+//! per-image badge and table values in `Isp6sAeVisual`.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
@@ -33,6 +36,191 @@ pub struct ImageEntry {
     pub name:      String,
     pub jpg_path:  String,
     pub toml_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExifParseProgress {
+    pub stage: &'static str,
+    pub completed: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExifParseSummary {
+    pub processed: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub total: usize,
+}
+
+struct ParseTempDir(PathBuf);
+
+impl Drop for ParseTempDir {
+    fn drop(&mut self) {
+        let temp_parent = std::env::temp_dir().canonicalize();
+        let target = self.0.canonicalize();
+        if let (Ok(parent), Ok(target)) = (temp_parent, target) {
+            let named_for_this_task = target.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("luxe-exif-"));
+            if target.parent() == Some(parent.as_path()) && named_for_this_task {
+                let _ = fs::remove_dir_all(target);
+            }
+        }
+    }
+}
+
+pub fn parse_exif_directory(
+    parser_path: &Path,
+    image_dir: &Path,
+    mut on_progress: impl FnMut(ExifParseProgress),
+) -> AppResult<ExifParseSummary> {
+    if !parser_path.is_file() {
+        return Err(AppError::NotFound(format!("DebugParser.exe: {}", parser_path.display())));
+    }
+    if !image_dir.is_dir() {
+        return Err(AppError::NotFound(format!("image directory: {}", image_dir.display())));
+    }
+    let entries = scan_directory(image_dir)?;
+    if entries.is_empty() {
+        return Err(AppError::Invalid("图片文件夹中没有 JPG、JPEG 或 PNG 图片".into()));
+    }
+    let pending: Vec<_> = entries.iter().filter(|entry| !Path::new(&entry.toml_path).is_file()).collect();
+    let total = pending.len();
+    let mut summary = ExifParseSummary {
+        processed: 0,
+        skipped: entries.len() - total,
+        failed: 0,
+        total: entries.len(),
+    };
+    on_progress(ExifParseProgress { stage: "EXIF", completed: 0, total });
+    let temp_root = std::env::temp_dir().join(format!(
+        "luxe-exif-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos(),
+    ));
+    fs::create_dir(&temp_root)?;
+    let _temp_guard = ParseTempDir(temp_root.clone());
+
+    let mut exif_paths = Vec::with_capacity(total);
+    let mut copied_images = Vec::with_capacity(total);
+    for entry in &pending {
+        let image = Path::new(&entry.jpg_path);
+        let exif = PathBuf::from(format!("{}.exif", entry.jpg_path));
+        if !exif.is_file() {
+            let filename = image
+                .file_name()
+                .ok_or_else(|| AppError::Invalid("invalid image filename".into()))?;
+            let copied_image = temp_root.join(filename);
+            fs::copy(image, &copied_image)?;
+            copied_images.push((copied_image, exif.clone()));
+        }
+        exif_paths.push(exif);
+    }
+
+    let existing_exif = total - copied_images.len();
+    on_progress(ExifParseProgress { stage: "EXIF", completed: existing_exif, total });
+    if !copied_images.is_empty() {
+        let mut command = Command::new(parser_path);
+        command.arg("-dump").arg(&temp_root)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        match command.spawn() {
+            Ok(mut child) => loop {
+                let generated = copied_images.iter().filter(|(image, _)| {
+                    PathBuf::from(format!("{}.exif", image.display())).is_file()
+                }).count();
+                on_progress(ExifParseProgress { stage: "EXIF", completed: existing_exif + generated, total });
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            tracing::warn!(%status, "DebugParser failed");
+                        }
+                        break;
+                    }
+                    Ok(None) => thread::sleep(Duration::from_millis(250)),
+                    Err(error) => {
+                        tracing::warn!(%error, "DebugParser wait failed");
+                        let _ = child.wait();
+                        break;
+                    }
+                }
+            },
+            Err(error) => tracing::warn!(%error, "DebugParser launch failed"),
+        }
+
+        for (copied_image, target) in &copied_images {
+            let generated = PathBuf::from(format!("{}.exif", copied_image.display()));
+            if generated.is_file() {
+                if let Err(error) = fs::copy(generated, target) {
+                    tracing::warn!(path = %target.display(), %error, "copy generated EXIF failed");
+                }
+            }
+        }
+    }
+    on_progress(ExifParseProgress { stage: "EXIF", completed: total, total });
+
+    on_progress(ExifParseProgress { stage: "TOML", completed: 0, total });
+    for (index, (entry, exif)) in pending.iter().zip(exif_paths.iter()).enumerate() {
+        match exif_to_toml(exif) {
+            Ok(Some(contents)) => {
+                if let Err(error) = fs::write(&entry.toml_path, contents) {
+                    tracing::warn!(path = %entry.toml_path, %error, "write image TOML failed");
+                    summary.failed += 1;
+                } else {
+                    summary.processed += 1;
+                }
+            }
+            Ok(None) => summary.failed += 1,
+            Err(error) => {
+                tracing::warn!(path = %exif.display(), %error, "read generated EXIF failed");
+                summary.failed += 1;
+            }
+        }
+        on_progress(ExifParseProgress { stage: "TOML", completed: index + 1, total });
+    }
+    Ok(summary)
+}
+
+fn exif_to_toml(path: &Path) -> AppResult<Option<String>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(path)?;
+    let mut root = toml::map::Map::new();
+    let mut section: Option<String> = None;
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if line.starts_with('[') && line.ends_with(']') {
+            let name = line[1..line.len() - 1].trim();
+            section = (!name.is_empty()).then(|| name.to_string());
+            continue;
+        }
+        for pair in line.split('|') {
+            let Some((key, value)) = pair.split_once(':') else { continue };
+            let key = key.trim();
+            let value = value.trim();
+            if key.is_empty() || value.is_empty() { continue; }
+            let parsed = if let Ok(number) = value.parse::<i64>() {
+                toml::Value::Integer(number)
+            } else if let Ok(number) = value.parse::<f64>() {
+                if number.is_finite() { toml::Value::Float(number) } else { toml::Value::String(value.into()) }
+            } else {
+                toml::Value::String(value.into())
+            };
+            if let Some(name) = section.as_ref() {
+                let table = root.entry(name.clone()).or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+                if let toml::Value::Table(fields) = table { fields.insert(key.into(), parsed); }
+            } else {
+                root.insert(key.into(), parsed);
+            }
+        }
+    }
+    if root.is_empty() { return Ok(None); }
+    Ok(Some(toml::to_string(&toml::Value::Table(root))?))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,8 +258,9 @@ static THUMBNAIL_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(
 static CACHE_TICK: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_IMAGE_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
-/// Scan `dir` for image files (`.jpg`, `.jpeg`, `.png`) that have a sibling
-/// `.toml` with the same stem. Sorted alphabetically.
+/// Scan `dir` for image files (`.jpg`, `.jpeg`, `.png`). A sibling `.toml`
+/// with the same stem is used when present; otherwise its expected path is
+/// retained so the UI can show the image with placeholder values.
 pub fn scan_directory(dir: &Path) -> AppResult<Vec<ImageEntry>> {
     clear_runtime_caches_if_dir_changed(dir);
 
@@ -98,7 +287,10 @@ pub fn scan_directory(dir: &Path) -> AppResult<Vec<ImageEntry>> {
 
     let mut entries = Vec::new();
     for (stem, jpg_path) in images {
-        let Some(toml_path) = tomls.get(&stem) else { continue };
+        let toml_path = tomls
+            .get(&stem)
+            .cloned()
+            .unwrap_or_else(|| jpg_path.with_extension("toml"));
         entries.push(ImageEntry {
             name:      stem,
             jpg_path:  jpg_path.to_string_lossy().into_owned(),

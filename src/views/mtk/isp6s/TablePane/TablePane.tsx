@@ -8,6 +8,8 @@ import {
   TableSimple24Regular,
   ChartMultiple24Regular,
   FolderAdd24Regular,
+  DocumentData24Regular,
+  CalculatorArrowClockwise24Regular,
   Search24Regular,
 } from "@fluentui/react-icons";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -50,6 +52,7 @@ type ImageTableColumnDragState = {
 interface Props {
   schema:    Isp6sSchemaRoot;
   filePath:  string | null;
+  calculatorSourcePath: string | null;
   entries:   ImageEntry[];
   current:   number;
   selectedHeatmapPaths: string[];
@@ -60,6 +63,9 @@ interface Props {
   imageSearchError: string | null;
   onImageSearchQueryChange: (value: string) => void;
   onImageSearch: () => void;
+  onParseExif: () => void;
+  exifParsing: boolean;
+  imageDataRevision: number;
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png"];
@@ -96,6 +102,7 @@ type FaceLinkTargetCalculator = (
 export function TablePane({
   schema,
   filePath,
+  calculatorSourcePath,
   entries,
   current,
   selectedHeatmapPaths,
@@ -106,10 +113,22 @@ export function TablePane({
   imageSearchError,
   onImageSearchQueryChange,
   onImageSearch,
+  onParseExif,
+  exifParsing,
+  imageDataRevision,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
+  const [parseAllVersion, setParseAllVersion] = useState(0);
+  const [applyAllVersion, setApplyAllVersion] = useState(0);
+  const [appliedCalculatorSourcePath, setAppliedCalculatorSourcePath] = useState<string | null>(null);
+  const [parseProgress, setParseProgress] = useState<{ done: number; total: number; error?: string } | null>(null);
+
+  useEffect(() => {
+    setAppliedCalculatorSourcePath(null);
+    setApplyAllVersion(0);
+  }, [filePath]);
 
   const pickImageDir = async () => {
     const picked = await openDialog({ directory: true, multiple: false });
@@ -184,7 +203,7 @@ export function TablePane({
            borderRadius: 12,
            overflow: "hidden",
          }}>
-      <div className="flex h-8 shrink-0 items-center justify-between gap-2 pl-10 pr-10"
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2 pl-10 pr-2"
            style={{
              background: "var(--colorNeutralBackground2)",
            }}>
@@ -196,17 +215,41 @@ export function TablePane({
             </span>
           )}
         </div>
-      </div>
-      <div className="absolute right-2 top-1 z-10">
-        <HoverTooltip content="Add image folder" positioning="below-center" inline>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<FolderAdd24Regular />}
-            onClick={pickImageDir}
-            aria-label="Add image folder"
-          />
-        </HoverTooltip>
+        <div className="flex shrink-0 items-center gap-1">
+          <HoverTooltip content={exifParsing ? "正在解析图片 EXIF" : "解析图片 EXIF"} positioning="below-center" inline>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<DocumentData24Regular />}
+              disabled={entries.length === 0 || exifParsing}
+              onClick={onParseExif}
+              aria-label="解析图片 EXIF"
+            />
+          </HoverTooltip>
+          <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆E" positioning="below-center" inline>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<CalculatorArrowClockwise24Regular />}
+              disabled={entries.length === 0 || !calculatorSourcePath || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
+              onClick={() => {
+                setAppliedCalculatorSourcePath(calculatorSourcePath);
+                setApplyAllVersion((version) => version + 1);
+                setParseAllVersion((version) => version + 1);
+              }}
+              aria-label="Apply all image"
+            />
+          </HoverTooltip>
+          <HoverTooltip content="Add image folder" positioning="below-center" inline>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<FolderAdd24Regular />}
+              onClick={pickImageDir}
+              aria-label="Add image folder"
+            />
+          </HoverTooltip>
+        </div>
       </div>
       <div className="hidden"
            style={{
@@ -262,7 +305,10 @@ export function TablePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ImageTab schema={schema} filePath={filePath} entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
+        <ImageTab schema={schema} filePath={filePath} calculatorSourcePath={appliedCalculatorSourcePath}
+          parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
+          imageDataRevision={imageDataRevision}
+          entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
       </div>
     </div>
   );
@@ -691,10 +737,17 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 }
 
 export function ImageTab({
-  schema, filePath, entries, current, selectedHeatmapPaths, onPick,
+  schema, filePath, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
+  entries, current, selectedHeatmapPaths, onPick,
+  imageDataRevision = 0,
 }: {
   schema:   Isp6sSchemaRoot;
   filePath: string | null;
+  calculatorSourcePath?: string | null;
+  parseAllVersion?: number;
+  applyAllVersion?: number;
+  onParseProgress?: (progress: { done: number; total: number; error?: string } | null) => void;
+  imageDataRevision?: number;
   entries:  ImageEntry[];
   current:  number;
   selectedHeatmapPaths: string[];
@@ -757,13 +810,28 @@ export function ImageTab({
     [imageTomlKeys],
   );
   const [tomls, setTomls] = useState<Record<string, Record<string, string>>>({});
+  const [parsedTomls, setParsedTomls] = useState<{
+    entries: ImageEntry[];
+    keySignature: string;
+    rows: Record<string, Record<string, string>>;
+  } | null>(null);
   const [faceLinkTargetState, setFaceLinkTargetState] = useState<{
     filePath: string | null;
     calculate: FaceLinkTargetCalculator;
   } | null>(null);
-  const faceLinkTargetCalculator = faceLinkTargetState?.filePath === filePath
+  const requestedCalculatorPath = applyAllVersion > 0 ? calculatorSourcePath ?? null : filePath;
+  const faceLinkTargetCalculator = faceLinkTargetState && faceLinkTargetState.filePath === requestedCalculatorPath
     ? faceLinkTargetState.calculate
     : null;
+  const allParsedRows = parsedTomls?.entries === entries && parsedTomls.keySignature === imageTomlKeySignature
+    ? parsedTomls.rows : null;
+  const allTargets = useMemo(() => {
+    if (!allParsedRows || !faceLinkTargetCalculator) return null;
+    return Object.fromEntries(entries.map((entry) => [
+      entry.toml_path,
+      faceLinkTargetCalculator(allParsedRows[entry.toml_path] ?? {}, faceBvKey),
+    ]));
+  }, [allParsedRows, entries, faceBvKey, faceLinkTargetCalculator]);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
@@ -776,15 +844,42 @@ export function ImageTab({
   useEffect(() => {
     let cancelled = false;
     import("../ImagePane/ChartMapMode")
-      .then(({ loadFaceLinkTargetCalculator }) => loadFaceLinkTargetCalculator(filePath))
+      .then(({ loadFaceLinkTargetCalculator }) => loadFaceLinkTargetCalculator(requestedCalculatorPath))
       .then((calculate) => {
-        if (!cancelled) setFaceLinkTargetState({ filePath, calculate });
+        if (!cancelled) setFaceLinkTargetState({ filePath: requestedCalculatorPath, calculate });
       })
       .catch(() => {
         if (!cancelled) setFaceLinkTargetState(null);
       });
     return () => { cancelled = true; };
-  }, [filePath]);
+  }, [filePath, requestedCalculatorPath, applyAllVersion]);
+
+  useEffect(() => {
+    if (parseAllVersion === 0) return;
+    let cancelled = false;
+    const paths = entries.map((entry) => entry.toml_path);
+    const keySignature = imageTomlKeySignature;
+    setParsedTomls(null);
+    onParseProgress?.({ done: 0, total: paths.length });
+    void (async () => {
+      const rows: Record<string, Record<string, string>> = {};
+      try {
+        for (let start = 0; start < paths.length; start += 128) {
+          const batch = await loadImageTomlFieldsBatch(paths.slice(start, start + 128), imageTomlKeys);
+          if (cancelled) return;
+          Object.assign(rows, batch);
+          onParseProgress?.({ done: Math.min(start + 128, paths.length), total: paths.length });
+        }
+        if (!cancelled) setParsedTomls({ entries, keySignature, rows });
+      } catch (error) {
+        if (!cancelled) onParseProgress?.({
+          done: paths.length, total: paths.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entries, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }));
@@ -936,7 +1031,7 @@ export function ImageTab({
     tableFieldAccessOrderRef.current = [];
     loadingTableFieldPathsRef.current.clear();
     setTomls({});
-  }, [entries, imageTomlKeySignature]);
+  }, [entries, imageTomlKeySignature, imageDataRevision]);
 
   useEffect(() => {
     if (!sortControlsEnabled || !sortState) return;
@@ -1489,10 +1584,9 @@ export function ImageTab({
           )}
           {visible.rows.map(({ e, i }) => {
             const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
-            const data = tomls[e.toml_path] ?? {};
-            const target = faceLinkTargetCalculator && e.toml_path in tomls
-              ? faceLinkTargetCalculator(data, faceBvKey)
-              : null;
+            const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
+            const target = allTargets?.[e.toml_path] ?? (faceLinkTargetCalculator && e.toml_path in tomls
+              ? faceLinkTargetCalculator(data, faceBvKey) : null);
             const exif = target && Number.isFinite(target.exif) ? Math.round(target.exif) : null;
             const calculated = target && Number.isFinite(target.calculated) ? Math.round(target.calculated) : null;
             const delta = exif !== null && calculated !== null ? calculated - exif : null;
@@ -1523,7 +1617,7 @@ export function ImageTab({
                          : column.kind === "name"
                            ? e.name
                            : column.kind === "cwr"
-                             ? `${exif ?? "-"}(${calculated ?? "-"})`
+                             ? exif === null && calculated === null ? "-" : `${exif ?? "-"}(${calculated ?? "-"})`
                              : column.kind === "delta"
                                ? <span style={delta !== null && Math.abs(delta) > 2
                                  ? { color: "var(--colorPaletteRedForeground1)" }

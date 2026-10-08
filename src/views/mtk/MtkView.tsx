@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 
 import { saveStateSection } from "@/ipc/stateIo";
 import { parseCppFile } from "@/ipc/cppParser";
+import { isFile } from "@/ipc/shell";
 import { scanImageDir, loadImageToml } from "@/ipc/imageScan";
 import { useMtkStore } from "@/stores/mtkStore";
 import { Toast, type ToastKind } from "@/components/common/Toast";
@@ -26,6 +27,10 @@ export function MtkView() {
   const setInnerSplit  = useMtkStore((s) => s.setInnerSplit);
   const debugParserPath = useMtkStore((s) => s.debugParserPath);
   const setDebugParserPath = useMtkStore((s) => s.setDebugParserPath);
+  const setCppPath = useMtkStore((s) => s.setCppPath);
+  const restoredCppPath = useRef<string | null>(null);
+  const restoredParserPath = useRef<string | null>(null);
+  const cppRequestId = useRef(0);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -65,41 +70,101 @@ export function MtkView() {
     alignWorkspaceDividerRef.current?.(x);
   }, []);
 
-  const onCppPathChange = async (path: string) => {
-    setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
+  const onCppPathChange = useCallback(async (path: string) => {
+    const requestId = ++cppRequestId.current;
     try {
+      if (!(await isFile(path))) {
+        if (requestId === cppRequestId.current) setToast({ kind: "error", title: "参数文件不存在", detail: path });
+        return;
+      }
+      if (requestId !== cppRequestId.current) return;
+      setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
       const result = await parseCppFile(path);
+      if (requestId !== cppRequestId.current) return;
       setImport(ispId, tabIdx, {
         parsed:  result,
         status:  "done",
         message: null,
       });
+      if (ispId === "ISP6S" && tabIdx === 0) {
+        restoredCppPath.current = path;
+        setCppPath(path);
+      }
       setToast({
         kind:  "success",
         title: "解析完成",
         detail: `${result.fields.length} 字段 / ${result.comments.length} 注释`,
       });
     } catch (err) {
+      if (requestId !== cppRequestId.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setImport(ispId, tabIdx, { status: "error", message: null });
       setToast({ kind: "error", title: "解析失败", detail: msg });
     }
-  };
+  }, [ispId, tabIdx, setCppPath, setImport]);
+
+  useEffect(() => {
+    const path = mtk.cpp_path;
+    if (!path || restoredCppPath.current === path) return;
+    restoredCppPath.current = path;
+    const requestId = ++cppRequestId.current;
+    let cancelled = false;
+    isFile(path).then(async (valid) => {
+      if (cancelled || requestId !== cppRequestId.current) return;
+      if (!valid) {
+        setCppPath(null);
+        setToast({ kind: "error", title: "上次的参数文件已失效", detail: path });
+        return;
+      }
+      setImport("ISP6S", 0, { filePath: path, parsed: null, status: "parsing", message: null });
+      try {
+        const parsed = await parseCppFile(path);
+        if (!cancelled && requestId === cppRequestId.current) setImport("ISP6S", 0, { parsed, status: "done", message: null });
+      } catch (error) {
+        if (cancelled || requestId !== cppRequestId.current) return;
+        setImport("ISP6S", 0, { filePath: null, parsed: null, status: "idle", message: null });
+        setCppPath(null);
+        setToast({ kind: "error", title: "上次的参数文件无法加载", detail: error instanceof Error ? error.message : String(error) });
+      }
+    }).catch((error) => {
+      if (!cancelled && requestId === cppRequestId.current) setToast({ kind: "error", title: "检查参数文件失败", detail: String(error) });
+    });
+    return () => { cancelled = true; };
+  }, [mtk.cpp_path, setCppPath, setImport]);
+
+  useEffect(() => {
+    const path = mtk.debug_parser_path;
+    if (!path || restoredParserPath.current === path) return;
+    restoredParserPath.current = path;
+    let cancelled = false;
+    isFile(path).then((valid) => {
+      if (cancelled) return;
+      if (valid && path.split(/[\\/]/).pop()?.toLowerCase() === "debugparser.exe") {
+        setDebugParserPath(path);
+      } else {
+        setDebugParserPath(null);
+        setToast({ kind: "error", title: "上次的 DP 解析工具路径已失效", detail: path });
+      }
+    }).catch((error) => {
+      if (!cancelled) setToast({ kind: "error", title: "检查 DP 解析工具失败", detail: String(error) });
+    });
+    return () => { cancelled = true; };
+  }, [mtk.debug_parser_path, setDebugParserPath]);
 
   const onImageDirChange = async (dir: string) => {
-    setImageDir(ispId, tabIdx, { dir, status: "scanning", message: null });
+    setImageDir(ispId, tabIdx, { dir, tomlData: {}, status: "scanning", message: null });
     try {
       const entries = await scanImageDir(dir);
       if (entries.length === 0) {
         setImageDir(ispId, tabIdx, {
           entries: [], current: 0, tomlData: {},
           status: "error",
-          message: "目录下没有找到带同名 .toml 的图片",
+          message: "目录下没有找到 JPG、JPEG 或 PNG 图片",
         });
         return;
       }
-      setImageDir(ispId, tabIdx, { entries, current: 0, status: "loading", message: null });
-      const tomlData = await loadImageToml(entries[0].toml_path);
+      setImageDir(ispId, tabIdx, { entries, current: 0, tomlData: {}, status: "loading", message: null });
+      const tomlData = await loadImageToml(entries[0].toml_path).catch((): Record<string, string> => ({}));
       setImageDir(ispId, tabIdx, {
         tomlData, status: "done",
         message: `已加载 ${entries.length} 张图片 · 当前 ${entries[0].name}`,
@@ -150,6 +215,10 @@ export function MtkView() {
                   filePath={imports.filePath}
                   parsed={parsedReady}
                   onImageDirChange={onImageDirChange}
+                  onCppPathChange={onCppPathChange}
+                  debugParserPath={debugParserPath}
+                  onDebugParserPathChange={setDebugParserPath}
+                  onNotice={setToast}
                   onWorkspaceDividerChange={reportWorkspaceDivider}
                 />
               </Suspense>

@@ -1,5 +1,6 @@
 import { call } from "./client";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
 
 export interface ImageEntry {
   name:      string;
@@ -9,6 +10,29 @@ export interface ImageEntry {
 
 export const scanImageDir = (dir: string) =>
   call<ImageEntry[]>("scan_image_dir", { dir });
+
+export interface ExifParseProgress {
+  stage: "EXIF" | "TOML";
+  completed: number;
+  total: number;
+}
+
+export interface ExifParseSummary {
+  processed: number;
+  skipped: number;
+  failed: number;
+  total: number;
+}
+
+export const parseImageExif = (
+  parserPath: string,
+  imageDir: string,
+  onProgress: (progress: ExifParseProgress) => void,
+) => {
+  const channel = new Channel<ExifParseProgress>();
+  channel.onmessage = onProgress;
+  return call<ExifParseSummary>("parse_image_exif", { parserPath, imageDir, onProgress: channel });
+};
 
 /** Flat key → string value map. Same key resolves the leaf regardless of TOML nesting. */
 export const loadImageToml = (path: string) =>
