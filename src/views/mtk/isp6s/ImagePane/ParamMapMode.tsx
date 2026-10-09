@@ -11,6 +11,7 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { cppResolveCardSource } from "@/ipc/cppParser";
 import type { CardSourceSpec, Isp6sSchemaRoot } from "@/ipc/cppParser";
+import type { FieldEntry, StructNode } from "@/types/cpp_parser";
 import {
   SourceCodeView,
   sourceDraftCanRestore,
@@ -33,6 +34,8 @@ interface Props {
   onSaveDraftAs: (path: string) => Promise<void>;
   onRestoreDraft: () => void;
   onBackToChart?: (target?: ChartPreviewTarget) => void;
+  sourceFields?: FieldEntry[];
+  sourceTree?: StructNode;
 }
 
 export interface SourceOverride {
@@ -146,6 +149,8 @@ export function ParamMapMode({
   onSaveDraftAs,
   onRestoreDraft,
   onBackToChart,
+  sourceFields,
+  sourceTree,
 }: Props) {
   const [ranges, setRanges] = useState<Array<[number, number]>>([]);
   const [jumpLine, setJumpLine] = useState(1);
@@ -293,6 +298,8 @@ export function ParamMapMode({
           jumpLine={jumpLine}
           jumpKey={jumpKey}
           sourceSelection={sourceOverride?.details?.selection}
+          sourceFields={sourceFields}
+          sourceTree={sourceTree}
           onTextChange={onDraftTextChange}
           chartJumpLabel={activeLabel}
           rangeGroups={sourceRangeGroupsForLabel(activeLabel)}

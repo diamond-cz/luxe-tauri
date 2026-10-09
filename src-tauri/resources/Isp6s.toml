@@ -220,24 +220,28 @@ label = "Target"
 toml_key = "SW_LCE_FinalTarget"
 
 [[preview_info.items]]
-label = "DStrenth"
-toml_key = "SW_LCE_FinalDStrength"
+label = "Final_D,B_Strenth"
+toml_keys = ["SW_LCE_FinalDStrength", "SW_LCE_FinalBStrength"]
 
 [[preview_info.items]]
-label = "BStrenth"
-toml_key = "SW_LCE_FinalBStrength"
+label = "Level_D,B_Strenth"
+toml_keys = ["SW_LCE_DStrengthLevel", "SW_LCE_BStrengthLevel"]
+
+[[preview_info.items]]
+label = "MeterFDTarget"
+toml_key = "SW_LCE_MeterFDTarget"
+
+[[preview_info.items]]
+label = "MeterFDLinkTarget"
+toml_key = "SW_LCE_MeterFDLinkTarget"
 
 [[preview_info.items]]
 label = "AEGain"
 toml_key = "SW_LCE_AEGain"
 
 [[preview_info.items]]
-label = "FaceLoBound"
-toml_key = "SW_LCE_FaceLoBound"
-
-[[preview_info.items]]
-label = "FaceHiBound"
-toml_key = "SW_LCE_FaceHiBound"
+label = "Face_L,H_Bound"
+toml_keys = ["SW_LCE_FaceLoBound", "SW_LCE_FaceHiBound"]
 
 # [[preview_info.items]]
 # label = "LCE_LV"

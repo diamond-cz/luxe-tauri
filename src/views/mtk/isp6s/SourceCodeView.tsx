@@ -15,6 +15,7 @@ import {
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { cppGetFieldsByLine } from "@/ipc/cppParser";
+import type { FieldEntry, StructNode } from "@/types/cpp_parser";
 
 interface Props {
   draft: SourceCodeDraft | null;
@@ -25,7 +26,9 @@ interface Props {
   /** Line to scroll to (1-indexed). */
   jumpLine?: number;
   jumpKey?: number;
-  sourceSelection?: { line: number; value: string; ordinal: number };
+  sourceSelection?: { line: number; value: string; ordinal: number; columnStart?: number; columnEnd?: number };
+  sourceFields?: FieldEntry[];
+  sourceTree?: StructNode;
   onTextChange: (text: string) => void;
   onPreviewChart?: (targetLabel?: string) => void;
   chartJumpLabel?: string;
@@ -84,6 +87,8 @@ export function SourceCodeView({
   jumpLine,
   jumpKey,
   sourceSelection,
+  sourceFields,
+  sourceTree,
   onTextChange,
   onPreviewChart,
   chartJumpLabel,
@@ -94,11 +99,47 @@ export function SourceCodeView({
   const copyTimerRef = useRef<number | null>(null);
   const [scrollFrame, setScrollFrame] = useState({ top: 0, height: 0 });
   const [activeLine, setActiveLine] = useState<number | null>(null);
+  const [activeColumn, setActiveColumn] = useState(0);
   const [activeLinePaths, setActiveLinePaths] = useState<string[]>([]);
   const [rangeStartPaths, setRangeStartPaths] = useState<string[][]>([]);
   const [pathCopied, setPathCopied] = useState(false);
 
   const parserPath = resolveFilePath ?? draft?.filePath;
+  const sourcePathsByLine = useMemo(() => {
+    if (!sourceFields) return null;
+    const byLine = new Map<number, FieldEntry[]>();
+    for (const field of sourceFields) {
+      const fields = byLine.get(field.line) ?? [];
+      fields.push(field);
+      byLine.set(field.line, fields);
+    }
+    for (const fields of byLine.values()) fields.sort((a, b) => a.column_start - b.column_start);
+    return byLine;
+  }, [sourceFields]);
+  const sourceSections = useMemo(() => {
+    if (!sourceTree) return [];
+    const sections: StructNode[] = [];
+    const visit = (node: StructNode) => {
+      if (node.path !== "[root]") sections.push(node);
+      node.children.forEach(visit);
+    };
+    visit(sourceTree);
+    return sections.sort((a, b) => b.depth - a.depth);
+  }, [sourceTree]);
+  const pathsAtLine = (line: number, column?: number): string[] => {
+    const fields = sourcePathsByLine?.get(line);
+    if (fields?.length) {
+      if (column === undefined) return uniqueFieldPaths(fields.map((field) => field.path));
+      const nearest = fields.reduce((best, field) => {
+        const distance = Math.max(field.column_start - column, column - field.column_end, 0);
+        const bestDistance = Math.max(best.column_start - column, column - best.column_end, 0);
+        return distance < bestDistance ? field : best;
+      });
+      return [nearest.path];
+    }
+    const section = sourceSections.find((node) => node.line_start <= line && line <= node.line_end);
+    return section ? [section.path] : [];
+  };
   const text = draft?.text ?? "";
   const lines = useMemo(() => text.split(/\r?\n/), [text]);
   const lineCount = Math.max(1, lines.length);
@@ -180,12 +221,15 @@ export function SourceCodeView({
     const maxLine = Math.max(1, lineNumberFromOffset(nextText, nextText.length));
     const nextLine = clampNumber(lineNumberFromOffset(nextText, selectionStart), 1, maxLine);
     setActiveLine((current) => current === nextLine ? current : nextLine);
+    const lineStart = nextText.lastIndexOf("\n", selectionStart - 1) + 1;
+    setActiveColumn(new TextEncoder().encode(nextText.slice(lineStart, selectionStart)).length);
   };
 
   const jumpToLine = (line: number) => {
     const nextLine = clampNumber(line, 1, lineCount);
     scrollerRef.current?.scrollTo({ top: Math.max(0, (nextLine - 6) * LINE_H), behavior: "auto" });
     setActiveLine(nextLine);
+    setActiveColumn(0);
   };
 
   const jumpToRange = (index: number) => {
@@ -245,6 +289,7 @@ export function SourceCodeView({
     let cancelled = false;
     Promise.all(
       highlightRanges.map(async ([start]) => {
+        if (sourcePathsByLine) return pathsAtLine(start);
         try {
           const fields = await cppGetFieldsByLine(parserPath, start);
           return uniqueFieldPaths(fields.map((field) => field.path));
@@ -259,7 +304,7 @@ export function SourceCodeView({
     return () => {
       cancelled = true;
     };
-  }, [highlightRangeKey, highlightRanges, parserPath]);
+  }, [highlightRangeKey, highlightRanges, parserPath, sourcePathsByLine, sourceSections]);
 
   useLayoutEffect(() => {
     if (!jumpLine || !scrollerRef.current) return;
@@ -278,32 +323,46 @@ export function SourceCodeView({
     const token = tokens[sourceSelection.ordinal]?.[0] === sourceSelection.value
       ? tokens[sourceSelection.ordinal]
       : tokens.find((match) => match[0] === sourceSelection.value);
-    if (token?.index === undefined) return;
+    const tokenStart = sourceSelection.columnStart === undefined
+      ? token?.index
+      : utf16ColumnFromByteOffset(lineText, sourceSelection.columnStart);
+    const tokenEnd = sourceSelection.columnEnd === undefined
+      ? tokenStart === undefined ? undefined : tokenStart + (token?.[0].length ?? 0)
+      : utf16ColumnFromByteOffset(lineText, sourceSelection.columnEnd);
+    if (tokenStart === undefined || tokenEnd === undefined) return;
     const lineOffset = lines.slice(0, sourceSelection.line - 1)
       .reduce((offset, line) => offset + line.length + 1, 0);
-    const start = lineOffset + token.index;
+    const start = lineOffset + tokenStart;
     textareaRef.current.focus({ preventScroll: true });
-    textareaRef.current.setSelectionRange(start, start + token[0].length);
+    textareaRef.current.setSelectionRange(start, lineOffset + tokenEnd);
     scrollerRef.current?.scrollTo({
       top: Math.max(0, (sourceSelection.line - 6) * LINE_H),
-      left: Math.max(0, (token.index - 12) * 7),
+      left: Math.max(0, (tokenStart - 12) * 7),
       behavior: "auto",
     });
     setActiveLine(sourceSelection.line);
+    setActiveColumn(sourceSelection.columnStart ?? new TextEncoder().encode(lineText.slice(0, tokenStart)).length);
   }, [jumpKey, draft?.loadVersion, sourceSelection]);
 
   useEffect(() => {
     if (!jumpLine) return;
     setActiveLine(clampNumber(jumpLine, 1, lineCount));
-  }, [jumpLine, jumpKey, lineCount]);
+    if (!sourceSelection) setActiveColumn(0);
+  }, [jumpLine, jumpKey, lineCount, sourceSelection]);
 
   useEffect(() => {
-    if (!parserPath || !activeLine) {
+    if ((!parserPath && !sourcePathsByLine) || !activeLine) {
       setActiveLinePaths([]);
       return;
     }
 
     let cancelled = false;
+    if (sourcePathsByLine) {
+      setActiveLinePaths(pathsAtLine(activeLine, activeColumn));
+      setPathCopied(false);
+      return;
+    }
+    if (!parserPath) return;
     cppGetFieldsByLine(parserPath, activeLine)
       .then((fields) => {
         if (cancelled) return;
@@ -319,7 +378,7 @@ export function SourceCodeView({
     return () => {
       cancelled = true;
     };
-  }, [activeLine, draft?.filePath, resolveFilePath]);
+  }, [activeLine, activeColumn, draft?.filePath, resolveFilePath, sourcePathsByLine, sourceSections]);
 
   if (loadError) {
     return (
@@ -500,6 +559,10 @@ function lineNumberFromOffset(text: string, offset: number): number {
     if (text.charCodeAt(index) === 10) line += 1;
   }
   return line;
+}
+
+function utf16ColumnFromByteOffset(line: string, byteOffset: number): number {
+  return new TextDecoder().decode(new TextEncoder().encode(line).slice(0, byteOffset)).length;
 }
 
 function uniqueFieldPaths(paths: string[]): string[] {

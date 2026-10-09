@@ -50,6 +50,7 @@ import {
   type NormalBadges, type FaceTouchBadges,
 } from "./badges";
 import type { PreviewMode } from "./ImagePane/ImagePane";
+import type { ParseResult } from "@/types/cpp_parser";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -60,6 +61,8 @@ interface Props {
   filePath:  string | null;
   /** true once the parameter file has been successfully parsed. */
   parsed:    boolean;
+  toneMode?: boolean;
+  toneParsed?: ParseResult | null;
   cppImportRevision: number;
   onImageDirChange: (dir: string) => void;
   onCppPathChange: (path: string) => void;
@@ -145,7 +148,7 @@ function formatImageMetadata(path: string, data: Record<string, string>, capture
 }
 
 export function Isp6sAeVisual({
-  isp, tabIdx, filePath, cppImportRevision, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
+  isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
 }: Props) {
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
@@ -153,6 +156,7 @@ export function Isp6sAeVisual({
   const [chartCardTarget, setChartCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [detailsTab, setDetailsTab] = useState<"normal" | "face" | "lce" | "bcompare">("normal");
+  const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>("param_map");
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
@@ -182,8 +186,9 @@ export function Isp6sAeVisual({
   }, [schema, reportWorkspaceDivider]);
   const cardJumpKeyRef = useRef(0);
 
-  const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${tabIdx}`]);
-  const imageDir      = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
+  const imageTabIdx = toneMode ? 0 : tabIdx;
+  const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${imageTabIdx}`]);
+  const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
   const currentEntry = imageDir.entries[imageDir.current];
   const setImageDir   = useMtkStore((s) => s.setImageDir);
 
@@ -215,13 +220,13 @@ export function Isp6sAeVisual({
       const result = await parseImageExif(parserPath, dir, (progress) => {
         if (exifParsingRef.current) setExifProgress(progress);
       });
-      if (useMtkStore.getState().imageDir[`${isp}|${tabIdx}`]?.dir !== dir) return;
+      if (useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir !== dir) return;
       const entries = await scanImageDir(dir);
       const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedPath));
       const tomlData = entries[current]
         ? await loadImageToml(entries[current].toml_path).catch((): Record<string, string> => ({}))
         : {};
-      setImageDir(isp, tabIdx, { entries, current, tomlData, status: "done", message: null });
+      setImageDir(isp, imageTabIdx, { entries, current, tomlData, status: "done", message: null });
       setImageDataRevision((revision) => revision + 1);
       onNotice({
         kind: result.failed > 0 ? "error" : "success",
@@ -286,16 +291,28 @@ export function Isp6sAeVisual({
    * lives in the image-list card. */
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
+    const selectedEntry = imageDir.entries[idx];
+    const imageDirKey = `${isp}|${imageTabIdx}`;
+    const selectionIsCurrent = () => {
+      const current = useMtkStore.getState().imageDir[imageDirKey];
+      return current?.dir === imageDir.dir && current.current === idx
+        && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
+    };
     setHeatmapSelection(null);
-    setImageDir(isp, tabIdx, { current: idx, tomlData: {}, status: "loading", message: null });
+    setImageDir(isp, imageTabIdx, {
+      dir: imageDir.dir, entries: imageDir.entries,
+      current: idx, tomlData: {}, status: "loading", message: null,
+    });
     try {
-      const tomlData = await loadImageToml(imageDir.entries[idx].toml_path);
-      setImageDir(isp, tabIdx, {
+      const tomlData = await loadImageToml(selectedEntry.toml_path);
+      if (!selectionIsCurrent()) return;
+      setImageDir(isp, imageTabIdx, {
         tomlData, status: "done",
         message: `当前 ${imageDir.entries[idx].name}`,
       });
     } catch {
-      setImageDir(isp, tabIdx, {
+      if (!selectionIsCurrent()) return;
+      setImageDir(isp, imageTabIdx, {
         tomlData: {},
         status: "done",
         message: `当前 ${imageDir.entries[idx].name}（未找到同名 TOML，暂显示 -）`,
@@ -832,6 +849,7 @@ export function Isp6sAeVisual({
       <Suspense fallback={<PaneFallback label="正在加载图片列表..." />}>
         <TablePane
           schema={schema}
+          toneMode={toneMode}
           filePath={filePath}
           calculatorSourcePath={calculatorSourcePath}
           entries={imageDir.entries}
@@ -861,9 +879,11 @@ export function Isp6sAeVisual({
       <Suspense fallback={<PaneFallback label="正在加载源代码卡片..." />}>
         <ImagePane
           key={`${filePath ?? ""}|${cppImportRevision}`}
+          toneMode={toneMode}
+          toneParsed={toneParsed}
           importRevision={cppImportRevision}
-          mode={visual.preview_mode ?? "param_map"}
-          onMode={setPreviewMode}
+          mode={toneMode ? tonePreviewMode : visual.preview_mode ?? "param_map"}
+          onMode={toneMode ? setTonePreviewMode : setPreviewMode}
           filePath={filePath ?? ""}
           onCppPathChange={onCppPathChange}
           schema={schema}
@@ -923,6 +943,50 @@ export function Isp6sAeVisual({
       workspace_column_ratios: [...nextRatios, sourceColumnSize],
     });
   };
+
+  if (toneMode) {
+    return (
+      <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
+        {exifProgress && (
+          <div className="mb-2 flex h-7 shrink-0 items-center gap-3 px-2 text-xs"
+               style={{ color: "var(--colorNeutralForeground2)", background: "var(--colorNeutralBackground2)" }}>
+            <span className="shrink-0">{exifProgress.stage} {exifProgress.completed}/{exifProgress.total}</span>
+            <progress className="h-2 min-w-0 flex-1" value={exifProgress.completed} max={Math.max(1, exifProgress.total)}
+                      style={{ accentColor: "var(--colorBrandBackground)" }} aria-label="图片解析进度" />
+          </div>
+        )}
+        <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
+          <Panel defaultSize={60} minSize={30} className="min-w-0 overflow-hidden">
+            <div ref={workspaceLeftRef} className="h-full w-full min-w-0">
+              <PanelGroup direction="vertical" className="h-full w-full min-w-0">
+                <Panel defaultSize={58} minSize={25} className="min-h-0 overflow-hidden">
+                  {renderTablePanel()}
+                </Panel>
+                <ResizeHandle direction="vertical" size={CARD_GAP_PX} />
+                <Panel defaultSize={42} minSize={25} className="min-h-0 overflow-hidden">
+                  <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-lg border"
+                       style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
+                    <div className="flex h-8 shrink-0 items-end border-b px-2"
+                         style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
+                      <span className="border-b-2 px-3 py-1 text-xs font-semibold"
+                            style={{ borderColor: "var(--colorBrandStroke1)", color: "var(--colorNeutralForeground1)" }}>LCE</span>
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <LceTab schema={schema} tomlData={imageDir.tomlData} />
+                    </div>
+                  </div>
+                </Panel>
+              </PanelGroup>
+            </div>
+          </Panel>
+          <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />
+          <Panel defaultSize={40} minSize={25} className="min-w-0 overflow-hidden">
+            {renderSourceCodePanel()}
+          </Panel>
+        </PanelGroup>
+      </div>
+    );
+  }
 
   return (
     <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">

@@ -79,6 +79,7 @@ export interface Isp6sAeVisual {
   chart_main_t_mid_chart_source: string;
   chart_main_t_mid_readout_mode: string;
   chart_map_tab:              string;
+  tone_chart_map_tab:         string;
 }
 
 export interface StateRoot {

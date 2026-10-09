@@ -68,7 +68,7 @@ interface Props {
 }
 
 export interface ChartSourceJumpDetails {
-  selection?: { line: number; value: string; ordinal: number };
+  selection?: { line: number; value: string; ordinal: number; columnStart?: number; columnEnd?: number };
 }
 
 interface ChartFocusTarget {
@@ -2705,7 +2705,6 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       fddr: value(FACE_FLT_FDDR_KEY),
       fdsz: value(FACE_FLT_FDSZ_KEY),
       exifThreshold: value(FACE_FLT_TARGET_KEY),
-      exifWeight: value(FACE_FLT_FDSZ_RA_KEY),
       fltMode: true,
     });
     return { exif: result.exifBackSceneTarget, calculated: result.backSceneTarget };
@@ -5875,16 +5874,16 @@ interface FaceTargetInputs {
   fddr: number;
   fdsz: number;
   exifThreshold: number;
-  exifWeight: number;
   fltMode: boolean;
 }
 
 function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTargetInputs) {
-  const { bv, dr, cwv, fdy, nsProb, normalTarget, oeSys, exifThreshold, exifWeight, fltMode } = input;
+  const { bv, dr, cwv, fdy, nsProb, normalTarget, oeSys, exifThreshold, fltMode } = input;
   const fddrRa = selectFaceFddrRa(source?.fddrRa ?? null, input.fddr).result;
   const faceWeight = fltMode
     ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz / 100).result
     : input.faceProb;
+  const exifWeight = faceWeight;
   const oethInterpolated = source ? interpolateFaceBvDrTableSource(source.oeth, bv, dr) : NaN;
   const nsOethInterpolated = source ? interpolateFaceBvDrTableSource(source.nsOeth, bv, dr) : NaN;
   const fdMinThInterpolated = source ? interpolateFaceBvDrTableSource(source.fdMinTh, bv, dr) : NaN;
@@ -5915,7 +5914,7 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
     ? (exifTarget * exifWeight + normalTarget * (1024 - exifWeight)) / 1024
     : NaN;
   return {
-    fddrRa, faceWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
+    fddrRa, faceWeight, exifWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
     computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFbtTarget,
     thresholdValue, fbtTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
@@ -6104,9 +6103,8 @@ function FaceTabContent({
   const normalTarget = parseFiniteNumber(normalTargetValue);
   const oeSys = parseFiniteNumber(oeSysValue);
   const exifThreshold = parseFiniteNumber(targetValue);
-  const exifWeight = parseFiniteNumber(fltMode ? fdszRaValue : faceProbValue);
   const {
-    fddrRa, faceWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
+    fddrRa, faceWeight, exifWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
     computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFbtTarget,
     thresholdValue, fbtTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
@@ -6114,7 +6112,7 @@ function FaceTabContent({
     bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys,
     fddr: parseFiniteNumber(fddrValue),
     fdsz: parseFiniteNumber(fdszValue),
-    exifThreshold, exifWeight, fltMode,
+    exifThreshold, fltMode,
   });
   const exifFbtTarget = exifTarget;
   const normalFormula = calculateNormalTargetFormula(normalTargetSource);

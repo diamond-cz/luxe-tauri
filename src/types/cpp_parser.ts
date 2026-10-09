@@ -4,6 +4,8 @@ export interface FieldEntry {
   value:      string;
   comment:    string;
   line:       number;
+  column_start: number;
+  column_end:   number;
   depth:      number;
   index:      number;
   value_type: string;

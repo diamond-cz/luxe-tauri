@@ -13,6 +13,9 @@ pub struct FieldEntry {
     pub comment:    String,
     /// 1-indexed source line.
     pub line:       u32,
+    /// Zero-based UTF-8 byte columns on the source line.
+    pub column_start: u32,
+    pub column_end:   u32,
     pub depth:      u32,
     pub index:      u32,
     /// One of: "number", "bool", "identifier", "init_list", "unary",

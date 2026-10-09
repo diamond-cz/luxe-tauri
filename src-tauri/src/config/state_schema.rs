@@ -140,6 +140,8 @@ pub struct Isp6sAeVisual {
     pub chart_main_t_mid_readout_mode:                 String,
     #[serde(default = "default_chart_map_tab")]
     pub chart_map_tab:                                 String,
+    #[serde(default = "default_tone_chart_map_tab")]
+    pub tone_chart_map_tab:                            String,
 }
 fn default_true() -> bool { true }
 fn default_split_ratio() -> f32 { 0.7 }
@@ -165,6 +167,7 @@ fn default_chart_main_t_mid_chart_mode() -> String { "thd".into() }
 fn default_chart_main_t_mid_chart_source() -> String { "mid".into() }
 fn default_chart_main_t_mid_readout_mode() -> String { "value".into() }
 fn default_chart_map_tab() -> String { "MainT".into() }
+fn default_tone_chart_map_tab() -> String { "LTM".into() }
 
 impl Default for Isp6sAeVisual {
     fn default() -> Self {
@@ -203,6 +206,7 @@ impl Default for Isp6sAeVisual {
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
             chart_map_tab: default_chart_map_tab(),
+            tone_chart_map_tab: default_tone_chart_map_tab(),
         }
     }
 }

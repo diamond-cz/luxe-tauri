@@ -129,19 +129,13 @@ impl<'a> ParseContext<'a> {
 
     // ── Pass 3: variable declarations + nested structure ──────────────
     fn parse_declarations(&mut self, root: Node<'_>) -> (String, String, Option<StructNode>) {
-        let mut var_name = String::new();
-        let mut var_type = String::new();
-        let mut tree: Option<StructNode> = None;
-
+        let mut declarations = Vec::new();
         let mut cursor = root.walk();
         for child in root.children(&mut cursor) {
             if child.kind() != "declaration" {
                 continue;
             }
-            // Same heuristics as Python:_parse_one_declaration — we keep the
-            // FIRST declaration that carries an initializer_list (matches the
-            // Python loop, which overwrites and ends up with the last one).
-            // To stay faithful, accept overwrites too.
+            // Preserve the single-declaration path layout used by AE.cpp.
             let cur_type = child
                 .child_by_field_name("type")
                 .map(|n| self.node_text(n))
@@ -155,11 +149,28 @@ impl<'a> ParseContext<'a> {
             });
             let Some(init) = init_node else { continue };
 
-            var_type = cur_type;
-            var_name = cur_name;
-            tree = Some(self.parse_init_list(init, String::new(), 0));
+            declarations.push((cur_name, cur_type, init));
         }
-        (var_name, var_type, tree)
+        if declarations.len() == 1 {
+            let (name, type_name, init) = declarations.remove(0);
+            return (name, type_name, Some(self.parse_init_list(init, String::new(), 0)));
+        }
+        if declarations.is_empty() {
+            return (String::new(), String::new(), None);
+        }
+
+        let mut combined = StructNode::empty();
+        combined.path = "[root]".into();
+        combined.line_start = (declarations[0].2.start_position().row + 1) as u32;
+        combined.line_end = (declarations.last().unwrap().2.end_position().row + 1) as u32;
+        let mut names = Vec::with_capacity(declarations.len());
+        for (index, (name, _, init)) in declarations.into_iter().enumerate() {
+            let mut node = self.parse_init_list(init, format!("[{index}]"), 1);
+            node.section_comment = name.clone();
+            names.push(name);
+            combined.children.push(node);
+        }
+        (names.join(", "), String::new(), Some(combined))
     }
 
     fn parse_init_list(&mut self, node: Node<'_>, path: String, depth: u32) -> StructNode {
@@ -192,16 +203,33 @@ impl<'a> ParseContext<'a> {
                     sn.children.push(sub);
                     child_idx += 1;
                 }
+                "initializer_pair" if find_descendant(child, "initializer_list").is_some() => {
+                    let init = find_descendant(child, "initializer_list").unwrap();
+                    let child_path = format!("{path}[{child_idx}]");
+                    let mut sub = self.parse_init_list(init, child_path, depth + 1);
+                    if let Some(designator) = child.child_by_field_name("designator") {
+                        sub.section_comment = self.node_text(designator);
+                    }
+                    sn.children.push(sub);
+                    child_idx += 1;
+                }
                 _ => {
-                    let val_text = self.node_text(child);
-                    let val_line = (child.start_position().row + 1) as u32;
-                    let val_type = classify_value(kind);
+                    let value = if kind == "initializer_pair" {
+                        child.child_by_field_name("value").unwrap_or(child)
+                    } else {
+                        child
+                    };
+                    let val_text = self.node_text(value);
+                    let val_line = (value.start_position().row + 1) as u32;
+                    let val_type = classify_value(value.kind());
                     let comment = self.line_comments.get(&val_line).cloned().unwrap_or_default();
                     let entry = FieldEntry {
                         path: format!("{path}.{value_idx}"),
                         value: val_text,
                         comment,
                         line: val_line,
+                        column_start: value.start_position().column as u32,
+                        column_end: value.end_position().column as u32,
                         depth,
                         index: value_idx,
                         value_type: val_type,

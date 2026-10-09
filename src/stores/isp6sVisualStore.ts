@@ -37,6 +37,7 @@ const DEFAULT: Isp6sAeVisual = {
   chart_main_t_mid_chart_source: "mid",
   chart_main_t_mid_readout_mode: "value",
   chart_map_tab:              "MainT",
+  tone_chart_map_tab:         "LTM",
 };
 
 interface VisualState {

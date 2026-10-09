@@ -9,7 +9,10 @@ pub fn get_fields_at_path<'a>(
     res: &'a ParseResult,
     prefix: &str,
 ) -> Vec<&'a FieldEntry> {
-    res.fields.iter().filter(|f| f.path.starts_with(prefix)).collect()
+    res.fields.iter().filter(|f| {
+        f.path == prefix || f.path.strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('[') || rest.starts_with('.'))
+    }).collect()
 }
 
 /// `get_values_at_path(prefix, key)` — return values; when `key == 0` (default)

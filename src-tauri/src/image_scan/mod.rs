@@ -10,6 +10,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -121,15 +122,7 @@ pub fn parse_exif_directory(
     let existing_exif = total - copied_images.len();
     on_progress(ExifParseProgress { stage: "EXIF", completed: existing_exif, total });
     if !copied_images.is_empty() {
-        let mut command = Command::new(parser_path);
-        command.arg("-dump").arg(&temp_root)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        match command.spawn() {
+        match spawn_debug_parser(parser_path, &temp_root) {
             Ok(mut child) => loop {
                 let generated = copied_images.iter().filter(|(image, _)| {
                     PathBuf::from(format!("{}.exif", image.display())).is_file()
@@ -184,6 +177,75 @@ pub fn parse_exif_directory(
         on_progress(ExifParseProgress { stage: "TOML", completed: index + 1, total });
     }
     Ok(summary)
+}
+
+#[cfg(not(windows))]
+fn spawn_debug_parser(parser_path: &Path, image_dir: &Path) -> std::io::Result<std::process::Child> {
+    Command::new(parser_path).arg("-dump").arg(image_dir)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
+}
+
+#[cfg(windows)]
+struct HiddenParserProcess(std::os::windows::io::OwnedHandle);
+
+#[cfg(windows)]
+impl HiddenParserProcess {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::ExitStatusExt;
+        use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+
+        let handle = HANDLE(self.0.as_raw_handle());
+        match unsafe { WaitForSingleObject(handle, 0) } {
+            WAIT_TIMEOUT => Ok(None),
+            WAIT_OBJECT_0 => {
+                let mut code = 0;
+                unsafe { GetExitCodeProcess(handle, &mut code) }
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                Ok(Some(std::process::ExitStatus::from_raw(code)))
+            }
+            _ => Err(std::io::Error::last_os_error()),
+        }
+    }
+
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        loop {
+            if let Some(status) = self.try_wait()? { return Ok(status); }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+#[cfg(windows)]
+fn spawn_debug_parser(parser_path: &Path, image_dir: &Path) -> std::io::Result<HiddenParserProcess> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::System::Threading::{
+        CreateProcessW, CREATE_NO_WINDOW, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
+    };
+
+    let application: Vec<u16> = parser_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut command_line: Vec<u16> = [b'"' as u16].into_iter()
+        .chain(parser_path.as_os_str().encode_wide())
+        .chain("\" -dump \"".encode_utf16())
+        .chain(image_dir.as_os_str().encode_wide())
+        .chain([b'"' as u16, 0])
+        .collect();
+    let mut startup = STARTUPINFOW::default();
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = 0; // SW_HIDE
+    let mut process = PROCESS_INFORMATION::default();
+    unsafe {
+        CreateProcessW(
+            PCWSTR(application.as_ptr()), Some(PWSTR(command_line.as_mut_ptr())),
+            None, None, false, CREATE_NO_WINDOW, None, PCWSTR::null(), &startup, &mut process,
+        )
+    }.map_err(|error| std::io::Error::other(error.to_string()))?;
+    let _thread = unsafe { OwnedHandle::from_raw_handle(process.hThread.0) };
+    Ok(HiddenParserProcess(unsafe { OwnedHandle::from_raw_handle(process.hProcess.0) }))
 }
 
 fn exif_to_toml(path: &Path) -> AppResult<Option<String>> {

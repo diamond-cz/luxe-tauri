@@ -51,6 +51,7 @@ type ImageTableColumnDragState = {
 };
 interface Props {
   schema:    Isp6sSchemaRoot;
+  toneMode?: boolean;
   filePath:  string | null;
   calculatorSourcePath: string | null;
   entries:   ImageEntry[];
@@ -101,6 +102,7 @@ type FaceLinkTargetCalculator = (
 
 export function TablePane({
   schema,
+  toneMode = false,
   filePath,
   calculatorSourcePath,
   entries,
@@ -226,7 +228,7 @@ export function TablePane({
               aria-label="解析图片 EXIF"
             />
           </HoverTooltip>
-          <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆E" positioning="below-center" inline>
+          {!toneMode && <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆E" positioning="below-center" inline>
             <Button
               size="small"
               appearance="subtle"
@@ -239,7 +241,7 @@ export function TablePane({
               }}
               aria-label="Apply all image"
             />
-          </HoverTooltip>
+          </HoverTooltip>}
           <HoverTooltip content="Add image folder" positioning="below-center" inline>
             <Button
               size="small"
@@ -305,7 +307,7 @@ export function TablePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ImageTab schema={schema} filePath={filePath} calculatorSourcePath={appliedCalculatorSourcePath}
+        <ImageTab schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
           imageDataRevision={imageDataRevision}
           entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
@@ -737,11 +739,12 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 }
 
 export function ImageTab({
-  schema, filePath, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
+  schema, toneMode = false, filePath, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
   entries, current, selectedHeatmapPaths, onPick,
   imageDataRevision = 0,
 }: {
   schema:   Isp6sSchemaRoot;
+  toneMode?: boolean;
   filePath: string | null;
   calculatorSourcePath?: string | null;
   parseAllVersion?: number;
@@ -767,8 +770,8 @@ export function ImageTab({
   const pendingViewportReloadRef = useRef(false);
   const sortRequestRef = useRef(0);
   const extraCols = useMemo(
-    () => Object.entries(schema.Image ?? {}),
-    [schema],
+    () => toneMode ? [] : Object.entries(schema.Image ?? {}),
+    [schema, toneMode],
   );
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   const tableColumns = useMemo<ImageTableColumn[]>(
@@ -776,8 +779,10 @@ export function ImageTab({
       { id: "idx", kind: "idx", label: "idx", align: "center" },
       { id: "thumbnail", kind: "thumbnail", label: "Thumbnail", align: "center" },
       { id: "name", kind: "name", label: "FileName", align: "left" },
-      { id: "cwr", kind: "cwr", label: "CWR", align: "center" },
-      { id: "delta", kind: "delta", label: "∆E", align: "center" },
+      ...(!toneMode ? [
+        { id: "cwr", kind: "cwr" as const, label: "CWR", align: "center" as const },
+        { id: "delta", kind: "delta" as const, label: "∆E", align: "center" as const },
+      ] : []),
       ...extraCols.map(([label, key], index) => ({
         id: `extra:${key}`,
         kind: "extra" as const,
@@ -786,7 +791,7 @@ export function ImageTab({
         align: index < 2 ? "center" as const : "left" as const,
       })),
     ],
-    [extraCols],
+    [extraCols, toneMode],
   );
   const [columnOrder, setColumnOrder] = useState<string[]>(readImageTableColumnOrder);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
@@ -801,9 +806,9 @@ export function ImageTab({
     [columnOrder, tableColumns],
   );
   const imageTomlKeys = useMemo(
-    () => [...new Set([...extraCols.map(([, key]) => key), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
+    () => toneMode ? [] : [...new Set([...extraCols.map(([, key]) => key), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
       .filter((key) => key.length > 0),
-    [extraCols, faceBvKey],
+    [extraCols, faceBvKey, toneMode],
   );
   const imageTomlKeySignature = useMemo(
     () => imageTomlKeys.join("\u001f"),
@@ -1836,11 +1841,11 @@ function LcePreviewInfoTable({
         <tbody>
           {(items as LcePreviewInfoItem[]).map((it, i) => (
             <tr key={`${it.label}-${i}`} style={{ borderBottom: "1px solid var(--colorNeutralStroke3)" }}>
-              <td className="px-3 py-1.5 align-top font-semibold"
+              <td className="whitespace-nowrap px-2 py-1.5 align-top font-semibold"
                   style={{ color: "var(--colorNeutralForeground2)", width: 120 }}>
                 {it.label}
               </td>
-              <td className="px-3 py-1.5" style={{ color: "var(--colorNeutralForeground1)" }}>
+              <td className="whitespace-nowrap px-2 py-1.5" style={{ color: "var(--colorNeutralForeground1)" }}>
                 {formatLcePreviewInfoValue(it, tomlData)}
               </td>
             </tr>
@@ -1867,10 +1872,21 @@ function formatLcePreviewInfoValue(
   item: LcePreviewInfoItem,
   tomlData: Record<string, string>,
 ): string {
+  if (item.toml_key === "SW_LCE_AEGain") {
+    const raw = tomlLookup(tomlData, item.toml_key);
+    const aeGain = Number(raw);
+    const gain = 10 ** (aeGain / 1024);
+    return raw !== "-" && Number.isFinite(aeGain) && Number.isFinite(gain)
+      ? `${raw}(${gain.toFixed(2)}xgain)`
+      : raw;
+  }
   const keys = item.toml_keys?.filter(Boolean) ?? [];
   if (keys.length >= 3) {
     const [valueKey, lowKey, highKey] = keys;
     return `${tomlLookup(tomlData, valueKey)} [${tomlLookup(tomlData, lowKey)}, ${tomlLookup(tomlData, highKey)}]`;
+  }
+  if (keys.length === 2) {
+    return `[${keys.map((key) => tomlLookup(tomlData, key)).join(", ")}]`;
   }
   if (keys.length > 0) {
     return keys.map((key) => tomlLookup(tomlData, key)).join(" / ");

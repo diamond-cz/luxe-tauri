@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ImageEntry } from "@/ipc/imageScan";
+import type { ParseResult } from "@/types/cpp_parser";
 import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ChartMapMode, type ChartSourceJumpDetails } from "./ChartMapMode";
+import { ToneChartMapMode } from "./ToneChartMapMode";
 import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
 import {
   normalizeSourceText,
@@ -23,6 +25,8 @@ export type PreviewMode = "para_check" | "param_map" | "chart_map";
 
 interface Props {
   mode:        PreviewMode | "image" | "image_split";
+  toneMode?: boolean;
+  toneParsed?: ParseResult | null;
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
   importRevision: number;
@@ -50,7 +54,7 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 const sourceHistorySnapshots = new Map<string, { revision: number; text: string }>();
 
 export function ImagePane({
-  mode, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
+  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
@@ -115,6 +119,10 @@ export function ImagePane({
   }, [effectiveMode]);
   const draftDirty = sourceDraftDirty(sourceDraft);
   const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
+  const toneImportedPathsMatchDraft = Boolean(toneMode && sourceDraft && toneParsed && sourceDraft.text === sourceDraft.initialText);
+  const toneSourceFields = toneImportedPathsMatchDraft
+    ? toneParsed?.fields
+    : toneMode && draftDirty && !tempDraftReady ? [] : undefined;
   const draftResolvePath = draftDirty && tempDraftReady ? tempDraft!.path : filePath;
   const chartFilePath = filePath ? (draftDirty ? (tempDraftReady ? tempDraft!.path : tempDraft?.path ?? filePath) : filePath) : null;
   const chartSourceRevision = draftDirty
@@ -337,9 +345,21 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {chartMounted && chartFilePath && (
+        {chartMounted && chartFilePath && (!toneMode || toneParsed) && (
           <div style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}>
-            <ChartMapMode
+            {toneMode && toneParsed ? <ToneChartMapMode
+              filePath={chartFilePath}
+              parsed={toneParsed}
+              tomlData={tomlData}
+              entries={entries}
+              sourceDraftText={sourceDraft?.text ?? null}
+              sourceInitialText={sourceDraft?.initialText ?? null}
+              sourceSavedText={sourceDraft?.savedText ?? null}
+              onSourceDraftTextChange={handleDraftTextChange}
+              onSaveSourceDraft={handleSaveDraft}
+              onSelectHeatmapImages={onSelectHeatmapImages}
+              onSourceJump={handleSourceJump}
+            /> : <ChartMapMode
               filePath={chartFilePath}
               sourceBasePath={filePath}
               schema={schema}
@@ -358,12 +378,17 @@ export function ImagePane({
               onSourceDraftTextChange={handleDraftTextChange}
               onSaveSourceDraft={handleSaveDraft}
               onSourceJump={handleSourceJump}
-            />
+            />}
           </div>
         )}
         {effectiveMode === "chart_map" && !chartFilePath && (
           <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
             {tempDraftPending ? "\u6b63\u5728\u540c\u6b65\u6e90\u7801\u8349\u7a3f..." : "\u6e90\u7801\u8349\u7a3f\u672a\u51c6\u5907\u5b8c\u6210"}
+          </div>
+        )}
+        {effectiveMode === "chart_map" && toneMode && chartFilePath && !toneParsed && (
+          <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
+            正在解析 Tone.cpp...
           </div>
         )}
         {effectiveMode === "param_map"   && (
@@ -381,6 +406,8 @@ export function ImagePane({
             onSaveDraftAs={handleSaveDraftAs}
             onRestoreDraft={handleRestoreDraft}
             onBackToChart={handleBackToChart}
+            sourceFields={toneSourceFields}
+            sourceTree={toneImportedPathsMatchDraft ? toneParsed?.tree : undefined}
           />
         )}
       </div>

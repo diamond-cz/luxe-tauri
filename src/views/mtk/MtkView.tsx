@@ -153,32 +153,37 @@ export function MtkView() {
   }, [mtk.debug_parser_path, setDebugParserPath]);
 
   const onImageDirChange = async (dir: string) => {
-    setImageDir(ispId, tabIdx, { dir, tomlData: {}, status: "scanning", message: null });
+    const imageTabIdx = ispId === "ISP6S" && (tabIdx === 0 || tabIdx === 1) ? 0 : tabIdx;
+    const imageDirKey = `${ispId}|${imageTabIdx}`;
+    setImageDir(ispId, imageTabIdx, { dir, tomlData: {}, status: "scanning", message: null });
     try {
       const entries = await scanImageDir(dir);
+      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
       if (entries.length === 0) {
-        setImageDir(ispId, tabIdx, {
+        setImageDir(ispId, imageTabIdx, {
           entries: [], current: 0, tomlData: {},
           status: "error",
           message: "目录下没有找到 JPG、JPEG 或 PNG 图片",
         });
         return;
       }
-      setImageDir(ispId, tabIdx, { entries, current: 0, tomlData: {}, status: "loading", message: null });
+      setImageDir(ispId, imageTabIdx, { entries, current: 0, tomlData: {}, status: "loading", message: null });
       const tomlData = await loadImageToml(entries[0].toml_path).catch((): Record<string, string> => ({}));
-      setImageDir(ispId, tabIdx, {
+      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
+      setImageDir(ispId, imageTabIdx, {
         tomlData, status: "done",
         message: `已加载 ${entries.length} 张图片 · 当前 ${entries[0].name}`,
       });
     } catch (e) {
-      setImageDir(ispId, tabIdx, {
+      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
+      setImageDir(ispId, imageTabIdx, {
         status:  "error",
         message: e instanceof Error ? e.message : String(e),
       });
     }
   };
 
-  const isAeBasic = ispId === "ISP6S" && tab.label === "AE Basic";
+  const isIsp6sWorkspace = ispId === "ISP6S" && (tab.label === "AE Basic" || tab.label === "ToneMap");
   const parsedReady = Boolean(imports.parsed && imports.filePath);
 
   return (
@@ -208,13 +213,15 @@ export function MtkView() {
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-hidden p-3">
-            {isAeBasic ? (
+            {isIsp6sWorkspace ? (
               <Suspense fallback={<Hint hint="正在加载 ISP6S AE 可视化..." />}>
                 <Isp6sAeVisual
                   isp={ispId}
                   tabIdx={tabIdx}
                   filePath={imports.filePath}
                   parsed={parsedReady}
+                  toneMode={tab.label === "ToneMap"}
+                  toneParsed={tab.label === "ToneMap" ? imports.parsed : null}
                   cppImportRevision={imports.revision}
                   onImageDirChange={onImageDirChange}
                   onCppPathChange={onCppPathChange}
