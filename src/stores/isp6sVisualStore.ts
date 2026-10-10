@@ -33,6 +33,7 @@ const DEFAULT: Isp6sAeVisual = {
   chart_ns_card_collapsed:     [],
   chart_face_card_collapsed:   [],
   chart_face_heatmap_modes:    {},
+  chart_face_sync_modes:       {},
   chart_main_t_mid_chart_mode: "thd",
   chart_main_t_mid_chart_source: "mid",
   chart_main_t_mid_readout_mode: "value",

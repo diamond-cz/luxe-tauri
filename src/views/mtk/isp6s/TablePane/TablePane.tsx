@@ -31,7 +31,7 @@ type ImageSortState = {
   key: string;
   direction: ImageSortDirection;
 };
-type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "cwr" | "delta" | "extra";
+type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "aeGain" | "backCwr" | "cwr" | "delta" | "extra";
 type ImageTableColumn = {
   id: string;
   kind: ImageTableColumnKind;
@@ -94,11 +94,53 @@ const FACE_LINK_TARGET_IMAGE_KEYS = [
   "AE_TAG_FACE_20_CWV", "AE_TAG_CWV", "AE_TAG_FLT_FDY", "AE_TAG_FLT_DR",
   "AE_TAG_NS_PROB", "AE_TAG_FACE_20_NORMAL_TARGET", "AE_TAG_FLT_OE_SYS",
   "AE_TAG_FLT_FDDR", "AE_TAG_FLT_FDSZ", "AE_TAG_FLT_TARGET",
-  "AE_TAG_FLT_FDSZ_RA",
+  "AE_TAG_FLT_FDSZ_RA", "AE_TAG_FBT_FDY", "AE_TAG_FBT_DR",
+  "AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE", "AE_TAG_FBT_OE_SYS",
+  "AE_TAG_FBT_FDDR", "AE_TAG_FBT_TARGET",
 ] as const;
+type FaceTargetPair = { exif: number; calculated: number };
 type FaceLinkTargetCalculator = (
   tomlData: Record<string, string>, bvKey: string,
-) => { exif: number; calculated: number };
+) => { backScene: FaceTargetPair; faceLink: FaceTargetPair };
+
+function roundedFaceTarget(value: number | undefined): number | null {
+  return value !== undefined && Number.isFinite(value) ? Math.round(value) : null;
+}
+
+function formatFaceTargetPair(first: number | string | null, second: number | string | null): string {
+  return first === null && second === null ? "-" : `${first ?? "-"}(${second ?? "-"})`;
+}
+
+function faceTargetRatio(numerator: number | null, denominator: number | null): string | null {
+  return numerator !== null && denominator !== null && denominator !== 0
+    ? (numerator / denominator).toFixed(2) : null;
+}
+
+function formatFaceTargetDelta(value: number | null): string {
+  return value === null ? "-" : `${value >= 0 ? "+" : ""}${value}`;
+}
+
+function faceTargetDeltaStyle(value: number | null): React.CSSProperties | undefined {
+  return value !== null && Math.abs(value) > 2
+    ? { color: "var(--colorPaletteRedForeground1)" } : undefined;
+}
+
+function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | null) {
+  const backExif = roundedFaceTarget(target?.backScene.exif);
+  const backCalculated = roundedFaceTarget(target?.backScene.calculated);
+  const linkExif = roundedFaceTarget(target?.faceLink.exif);
+  const linkCalculated = roundedFaceTarget(target?.faceLink.calculated);
+  const backDelta = backExif !== null && backCalculated !== null ? backCalculated - backExif : null;
+  const linkDelta = linkExif !== null && linkCalculated !== null ? linkCalculated - linkExif : null;
+  return {
+    aeGain: formatFaceTargetPair(faceTargetRatio(linkExif, backExif), faceTargetRatio(linkCalculated, backCalculated)),
+    backCwr: formatFaceTargetPair(backExif, backCalculated),
+    cwr: formatFaceTargetPair(linkExif, linkCalculated),
+    delta: `${formatFaceTargetDelta(backDelta)}|${formatFaceTargetDelta(linkDelta)}`,
+    backDelta,
+    linkDelta,
+  };
+}
 
 export function TablePane({
   schema,
@@ -228,7 +270,7 @@ export function TablePane({
               aria-label="解析图片 EXIF"
             />
           </HoverTooltip>
-          {!toneMode && <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆E" positioning="below-center" inline>
+          {!toneMode && <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆CWR" positioning="below-center" inline>
             <Button
               size="small"
               appearance="subtle"
@@ -780,8 +822,10 @@ export function ImageTab({
       { id: "thumbnail", kind: "thumbnail", label: "Thumbnail", align: "center" },
       { id: "name", kind: "name", label: "FileName", align: "left" },
       ...(!toneMode ? [
-        { id: "cwr", kind: "cwr" as const, label: "CWR", align: "center" as const },
-        { id: "delta", kind: "delta" as const, label: "∆E", align: "center" as const },
+        { id: "aeGain", kind: "aeGain" as const, label: "AEGain(new)", align: "center" as const },
+        { id: "backCwr", kind: "backCwr" as const, label: "CWR(BackTar)", align: "center" as const },
+        { id: "cwr", kind: "cwr" as const, label: "CWR(FLinkTar)", align: "center" as const },
+        { id: "delta", kind: "delta" as const, label: "∆CWR", align: "center" as const },
       ] : []),
       ...extraCols.map(([label, key], index) => ({
         id: `extra:${key}`,
@@ -980,6 +1024,13 @@ export function ImageTab({
     const rows = sortedRows.slice(start, end);
     return { start, end, rows };
   }, [scrollTop, sortedRows, viewportHeight]);
+
+  const visibleFaceValues = useMemo(() => Object.fromEntries(visible.rows.map(({ e }) => {
+    const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
+    const target = allTargets?.[e.toml_path] ?? (faceLinkTargetCalculator && e.toml_path in tomls
+      ? faceLinkTargetCalculator(data, faceBvKey) : null);
+    return [e.toml_path, imageFaceTargetValues(target)];
+  })), [allParsedRows, allTargets, faceBvKey, faceLinkTargetCalculator, tomls, visible.rows]);
 
   const tableWindowPaths = useMemo(() => {
     const paths: string[] = [];
@@ -1422,42 +1473,42 @@ export function ImageTab({
   const colSpan = orderedColumns.length;
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
+  const nameColumnWidth = useMemo(() => entries.reduce(
+    (width, entry) => Math.max(width, estimateImageColumnTextWidth(entry.name)),
+    estimateImageColumnTextWidth("FileName") + (sortControlsEnabled ? 16 : 0),
+  ), [entries, sortControlsEnabled]);
   const baseColumnWidths = useMemo(() => {
-    const idxWidth = clampImageColumnWidth(
-      estimateImageColumnTextWidth(String(Math.max(entries.length, 1))),
-      34,
-      46,
-    );
-    const thumbnailWidth = 72;
-    const nameWidth = clampImageColumnWidth(
-      Math.max(
-        estimateImageColumnTextWidth("name"),
-        ...visible.rows.map(({ e }) => estimateImageColumnTextWidth(e.name)),
-      ),
-      120,
-      260,
-    );
-    const extraWidths = extraCols.map(([col, key]) => {
-      const valueWidth = Math.max(
-        estimateImageColumnTextWidth(col),
-        ...visible.rows.map(({ e }) => estimateImageColumnTextWidth(tomls[e.toml_path]?.[key] ?? "-")),
-      );
-      return clampImageColumnWidth(valueWidth, 52, 132);
-    });
-    const byId: Record<string, number> = {
-      idx: idxWidth,
-      thumbnail: thumbnailWidth,
-      name: nameWidth,
-      cwr: 108,
-      delta: 62,
-    };
-    extraCols.forEach(([, key], index) => {
-      byId[`extra:${key}`] = extraWidths[index];
-    });
-    return {
-      byId,
-    };
-  }, [entries.length, extraCols, tomls, visible.rows]);
+    const byId: Record<string, number> = {};
+    for (const column of tableColumns) {
+      if (column.kind === "thumbnail") {
+        byId[column.id] = Math.max(72, estimateImageColumnTextWidth(column.label));
+        continue;
+      }
+      if (column.kind === "name") {
+        byId[column.id] = nameColumnWidth;
+        continue;
+      }
+      const minWidth = column.kind === "idx" ? 34 : 52;
+      const headerWidth = estimateImageColumnTextWidth(column.label)
+        + (column.kind === "extra" && sortControlsEnabled ? 16 : 0);
+      let width = Math.max(minWidth, headerWidth);
+      if (column.kind === "idx") {
+        byId[column.id] = Math.max(width, estimateImageColumnTextWidth(String(entries.length)));
+        continue;
+      }
+      for (const { e: entry } of visible.rows) {
+        const target = visibleFaceValues[entry.toml_path];
+        const text = column.kind === "extra" ? allParsedRows?.[entry.toml_path]?.[column.key ?? ""] ?? tomls[entry.toml_path]?.[column.key ?? ""] ?? "-"
+          : column.kind === "aeGain" ? target?.aeGain ?? "-"
+          : column.kind === "backCwr" ? target?.backCwr ?? "-"
+          : column.kind === "cwr" ? target?.cwr ?? "-"
+          : target?.delta ?? "-";
+        width = Math.max(width, estimateImageColumnTextWidth(text));
+      }
+      byId[column.id] = width;
+    }
+    return { byId };
+  }, [allParsedRows, entries.length, nameColumnWidth, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -1590,11 +1641,7 @@ export function ImageTab({
           {visible.rows.map(({ e, i }) => {
             const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
             const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
-            const target = allTargets?.[e.toml_path] ?? (faceLinkTargetCalculator && e.toml_path in tomls
-              ? faceLinkTargetCalculator(data, faceBvKey) : null);
-            const exif = target && Number.isFinite(target.exif) ? Math.round(target.exif) : null;
-            const calculated = target && Number.isFinite(target.calculated) ? Math.round(target.calculated) : null;
-            const delta = exif !== null && calculated !== null ? calculated - exif : null;
+            const target = visibleFaceValues[e.toml_path];
             return (
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
@@ -1621,12 +1668,16 @@ export function ImageTab({
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
+                           : column.kind === "aeGain"
+                             ? target?.aeGain ?? "-"
+                           : column.kind === "backCwr"
+                             ? target?.backCwr ?? "-"
                            : column.kind === "cwr"
-                             ? exif === null && calculated === null ? "-" : `${exif ?? "-"}(${calculated ?? "-"})`
+                             ? target?.cwr ?? "-"
                              : column.kind === "delta"
-                               ? <span style={delta !== null && Math.abs(delta) > 2
-                                 ? { color: "var(--colorPaletteRedForeground1)" }
-                                 : undefined}>{delta === null ? "-" : `${delta >= 0 ? "+" : ""}${delta}`}</span>
+                               ? <><span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
+                                   <span>|</span>
+                                   <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
                                : data[column.key ?? ""] ?? "-"}
                    </Td>
                  ))}
@@ -1931,10 +1982,6 @@ function estimateImageColumnTextWidth(value: string): number {
     width += ch.charCodeAt(0) > 255 ? 12 : 7;
   }
   return Math.ceil(width + 18);
-}
-
-function clampImageColumnWidth(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.ceil(value)));
 }
 
 function readImageTableColumnOrder(): string[] {

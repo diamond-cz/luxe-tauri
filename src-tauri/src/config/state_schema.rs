@@ -132,6 +132,7 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub chart_ns_card_collapsed:     Vec<String>,
     #[serde(default)] pub chart_face_card_collapsed:   Vec<String>,
     #[serde(default)] pub chart_face_heatmap_modes:    BTreeMap<String, FaceHeatmapMode>,
+    #[serde(default)] pub chart_face_sync_modes:       BTreeMap<String, bool>,
     #[serde(default = "default_chart_main_t_mid_chart_mode")]
     pub chart_main_t_mid_chart_mode:                   String,
     #[serde(default = "default_chart_main_t_mid_chart_source")]
@@ -202,6 +203,7 @@ impl Default for Isp6sAeVisual {
             chart_ns_card_collapsed: vec![],
             chart_face_card_collapsed: vec![],
             chart_face_heatmap_modes: BTreeMap::new(),
+            chart_face_sync_modes: BTreeMap::new(),
             chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),

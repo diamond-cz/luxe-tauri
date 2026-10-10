@@ -7,7 +7,7 @@ import {
   SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import {
@@ -277,6 +277,21 @@ type TouchMeterParamId = "meterWeight" | "yLow" | "yHigh";
 type TouchMeterParamDrafts = Record<TouchMeterParamId, string>;
 type FaceMetricCardId = "fbtTarget" | "normalTarget" | "fbtTh" | "fdThGroup" | "fdMinThGroup" | "oethGroup";
 type FaceFbtTableKey = "fdTh" | "nsFdTh" | "fdMinTh" | "nsFdMinTh" | "oeth" | "nsOeth";
+
+function faceSyncPartner(tableKey: FaceFbtTableKey): FaceFbtTableKey | null {
+  switch (tableKey) {
+    case "fdTh": return "fdMinTh";
+    case "fdMinTh": return "fdTh";
+    case "nsFdTh": return "nsFdMinTh";
+    case "nsFdMinTh": return "nsFdTh";
+    default: return null;
+  }
+}
+
+function faceSyncModeKey(faceTab: "Face" | "Face_FLT", tableKey: FaceFbtTableKey): string | null {
+  if (!faceSyncPartner(tableKey)) return null;
+  return `${faceTab}_${tableKey.startsWith("ns") ? "nsFd" : "fd"}`;
+}
 
 type FaceBvDrCellTarget =
   | { kind: "rowHeader"; rowIndex: number }
@@ -2689,25 +2704,47 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
 }
 
 export async function loadFaceLinkTargetCalculator(filePath: string | null) {
-  const source = filePath ? await loadFaceFbtSource(filePath, true).catch(() => null) : null;
+  const [faceSource, linkSource] = filePath
+    ? await Promise.all([
+        loadFaceFbtSource(filePath).catch(() => null),
+        loadFaceFbtSource(filePath, true).catch(() => null),
+      ])
+    : [null, null];
   return (tomlData: Record<string, string>, bvKey: string) => {
     const value = (key: string) => parseFiniteNumber(readTomlValue(tomlData, key));
     const cwv = parseFiniteNumber(readFirstTomlValue(tomlData, FACE_CWV_KEYS));
-    const result = calculateFaceTargetMetrics(source, {
+    const common = {
       bv: value(bvKey),
-      dr: value(FACE_FLT_DR_KEY),
       cwv,
-      fdy: value(FACE_FLT_FDY_KEY),
-      faceProb: NaN,
       nsProb: value(NS_PROB_KEY),
       normalTarget: value(FACE_NORMAL_TARGET_KEY),
+    };
+    const face = calculateFaceTargetMetrics(faceSource, {
+      ...common,
+      dr: value(FACE_FBT_DR_KEY),
+      fdy: value(FACE_FBT_FDY_KEY),
+      faceProb: parseFiniteNumber(readFirstTomlValue(tomlData, FACE_PROB_KEYS)),
+      oeSys: value(FACE_FBT_OE_SYS_KEY),
+      fddr: value(FACE_FBT_FDDR_KEY),
+      fdsz: NaN,
+      exifThreshold: value(FACE_FBT_TARGET_KEY),
+      fltMode: false,
+    });
+    const link = calculateFaceTargetMetrics(linkSource, {
+      ...common,
+      dr: value(FACE_FLT_DR_KEY),
+      fdy: value(FACE_FLT_FDY_KEY),
+      faceProb: NaN,
       oeSys: value(FACE_FLT_OE_SYS_KEY),
       fddr: value(FACE_FLT_FDDR_KEY),
       fdsz: value(FACE_FLT_FDSZ_KEY),
       exifThreshold: value(FACE_FLT_TARGET_KEY),
       fltMode: true,
     });
-    return { exif: result.exifBackSceneTarget, calculated: result.backSceneTarget };
+    return {
+      backScene: { exif: face.exifBackSceneTarget, calculated: face.backSceneTarget },
+      faceLink: { exif: link.exifBackSceneTarget, calculated: link.backSceneTarget },
+    };
   };
 }
 
@@ -6161,7 +6198,16 @@ function FaceTabContent({
   const previewCell = (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
     if (!isSourceNumberText(trimmed)) return;
-    setEditableSource((current) => current ? previewFaceFbtSourceTarget(current, tableKey, target, trimmed) : current);
+    const partner = target.kind === "value" ? faceSyncPartner(tableKey) : null;
+    const syncKey = faceSyncModeKey(fltMode ? "Face_FLT" : "Face", tableKey);
+    const syncEnabled = Boolean(partner && syncKey && useIsp6sVisualStore.getState().visual.chart_face_sync_modes?.[syncKey]);
+    setEditableSource((current) => {
+      if (!current) return current;
+      const next = previewFaceFbtSourceTarget(current, tableKey, target, trimmed);
+      return syncEnabled && partner && getFaceBvDrTargetField(next[partner], target)
+        ? previewFaceFbtSourceTarget(next, partner, target, trimmed)
+        : next;
+    });
   };
 
   const updateCell = (tableKey: FaceFbtTableKey, target: FaceBvDrCellTarget, nextValue: string): boolean => {
@@ -6171,11 +6217,23 @@ function FaceTabContent({
     const table = editableSource[tableKey];
     const field = getFaceBvDrTargetField(table, target);
     if (!field) return false;
-    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, trimmed);
+    const partner = target.kind === "value" ? faceSyncPartner(tableKey) : null;
+    const syncKey = faceSyncModeKey(fltMode ? "Face_FLT" : "Face", tableKey);
+    const syncEnabled = Boolean(partner && syncKey && useIsp6sVisualStore.getState().visual.chart_face_sync_modes?.[syncKey]);
+    const partnerField = syncEnabled && partner ? getFaceBvDrTargetField(editableSource[partner], target) : null;
+    if (syncEnabled && !partnerField) return false;
+    let nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, trimmed);
     if (nextText === null) return false;
+    let nextSource = updateFaceFbtSourceField(editableSource, tableKey, field, trimmed);
+    if (partner && partnerField && partnerField.value !== trimmed) {
+      const syncedText = replaceSourceFieldInSourceText(nextText, nextSource.fields, partnerField, trimmed);
+      if (syncedText === null) return false;
+      nextText = syncedText;
+      nextSource = updateFaceFbtSourceField(nextSource, partner, partnerField, trimmed);
+    }
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
-    setEditableSource((current) => current ? updateFaceFbtSourceField(current, tableKey, field, trimmed) : current);
+    setEditableSource(nextSource);
     return true;
   };
 
@@ -7048,6 +7106,9 @@ function FaceBvDrTableCard({
   const mode = heatmapModes?.[heatmapKey];
   const showHeatmap = mode?.enabled ?? false;
   const showHitCounts = mode?.show_hit_counts ?? true;
+  const syncModes = useIsp6sVisualStore((state) => state.visual.chart_face_sync_modes);
+  const syncKey = faceSyncModeKey(faceTab, tableKey);
+  const syncEnabled = syncKey ? syncModes?.[syncKey] ?? false : false;
   const updateHeatmapMode = (enabled: boolean, show_hit_counts: boolean) => {
     patchVis({
       chart_face_heatmap_modes: {
@@ -7124,6 +7185,17 @@ function FaceBvDrTableCard({
         >
           <DataHistogram24Regular className="h-4 w-4" />
         </button>
+        {syncKey && <button
+          type="button"
+          style={{ ...groupSourceButtonStyle(canEdit), background: syncEnabled ? "var(--colorBrandBackground2)" : undefined, opacity: syncEnabled ? 1 : 0.45 }}
+          title={syncEnabled ? `关闭 ${title} 与配对表的数据同步` : `开启 ${title} 与配对表的数据同步`}
+          aria-label={`${title} 数据同步`}
+          aria-pressed={syncEnabled}
+          disabled={!canEdit}
+          onClick={() => patchVis({ chart_face_sync_modes: { ...syncModes, [syncKey]: !syncEnabled } })}
+        >
+          <ArrowSync24Regular className="h-4 w-4" />
+        </button>}
         <button
           type="button"
           style={groupSourceButtonStyle(canJumpToSource)}
