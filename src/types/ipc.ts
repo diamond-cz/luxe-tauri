@@ -71,6 +71,7 @@ export interface Isp6sAeVisual {
   chart_main_t_card_collapsed: string[];
   chart_hs_card_order:         string[];
   chart_hs_card_collapsed:     string[];
+  chart_hs_area_layout:        "auto" | "horizontal" | "vertical";
   chart_ns_card_order:         string[];
   chart_ns_card_collapsed:     string[];
   chart_face_card_collapsed:   string[];

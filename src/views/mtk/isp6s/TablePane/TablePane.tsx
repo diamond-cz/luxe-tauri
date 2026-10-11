@@ -31,7 +31,7 @@ type ImageSortState = {
   key: string;
   direction: ImageSortDirection;
 };
-type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "aeGain" | "backCwr" | "cwr" | "delta" | "extra";
+type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "aeGain" | "normalCwr" | "backCwr" | "cwr" | "delta" | "extra";
 type ImageTableColumn = {
   id: string;
   kind: ImageTableColumnKind;
@@ -97,11 +97,22 @@ const FACE_LINK_TARGET_IMAGE_KEYS = [
   "AE_TAG_FLT_FDSZ_RA", "AE_TAG_FBT_FDY", "AE_TAG_FBT_DR",
   "AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE", "AE_TAG_FBT_OE_SYS",
   "AE_TAG_FBT_FDDR", "AE_TAG_FBT_TARGET",
+  "AE_TAG_MTV6_MAINT_TARGET", "AE_TAG_HSV6_MAINT_WET",
+  "AE_TAG_HSV6_BT_TARGET", "AE_TAG_HSV6_MT_TARGET", "AE_TAG_HSV6_DT_TARGET",
+  "AE_TAG_HSV6_BT_WET", "AE_TAG_HSV6_MT_WET", "AE_TAG_HSV6_DT_WET",
+  "AE_TAG_NS_FINAL_TARGET", "AE_TAG_MTV6_MAINT_Y",
+  "AE_TAG_MTV6_MAINT_MID_INTRATIO", "AE_TAG_DRV6_CORR_MIDRATIO",
+  "AE_TAG_HSV6_BT_Final_Y", "AE_TAG_HSV6_MT_Final_Y", "AE_TAG_HSV6_DT_Final_Y",
+  "AE_TAG_DRV6_B2D", "AE_TAG_DRV6_B2M", "AE_TAG_DRV6_MIDRATIO", "AE_TAG_HS_EVD",
+  "AE_TAG_NS_STS_CDF", "AE_TAG_NS_EVD",
+  "NS_OE_THD", "AE_TAG_NS_NORMAL_FINAL_THD", "NS_Y", "AE_TAG_NS_NORMAL_Y",
+  "NS_BrightTone_THD", "AE_TAG_NS_BT_FINAL_THD", "NS_BrightTone_Y", "AE_TAG_NS_BT_Y",
+  "NS_LOWBND_THD", "AE_TAG_NS_DT_THD", "NS_LOWBND_Y", "AE_TAG_NS_DT_Y",
 ] as const;
 type FaceTargetPair = { exif: number; calculated: number };
 type FaceLinkTargetCalculator = (
   tomlData: Record<string, string>, bvKey: string,
-) => { backScene: FaceTargetPair; faceLink: FaceTargetPair };
+) => { normal: FaceTargetPair; backScene: FaceTargetPair; faceLink: FaceTargetPair };
 
 function roundedFaceTarget(value: number | undefined): number | null {
   return value !== undefined && Number.isFinite(value) ? Math.round(value) : null;
@@ -126,17 +137,22 @@ function faceTargetDeltaStyle(value: number | null): React.CSSProperties | undef
 }
 
 function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | null) {
+  const normalExif = roundedFaceTarget(target?.normal.exif);
+  const normalCalculated = roundedFaceTarget(target?.normal.calculated);
   const backExif = roundedFaceTarget(target?.backScene.exif);
   const backCalculated = roundedFaceTarget(target?.backScene.calculated);
   const linkExif = roundedFaceTarget(target?.faceLink.exif);
   const linkCalculated = roundedFaceTarget(target?.faceLink.calculated);
   const backDelta = backExif !== null && backCalculated !== null ? backCalculated - backExif : null;
   const linkDelta = linkExif !== null && linkCalculated !== null ? linkCalculated - linkExif : null;
+  const normalDelta = normalExif !== null && normalCalculated !== null ? normalCalculated - normalExif : null;
   return {
     aeGain: formatFaceTargetPair(faceTargetRatio(linkExif, backExif), faceTargetRatio(linkCalculated, backCalculated)),
+    normalCwr: formatFaceTargetPair(normalExif, normalCalculated),
     backCwr: formatFaceTargetPair(backExif, backCalculated),
     cwr: formatFaceTargetPair(linkExif, linkCalculated),
-    delta: `${formatFaceTargetDelta(backDelta)}|${formatFaceTargetDelta(linkDelta)}`,
+    delta: `${formatFaceTargetDelta(normalDelta)}|${formatFaceTargetDelta(backDelta)}|${formatFaceTargetDelta(linkDelta)}`,
+    normalDelta,
     backDelta,
     linkDelta,
   };
@@ -823,6 +839,7 @@ export function ImageTab({
       { id: "name", kind: "name", label: "FileName", align: "left" },
       ...(!toneMode ? [
         { id: "aeGain", kind: "aeGain" as const, label: "AEGain(new)", align: "center" as const },
+        { id: "normalCwr", kind: "normalCwr" as const, label: "CWR(Normal)", align: "center" as const },
         { id: "backCwr", kind: "backCwr" as const, label: "CWR(BackTar)", align: "center" as const },
         { id: "cwr", kind: "cwr" as const, label: "CWR(FLinkTar)", align: "center" as const },
         { id: "delta", kind: "delta" as const, label: "∆CWR", align: "center" as const },
@@ -1500,6 +1517,7 @@ export function ImageTab({
         const target = visibleFaceValues[entry.toml_path];
         const text = column.kind === "extra" ? allParsedRows?.[entry.toml_path]?.[column.key ?? ""] ?? tomls[entry.toml_path]?.[column.key ?? ""] ?? "-"
           : column.kind === "aeGain" ? target?.aeGain ?? "-"
+          : column.kind === "normalCwr" ? target?.normalCwr ?? "-"
           : column.kind === "backCwr" ? target?.backCwr ?? "-"
           : column.kind === "cwr" ? target?.cwr ?? "-"
           : target?.delta ?? "-";
@@ -1670,12 +1688,16 @@ export function ImageTab({
                            ? e.name
                            : column.kind === "aeGain"
                              ? target?.aeGain ?? "-"
+                           : column.kind === "normalCwr"
+                             ? target?.normalCwr ?? "-"
                            : column.kind === "backCwr"
                              ? target?.backCwr ?? "-"
                            : column.kind === "cwr"
                              ? target?.cwr ?? "-"
                              : column.kind === "delta"
-                               ? <><span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
+                               ? <><span style={faceTargetDeltaStyle(target?.normalDelta ?? null)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
+                                   <span>|</span>
+                                   <span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
                                    <span>|</span>
                                    <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
                                : data[column.key ?? ""] ?? "-"}

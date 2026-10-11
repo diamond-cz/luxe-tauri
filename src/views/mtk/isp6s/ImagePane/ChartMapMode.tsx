@@ -7,7 +7,7 @@ import {
   SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, LayoutColumnThree24Regular, LayoutRowThree24Regular, LayoutRowTwoSplitTop24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import {
@@ -30,7 +30,19 @@ type MidChartSource = "mid" | "mid_value" | "corr_dr_midratio" | "dr_midratio_or
 type BindingPanelKind = "bv" | "mid";
 type MainTMetricCardId = "mainThd" | "mtwv" | "mainTarget";
 type HsMetricCardId = "hsTarget" | "hsWeight" | "hsBright" | "hsMiddle" | "hsDark";
+type HsAreaLayoutMode = "auto" | "horizontal" | "vertical";
+type HsAreaLayoutColumns = 1 | 2 | 3;
+const HS_AREA_CARD_MIN_WIDTH = 360;
+const HS_AREA_CARD_GAP = 12;
+const HS_AREA_TWO_COLUMN_MIN_WIDTH = HS_AREA_CARD_MIN_WIDTH * 2 + HS_AREA_CARD_GAP;
+const HS_AREA_THREE_COLUMN_MIN_WIDTH = HS_AREA_CARD_MIN_WIDTH * 3 + HS_AREA_CARD_GAP * 2;
 type HsTargetTermId = "BT" | "MT" | "DT";
+const MAIN_T_BV_HEATMAP_KEY = "MainT_base_exp_tbl";
+const HS_AREA_HEATMAP_KEYS: Record<HsTargetTermId, string> = {
+  BT: "HS_BrightArea",
+  MT: "HS_MiddleArea",
+  DT: "HS_DarkArea",
+};
 type HsTargetFormulaMode = "full" | "compact";
 type NsMetricCardId = "nsTarget" | "nsProb" | "nsNorT" | "nsBT" | "nsDT";
 type NsTargetTermId = "NorT" | "BT" | "DT";
@@ -321,11 +333,20 @@ interface FaceFbtTableItem {
   result: number;
 }
 
-interface FaceHeatmapPoint {
+interface BvHeatmapPoint {
   path: string;
   bv: number;
+}
+
+interface FaceHeatmapPoint extends BvHeatmapPoint {
   dr: number;
   nsProb: number;
+}
+
+interface HsAreaHeatmapPoint {
+  path: string;
+  bv: number;
+  axis: number;
 }
 
 interface FaceProbTableRow {
@@ -920,9 +941,11 @@ export function ChartMapMode({
   const sourceKey = useMemo(() => tab, [tab]);
   const isFaceTab = tab === "Face" || tab === "Face_FLT";
   useEffect(() => {
-    if (isFaceTab && Object.keys(FACE_TABLE_GROUP_BY_KEY).some((tableKey) =>
-      visual.chart_face_heatmap_modes?.[`${tab}_${tableKey}`]?.enabled,
-    )) {
+    const heatmapKeys = tab === "MainT" ? [MAIN_T_BV_HEATMAP_KEY]
+      : tab === "HS" ? Object.values(HS_AREA_HEATMAP_KEYS)
+      : isFaceTab ? Object.keys(FACE_TABLE_GROUP_BY_KEY).map((tableKey) => `${tab}_${tableKey}`)
+      : [];
+    if (heatmapKeys.some((key) => visual.chart_face_heatmap_modes?.[key]?.enabled)) {
       setHeatmapRequested(true);
     }
   }, [isFaceTab, tab, visual.chart_face_heatmap_modes]);
@@ -938,7 +961,8 @@ export function ChartMapMode({
     let cancelled = false;
     loadImageTomlFieldsBatch(
       entries.map((entry) => entry.toml_path),
-      [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY],
+      [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY,
+        HS_BRIGHT_EVD_KEY, HS_MIDDLE_B2M_KEY, "AE_TAG_DRV6_B2D"],
     ).then((rows) => {
       if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, rows, failed: false });
     }).catch(() => {
@@ -961,6 +985,38 @@ export function ChartMapMode({
       return Number.isFinite(bv) && Number.isFinite(dr) ? [{ path: entry.toml_path, bv, dr, nsProb }] : [];
     });
   }, [currentHeatmapRows, entries, heatmapBvKey, tab]);
+  const bvHeatmapPoints = useMemo<BvHeatmapPoint[]>(() => {
+    const rows = currentHeatmapRows?.rows;
+    if (!rows) return [];
+    return entries.flatMap((entry) => {
+      const bv = parseFiniteNumber(readTomlValue(rows[entry.toml_path] ?? {}, heatmapBvKey));
+      return Number.isFinite(bv) ? [{ path: entry.toml_path, bv }] : [];
+    });
+  }, [currentHeatmapRows, entries, heatmapBvKey]);
+  const hsAreaHeatmapPoints = useMemo(() => {
+    const points: Record<HsTargetTermId, HsAreaHeatmapPoint[]> = { BT: [], MT: [], DT: [] };
+    const rows = currentHeatmapRows?.rows;
+    if (!rows) return points;
+    for (const entry of entries) {
+      const data = rows[entry.toml_path] ?? {};
+      const bv = parseFiniteNumber(readTomlValue(data, heatmapBvKey));
+      if (!Number.isFinite(bv)) continue;
+      for (const [tone, key] of [
+        ["BT", HS_BRIGHT_EVD_KEY], ["MT", HS_MIDDLE_B2M_KEY], ["DT", "AE_TAG_DRV6_B2D"],
+      ] as const) {
+        const axis = parseFiniteNumber(readTomlValue(data, key));
+        if (Number.isFinite(axis)) points[tone].push({ path: entry.toml_path, bv, axis });
+      }
+    }
+    return points;
+  }, [currentHeatmapRows, entries, heatmapBvKey]);
+  const requestImageHeatmap = () => {
+    if (currentHeatmapRows?.failed) {
+      setHeatmapRows(null);
+      setHeatmapRetry((current) => current + 1);
+    }
+    setHeatmapRequested(true);
+  };
   const currentHsWeightSource = hsSourceIdentity === sourceIdentity ? hsWeightSource : null;
   const currentNsLowBndBounds = nsLowBndBounds.identity === sourceIdentity ? nsLowBndBounds.bounds : null;
   const currentNsDtSource = nsDtSource.identity === sourceIdentity ? nsDtSource.source : null;
@@ -1391,6 +1447,25 @@ export function ChartMapMode({
     () => sanitiseHsMetricCollapsed(visual.chart_hs_card_collapsed),
     [visual.chart_hs_card_collapsed],
   );
+  const hsAreaCardOrder = hsCardOrder.filter(isHsAreaCardId);
+  const hsAreaGroupRef = useRef<HTMLDivElement>(null);
+  const [hsAreaGroupWidth, setHsAreaGroupWidth] = useState(0);
+  const hsAreaLayoutMode = coerceHsAreaLayoutMode(visual.chart_hs_area_layout);
+  const hsAreaLayoutColumns = hsAreaLayoutColumnCount(hsAreaLayoutMode, hsAreaGroupWidth);
+  const hsAreaPreferVertical = hsAreaLayoutMode === "vertical";
+  useLayoutEffect(() => {
+    const group = hsAreaGroupRef.current;
+    if (tab !== "HS" || !group) return;
+    const update = () => setHsAreaGroupWidth(group.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(group);
+    return () => observer.disconnect();
+  }, [tab]);
+  const toggleHsAreaLayout = () => patchVis({
+    chart_hs_area_layout: hsAreaPreferVertical ? "horizontal" : "vertical",
+  });
+  const resetHsAreaLayout = () => patchVis({ chart_hs_area_layout: "auto" });
   const nsCardOrder = useMemo(
     () => sanitiseNsMetricOrder(visual.chart_ns_card_order),
     [visual.chart_ns_card_order],
@@ -1727,8 +1802,21 @@ export function ChartMapMode({
             sourceSpec={schema.card_source?.Main_Target_Threshold ?? MAIN_TARGET_THRESHOLD_SOURCE_SPEC}
             focusTarget={focusTarget}
             sourceDraftText={sourceDraftText}
+            sourceSavedText={sourceSavedText}
             onSourceDraftTextChange={onSourceDraftTextChange}
+            onSaveSourceDraft={onSaveSourceDraft}
             onSourceJump={onSourceJump}
+            bvHeatmapPoints={bvHeatmapPoints}
+            onSelectHeatmapImages={onSelectHeatmapImages}
+            heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+            heatmapFailed={currentHeatmapRows?.failed ?? false}
+            onHeatmapRequest={() => {
+              if (currentHeatmapRows?.failed) {
+                setHeatmapRows(null);
+                setHeatmapRetry((current) => current + 1);
+              }
+              setHeatmapRequested(true);
+            }}
             onMainThdValueChange={setMainThdValue}
             initialExpanded={!mainTCardCollapsedIds.includes(cardId)}
             onExpandedChange={(expanded) => setMainTCardExpanded(cardId, expanded)}
@@ -1774,7 +1862,12 @@ export function ChartMapMode({
 
   const renderHsMetricCard = (cardId: HsMetricCardId) => {
     const collapsed = hsCardCollapsedIds.includes(cardId);
-    const sortableWrapper = (children: ReactNode) => (
+    const sortableWrapper = (children: ReactNode) => isHsAreaCardId(cardId) ? (
+      <div key={cardId} style={{
+        minWidth: 0,
+        gridColumn: hsAreaLayoutColumns === 2 && cardId === hsAreaCardOrder[2] ? "1 / -1" : undefined,
+      }}>{children}</div>
+    ) : (
       <SortableMetricCard key={cardId} id={cardId} disabled={!collapsed}>
         {children}
       </SortableMetricCard>
@@ -1817,6 +1910,7 @@ export function ChartMapMode({
         <HsAreaCard
           domId={hsMetricCardDomId(cardId)}
           title="HS Bright Area"
+          heatmapKey={HS_AREA_HEATMAP_KEYS.BT}
           source={currentHsBrightAreaSource}
           bvValue={imageBvValue}
           axisValue={evdValue}
@@ -1827,11 +1921,20 @@ export function ChartMapMode({
           sourceJumpLabel="HS.Bright Area"
           sourcePaths={[...HS_BRIGHT_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
+          heatmapPoints={hsAreaHeatmapPoints.BT}
+          onSelectHeatmapImages={onSelectHeatmapImages}
+          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapFailed={currentHeatmapRows?.failed ?? false}
+          onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsBrightThdValue}
-          initialExpanded={!collapsed}
-          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+          layoutColumns={hsAreaLayoutColumns}
+          preferVerticalLayout={hsAreaPreferVertical}
+          onLayoutToggle={toggleHsAreaLayout}
+          onLayoutReset={resetHsAreaLayout}
         />,
       );
     }
@@ -1841,6 +1944,7 @@ export function ChartMapMode({
         <HsAreaCard
           domId={hsMetricCardDomId(cardId)}
           title="HS Middle Area"
+          heatmapKey={HS_AREA_HEATMAP_KEYS.MT}
           source={currentHsMiddleAreaSource}
           bvValue={imageBvValue}
           axisValue={b2mValue}
@@ -1851,11 +1955,20 @@ export function ChartMapMode({
           sourceJumpLabel="HS.Middle Area"
           sourcePaths={[...HS_MIDDLE_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
+          heatmapPoints={hsAreaHeatmapPoints.MT}
+          onSelectHeatmapImages={onSelectHeatmapImages}
+          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapFailed={currentHeatmapRows?.failed ?? false}
+          onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsMiddleThdValue}
-          initialExpanded={!collapsed}
-          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+          layoutColumns={hsAreaLayoutColumns}
+          preferVerticalLayout={hsAreaPreferVertical}
+          onLayoutToggle={toggleHsAreaLayout}
+          onLayoutReset={resetHsAreaLayout}
         />,
       );
     }
@@ -1865,6 +1978,7 @@ export function ChartMapMode({
         <HsAreaCard
           domId={hsMetricCardDomId(cardId)}
           title="HS Dark Area"
+          heatmapKey={HS_AREA_HEATMAP_KEYS.DT}
           source={currentHsDarkAreaSource}
           bvValue={imageBvValue}
           axisValue={b2dValue}
@@ -1875,11 +1989,20 @@ export function ChartMapMode({
           sourceJumpLabel="HS.Dark Area"
           sourcePaths={[...HS_DARK_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
+          heatmapPoints={hsAreaHeatmapPoints.DT}
+          onSelectHeatmapImages={onSelectHeatmapImages}
+          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapFailed={currentHeatmapRows?.failed ?? false}
+          onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsDarkThdValue}
-          initialExpanded={!collapsed}
-          onExpandedChange={(expanded) => setHsCardExpanded(cardId, expanded)}
+          layoutColumns={hsAreaLayoutColumns}
+          preferVerticalLayout={hsAreaPreferVertical}
+          onLayoutToggle={toggleHsAreaLayout}
+          onLayoutReset={resetHsAreaLayout}
         />,
       );
     }
@@ -2062,8 +2185,28 @@ export function ChartMapMode({
               collisionDetection={closestCenter}
               onDragEnd={onHsCardDragEnd}
             >
-              <SortableContext items={hsCardOrder} strategy={verticalListSortingStrategy}>
-                {hsCardOrder.map(renderHsMetricCard)}
+              <SortableContext items={hsCardOrder.filter((id) => !isHsAreaCardId(id))} strategy={verticalListSortingStrategy}>
+                {hsCardOrder.map((cardId) => {
+                  if (!isHsAreaCardId(cardId)) return renderHsMetricCard(cardId);
+                  if (cardId !== hsAreaCardOrder[0]) return null;
+                  return (
+                    <div
+                      key="hsAreaGroup"
+                      ref={hsAreaGroupRef}
+                      style={{ minWidth: 0, width: "100%", marginBottom: 12 }}
+                    >
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${hsAreaLayoutColumns}, minmax(0, 1fr))`,
+                        minWidth: 0,
+                        gap: HS_AREA_CARD_GAP,
+                        alignItems: "stretch",
+                      }}>
+                        {hsAreaCardOrder.map(renderHsMetricCard)}
+                      </div>
+                    </div>
+                  );
+                })}
               </SortableContext>
             </DndContext>
           )}
@@ -2704,17 +2847,88 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
 }
 
 export async function loadFaceLinkTargetCalculator(filePath: string | null) {
-  const [faceSource, linkSource] = filePath
+  const [faceSource, linkSource, mainThreshold, mainMidCurve, hsWeight, hsBright, hsMiddle, hsDark, nsBounds, nsProbability, nsNorT, nsBT] = filePath
     ? await Promise.all([
         loadFaceFbtSource(filePath).catch(() => null),
         loadFaceFbtSource(filePath, true).catch(() => null),
+        loadMainTargetThreshold(filePath).catch(() => null),
+        loadMainTargetMidCurve(filePath).catch(() => null),
+        loadHsWeightSource(filePath).catch(() => null),
+        loadHsBrightAreaSource(filePath).catch(() => null),
+        loadHsMiddleAreaSource(filePath).catch(() => null),
+        loadHsDarkAreaSource(filePath).catch(() => null),
+        loadNsLowBndBounds(filePath).catch(() => null),
+        loadNsProbabilityCurveSource(filePath).catch(() => null),
+        loadNsNorTSource(filePath).catch(() => null),
+        loadNsBTSource(filePath).catch(() => null),
       ])
-    : [null, null];
+    : [null, null, null, null, null, null, null, null, null, null, null, null];
   return (tomlData: Record<string, string>, bvKey: string) => {
     const value = (key: string) => parseFiniteNumber(readTomlValue(tomlData, key));
+    const firstValue = (keys: string[]) => parseFiniteNumber(readFirstTomlValue(tomlData, keys));
     const cwv = parseFiniteNumber(readFirstTomlValue(tomlData, FACE_CWV_KEYS));
+    const bv = value(bvKey);
+    const normalExif = calculateNormalTargetFormula({
+      mainTarget: readTomlValue(tomlData, "AE_TAG_MTV6_MAINT_TARGET"),
+      mainWeight: readTomlValue(tomlData, "AE_TAG_HSV6_MAINT_WET"),
+      hsTargets: ["BT", "MT", "DT"].map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_TARGET`)),
+      hsWeights: ["BT", "MT", "DT"].map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_WET`)),
+      nsTarget: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") ?? readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
+      nsProb: readTomlValue(tomlData, NS_PROB_KEY),
+    }).finalTarget;
+    const bvRow = mainThreshold?.find((row) => row.label === "BV");
+    const baseRow = mainThreshold?.find((row) => row.label === "Base");
+    const expRow = mainThreshold?.find((row) => row.label === "Exp");
+    const thresholdBv = Number.isFinite(bv) ? bv : parseFiniteNumber(firstNumericString(bvRow?.values));
+    const base = interpolateTableValue(thresholdBv, bvRow?.values, baseRow?.values);
+    const exp = interpolateTableValue(thresholdBv, bvRow?.values, expRow?.values);
+    const maxThd = Number.isFinite(base) && Number.isFinite(exp) ? base * 2 ** (exp / 1000) : NaN;
+    const mainThd = computeSegmentedThd(value("AE_TAG_DRV6_CORR_MIDRATIO"), base, exp, maxThd,
+      buildSegmentedMidPoints(buildMidCurvePoints(mainMidCurve)), value("AE_TAG_MTV6_MAINT_MID_INTRATIO"));
+    const mainY = value(MTWV_VALUE_KEY);
+    const mainTarget = Number.isFinite(cwv) && Number.isFinite(mainThd) && Number.isFinite(mainY) && mainY !== 0
+      ? cwv * mainThd / mainY : NaN;
+    const hsCwv = Number.isFinite(value(HS_TARGET_CWV_KEY)) ? value(HS_TARGET_CWV_KEY) : cwv;
+    const b2d = value("AE_TAG_DRV6_B2D");
+    const mid = value("AE_TAG_DRV6_MIDRATIO");
+    const wet = (tone: HsWeightToneId) => hsWeight
+      ? interpolateHsWeightSource(hsWeight, hsWeightChannelIndex(tone), bv, b2d, mid) : NaN;
+    const hsTerms = HS_TARGET_INPUTS.map((input) => {
+      const source = input.id === "BT" ? hsBright : input.id === "MT" ? hsMiddle : hsDark;
+      const axis = input.id === "BT" ? value(HS_BRIGHT_EVD_KEY)
+        : input.id === "MT" ? value(HS_MIDDLE_B2M_KEY) : b2d;
+      const thd = source ? interpolateHsAreaSource(source, bv, axis) : NaN;
+      const y = value(input.yKey);
+      const target = Number.isFinite(hsCwv) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0
+        ? hsCwv * thd / y : NaN;
+      return { target, wet: wet(HS_TARGET_WEIGHT_TONE_BY_ID[input.id]) };
+    });
+    const hsWeightSum = hsTerms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
+    const hsTarget = hsWeightSum > 0 ? hsTerms.reduce((sum, term) =>
+      sum + (Number.isFinite(term.target) && Number.isFinite(term.wet) ? term.target * term.wet : 0), 0) / hsWeightSum : NaN;
+    const nsCwv = hsCwv;
+    const nsTerms = NS_TARGET_INPUTS.map((input) => {
+      const computation = input.id === "NorT" ? calculateNsAreaComputation(nsNorT, bv, value(NS_EVD_KEY))
+        : input.id === "BT" ? calculateNsAreaComputation(nsBT, bv, bv) : null;
+      const thd = computation?.finalThd ?? firstValue(input.thdKeys);
+      const y = firstValue(input.yKeys);
+      const target = Number.isFinite(nsCwv) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0
+        ? nsCwv * thd / y : NaN;
+      return input.id === "DT" ? clampNsLowBndTarget(target, nsBounds) : target;
+    });
+    const nsTarget = nsTerms.reduce((max, target) => Number.isFinite(target) ? Math.max(max, target) : max, -Infinity);
+    const cdf = value(NS_STS_CDF_KEY);
+    const bvProb = nsProbability ? interpolateNsProbabilityCurve(nsProbability.bv, bv) : NaN;
+    const cdfProb = nsProbability ? interpolateNsProbabilityCurve(nsProbability.cdf, cdf) : NaN;
+    const nsProb = Number.isFinite(bvProb) && Number.isFinite(cdfProb) ? bvProb * cdfProb / 1024 : NaN;
+    const parameterValue = (number: number) => formatInputNumber(Number.isFinite(number) ? number : 0);
+    const normalCalculated = calculateNormalTargetFormula({
+      mainTarget: parameterValue(mainTarget), mainWeight: parameterValue(wet("target")),
+      hsTargets: [parameterValue(hsTarget)], hsWeights: [parameterValue(hsWeightSum)],
+      nsTarget: parameterValue(nsTarget), nsProb: parameterValue(nsProb),
+    }).finalTarget;
     const common = {
-      bv: value(bvKey),
+      bv,
       cwv,
       nsProb: value(NS_PROB_KEY),
       normalTarget: value(FACE_NORMAL_TARGET_KEY),
@@ -2742,6 +2956,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       fltMode: true,
     });
     return {
+      normal: { exif: normalExif, calculated: normalCalculated },
       backScene: { exif: face.exifBackSceneTarget, calculated: face.backSceneTarget },
       faceLink: { exif: link.exifBackSceneTarget, calculated: link.backSceneTarget },
     };
@@ -3153,6 +3368,21 @@ function sanitiseHsMetricOrder(order: string[] | undefined): HsMetricCardId[] {
   return cleaned;
 }
 
+function isHsAreaCardId(cardId: HsMetricCardId): boolean {
+  return cardId === "hsBright" || cardId === "hsMiddle" || cardId === "hsDark";
+}
+
+function coerceHsAreaLayoutMode(value: string | undefined): HsAreaLayoutMode {
+  return value === "horizontal" || value === "vertical" ? value : "auto";
+}
+
+function hsAreaLayoutColumnCount(mode: HsAreaLayoutMode, width: number): HsAreaLayoutColumns {
+  if (mode === "vertical") return 1;
+  if (width >= HS_AREA_THREE_COLUMN_MIN_WIDTH) return 3;
+  if (width >= HS_AREA_TWO_COLUMN_MIN_WIDTH) return 2;
+  return 1;
+}
+
 function sanitiseHsMetricCollapsed(collapsed: string[] | undefined): HsMetricCardId[] {
   const known = new Set<HsMetricCardId>(HS_METRIC_CARD_ORDER);
   return (collapsed ?? [])
@@ -3429,6 +3659,22 @@ function SortableMetricCard({
   );
 }
 
+function useChartTableHeatmapMode(heatmapKey: string, defaultShowHitCounts = false) {
+  const mode = useIsp6sVisualStore((state) => state.visual.chart_face_heatmap_modes?.[heatmapKey]);
+  const showHeatmap = mode?.enabled ?? false;
+  const showHitCounts = mode?.show_hit_counts ?? defaultShowHitCounts;
+  const updateHeatmapMode = useCallback((enabled: boolean, show_hit_counts: boolean) => {
+    const { visual, patch } = useIsp6sVisualStore.getState();
+    patch({
+      chart_face_heatmap_modes: {
+        ...visual.chart_face_heatmap_modes,
+        [heatmapKey]: { enabled, show_hit_counts },
+      },
+    });
+  }, [heatmapKey]);
+  return { showHeatmap, showHitCounts, updateHeatmapMode };
+}
+
 function MainTargetThresholdCard({
   filePath,
   rows,
@@ -3444,8 +3690,15 @@ function MainTargetThresholdCard({
   sourceSpec,
   focusTarget,
   sourceDraftText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
+  bvHeatmapPoints,
+  onSelectHeatmapImages,
+  heatmapLoading,
+  heatmapFailed,
+  onHeatmapRequest,
   onMainThdValueChange,
   initialExpanded,
   onExpandedChange,
@@ -3468,8 +3721,15 @@ function MainTargetThresholdCard({
   sourceSpec: CardSourceSpec;
   focusTarget?: ChartFocusTarget | null;
   sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSaveSourceDraft?: () => Promise<void>;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+  bvHeatmapPoints: BvHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onHeatmapRequest: () => void;
   onMainThdValueChange?: (value: number) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -3488,6 +3748,11 @@ function MainTargetThresholdCard({
   const [editableB2dCurve, setEditableB2dCurve] = useState<B2dCurveSource | null>(b2dCurve);
   const [editableB2dCorrCurve, setEditableB2dCorrCurve] = useState<B2dCorrCurveSource | null>(b2dCorrCurve);
   const [bindingPanel, setBindingPanel] = useState<BindingPanelKind | null>(null);
+  const {
+    showHeatmap: showBvHeatmap,
+    showHitCounts: showBvHitCounts,
+    updateHeatmapMode: updateBvHeatmapMode,
+  } = useChartTableHeatmapMode(MAIN_T_BV_HEATMAP_KEY);
   const [bvBindingPaths, setBvBindingPaths] = useState<Record<MainTargetThresholdRow["label"], string>>({
     BV: MAIN_TARGET_THRESHOLD_PATHS[0],
     Base: MAIN_TARGET_THRESHOLD_PATHS[1],
@@ -3578,6 +3843,24 @@ function MainTargetThresholdCard({
   const baseValue = interpolateTableValue(bvNumber, bv?.values, base?.values);
   const expValue = interpolateTableValue(bvNumber, bv?.values, exp?.values);
   const interpolationColumns = interpolationColumnIndexes(bvNumber, bv?.values);
+  const bvAxis = useMemo(() => bv?.values.map(parseFiniteNumber) ?? [], [bv]);
+  const bvHeatmapHitPaths = useMemo(() => {
+    const paths = bvAxis.map(() => new Set<string>());
+    if (!showBvHeatmap) return paths.map(() => [] as string[]);
+    for (const point of bvHeatmapPoints) {
+      for (const hit of boundsForTableAxis(point.bv, bvAxis).points) paths[hit.index].add(point.path);
+    }
+    return paths.map((hits) => [...hits]);
+  }, [bvAxis, bvHeatmapPoints, showBvHeatmap]);
+  const bvHeatmapCounts = bvHeatmapHitPaths.map((paths) => paths.length);
+  const maxBvHeatmapCount = Math.max(0, ...bvHeatmapCounts);
+  const bvTableDirty = Boolean(sourceDraftText && sourceSavedText && orderedRows.some((row) =>
+    row.fields.some((field) => {
+      const draft = sourceFieldNumber(sourceDraftText, field, row.fields);
+      const saved = sourceFieldNumber(sourceSavedText, field, row.fields);
+      return Number.isFinite(saved) && Number.isFinite(draft) && draft !== saved;
+    }),
+  ));
   const thdMaxValue = Number.isFinite(baseValue) && Number.isFinite(expValue)
     ? baseValue * 2 ** (expValue / 1000)
     : NaN;
@@ -3613,16 +3896,17 @@ function MainTargetThresholdCard({
       ? `恢复默认 BV 值：${defaultBv}`
       : "无可恢复 BV 值";
 
-  const updateThresholdCell = (rowLabel: MainTargetThresholdRow["label"], cellIndex: number, nextValue: string) => {
+  const updateThresholdCell = (rowLabel: MainTargetThresholdRow["label"], cellIndex: number, nextValue: string): boolean => {
     const currentRow = editableRows.find((row) => row.label === rowLabel);
-    if (!currentRow) return;
+    if (!currentRow) return false;
     const trimmed = nextValue.trim();
-    if (!isSourceNumberText(trimmed)) return;
+    if (!isSourceNumberText(trimmed)) return false;
     const nextText = replaceThresholdCellInSourceText(sourceDraftTextRef.current, currentRow, cellIndex, trimmed);
-    if (nextText === null) return;
+    if (nextText === null) return false;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
     setEditableRows((current) => updateThresholdRowsCell(current, rowLabel, cellIndex, trimmed));
+    return true;
   };
 
   const bvBindingEntries: BindingEntry[] = orderedRows.map((row) => ({
@@ -3818,13 +4102,39 @@ function MainTargetThresholdCard({
             </div>
           </div>
           <div style={thresholdTableWrapStyle}>
-            <div style={thresholdTableSurfaceStyle}>
+            <div style={{ ...thresholdTableSurfaceStyle, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+              <div style={faceBvDrCardHeaderStyle}>
+                <strong style={faceBvDrTitleStyle}>base_exp_tbl</strong>
+                <div style={thresholdGroupActionsStyle}>
+                  <FaceTableSaveButton dirty={bvTableDirty} onSave={onSaveSourceDraft} />
+                  <button
+                    type="button"
+                    style={{ ...groupSourceButtonStyle(Boolean(bv)), background: showBvHeatmap ? "var(--colorBrandBackground2)" : undefined }}
+                    title={showBvHeatmap
+                      ? `左键关闭热力图，右键切换${showBvHitCounts ? "参数值" : "命中数"}`
+                      : "显示图片 BV 笛卡尔热力图"}
+                    aria-label={showBvHeatmap ? "关闭 base_exp_tbl 笛卡尔热力图" : "显示 base_exp_tbl 笛卡尔热力图"}
+                    aria-pressed={showBvHeatmap}
+                    disabled={!bv}
+                    onClick={() => {
+                      if (!showBvHeatmap) onHeatmapRequest();
+                      updateBvHeatmapMode(!showBvHeatmap, showBvHitCounts);
+                    }}
+                    onContextMenu={(event) => {
+                      if (!showBvHeatmap) return;
+                      event.preventDefault();
+                      updateBvHeatmapMode(true, !showBvHitCounts);
+                    }}
+                  >
+                    <DataHistogram24Regular className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
               <table style={thresholdTableStyle}>
                 <tbody>
                   {orderedRows.map((row) => (
                     <tr key={row.label}>
                       <th
-                        title={row.path}
                         style={thresholdLabelCellStyle(row.label)}
                       >
                         {row.label}
@@ -3836,8 +4146,23 @@ function MainTargetThresholdCard({
                           value={value}
                           highlighted={interpolationColumns.has(idx)}
                           editable={Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined && row.fields[idx])}
-                          title={`${row.path} #${idx}`}
+                          heatmapCount={showBvHeatmap ? bvHeatmapCounts[idx] : undefined}
+                          showHitCounts={showBvHeatmap && showBvHitCounts && row.label !== "BV"}
+                          onSelectHeatmapImages={onSelectHeatmapImages
+                            ? () => onSelectHeatmapImages(bvHeatmapHitPaths[idx] ?? []) : undefined}
+                          maxHeatmapCount={maxBvHeatmapCount}
+                          heatmapLoading={heatmapLoading}
+                          heatmapFailed={heatmapFailed}
                           onCommit={(nextValue) => updateThresholdCell(row.label, idx, nextValue)}
+                          onSourceJump={row.fields[idx] && onSourceJump ? (currentValue) => {
+                            const field = row.fields[idx];
+                            const fieldsOnLine = row.fields.filter((item) => item.line === field.line)
+                              .sort((left, right) => left.index - right.index || left.path.localeCompare(right.path));
+                            const ordinal = fieldsOnLine.findIndex((item) => sameFieldEntry(item, field));
+                            onSourceJump(`Main_Target_Threshold.${row.label}.${idx}`, {
+                              paths: [field.path], jump_to: "first", highlight: "ranges",
+                            }, { selection: { line: field.line, value: currentValue, ordinal } });
+                          } : undefined}
                         />
                       ))}
                     </tr>
@@ -7100,23 +7425,12 @@ function FaceBvDrTableCard({
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
-  const heatmapModes = useIsp6sVisualStore((state) => state.visual.chart_face_heatmap_modes);
   const patchVis = useIsp6sVisualStore((state) => state.patch);
   const heatmapKey = `${faceTab}_${tableKey}`;
-  const mode = heatmapModes?.[heatmapKey];
-  const showHeatmap = mode?.enabled ?? false;
-  const showHitCounts = mode?.show_hit_counts ?? true;
+  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode(heatmapKey, true);
   const syncModes = useIsp6sVisualStore((state) => state.visual.chart_face_sync_modes);
   const syncKey = faceSyncModeKey(faceTab, tableKey);
   const syncEnabled = syncKey ? syncModes?.[syncKey] ?? false : false;
-  const updateHeatmapMode = (enabled: boolean, show_hit_counts: boolean) => {
-    patchVis({
-      chart_face_heatmap_modes: {
-        ...heatmapModes,
-        [heatmapKey]: { enabled, show_hit_counts },
-      },
-    });
-  };
   const eligibleHeatmapPoints = useMemo(
     () => title.startsWith("ns_")
       ? imageHeatmapPoints.filter(({ nsProb }) => Number.isFinite(nsProb) && nsProb !== 0)
@@ -7209,7 +7523,7 @@ function FaceBvDrTableCard({
             highlight: "ranges",
           })}
         >
-          <TableLink24Regular className="h-4 w-4" />
+          <Code24Regular className="h-4 w-4" />
         </button>
         </div>
       </div>
@@ -8468,6 +8782,7 @@ function HsWeightEditableCell({
   style,
   onPreview,
   onCommit,
+  onSourceJump,
 }: {
   value: string;
   editable: boolean;
@@ -8475,6 +8790,7 @@ function HsWeightEditableCell({
   style: CSSProperties;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
+  onSourceJump?: (value: string) => void;
 }) {
   return (
     <EditableNumberTableCell
@@ -8488,13 +8804,35 @@ function HsWeightEditableCell({
       inputStyle={({ editable: cellEditable }) => hsWeightCellInputStyle(cellEditable)}
       onPreview={onPreview}
       onCommit={onCommit}
+      onSourceJump={onSourceJump}
+      commitBeforeSourceJump={Boolean(onSourceJump)}
     />
   );
+}
+
+function countHsAreaHits(source: HsAreaSource, points: HsAreaHeatmapPoint[]): number[][] {
+  const counts = source.rowHeaders.map(() => source.columnHeaders.map(() => 0));
+  for (const { bv, axis } of points) {
+    const rows = boundsForTableAxis(bv, source.rowHeaders).points;
+    const columns = boundsForTableAxis(axis, source.columnHeaders).points;
+    for (const row of rows) {
+      for (const column of columns) counts[row.index][column.index] += 1;
+    }
+  }
+  return counts;
+}
+
+function hsAreaHitPaths(source: HsAreaSource, points: HsAreaHeatmapPoint[], rowIndex: number, columnIndex: number): string[] {
+  return [...new Set(points.filter(({ bv, axis }) =>
+    boundsForTableAxis(bv, source.rowHeaders).points.some((row) => row.index === rowIndex)
+    && boundsForTableAxis(axis, source.columnHeaders).points.some((column) => column.index === columnIndex),
+  ).map(({ path }) => path))];
 }
 
 function HsAreaCard({
   domId,
   title,
+  heatmapKey,
   source,
   bvValue,
   axisValue,
@@ -8505,14 +8843,24 @@ function HsAreaCard({
   sourceJumpLabel,
   sourcePaths,
   sourceDraftText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
+  heatmapPoints,
+  onSelectHeatmapImages,
+  heatmapLoading,
+  heatmapFailed,
+  onHeatmapRequest,
   onInterpolatedChange,
-  initialExpanded,
-  onExpandedChange,
+  layoutColumns,
+  preferVerticalLayout,
+  onLayoutToggle,
+  onLayoutReset,
 }: {
   domId?: string;
   title: string;
+  heatmapKey: string;
   source: HsAreaSource | null;
   bvValue: string | null;
   axisValue: string | null;
@@ -8523,18 +8871,25 @@ function HsAreaCard({
   sourceJumpLabel: string;
   sourcePaths: string[];
   sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSaveSourceDraft?: () => Promise<void>;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+  heatmapPoints: HsAreaHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onHeatmapRequest: () => void;
   onInterpolatedChange?: (value: number) => void;
-  initialExpanded?: boolean;
-  onExpandedChange?: (expanded: boolean) => void;
+  layoutColumns: HsAreaLayoutColumns;
+  preferVerticalLayout: boolean;
+  onLayoutToggle: () => void;
+  onLayoutReset: () => void;
 }) {
-  const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [editableSource, setEditableSource] = useState(source);
+  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode(heatmapKey);
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
-  useEffect(() => {
-    setExpanded(initialExpanded ?? true);
-  }, [initialExpanded]);
+  const layoutLabel = layoutColumns === 3 ? "三张并排" : layoutColumns === 2 ? "上二下一" : "三张竖排";
   useEffect(() => {
     setEditableSource(source);
   }, [source]);
@@ -8549,6 +8904,26 @@ function HsAreaCard({
   }, [interpolatedThd, onInterpolatedChange]);
   const selected = locateHsAreaSelection(editableSource, bv, axis);
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
+  const tableDirty = useMemo(() => {
+    if (!editableSource || !sourceDraftText || !sourceSavedText || sourceDraftText === sourceSavedText) return false;
+    const draftLines = faceSourceLines(sourceDraftText);
+    const savedLines = faceSourceLines(sourceSavedText);
+    const fields = [
+      ...editableSource.rowHeaderFields,
+      ...editableSource.columnHeaderFields,
+      ...editableSource.valueFields.flat(),
+    ];
+    return fields.some((field) => {
+      if (!field || draftLines[field.line - 1] === savedLines[field.line - 1]) return false;
+      const draft = sourceFieldNumber(sourceDraftText, field, editableSource.fields);
+      const saved = sourceFieldNumber(sourceSavedText, field, editableSource.fields);
+      return Number.isFinite(draft) && Number.isFinite(saved) && draft !== saved;
+    });
+  }, [editableSource, sourceDraftText, sourceSavedText]);
+  const heatmapCounts = useMemo(() => editableSource && showHeatmap
+    ? countHsAreaHits(editableSource, heatmapPoints) : [],
+  [editableSource, heatmapPoints, showHeatmap]);
+  const maxHeatmapCount = Math.max(0, ...heatmapCounts.flat());
 
   const previewAreaCell = (target: HsAreaCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
@@ -8569,12 +8944,44 @@ function HsAreaCard({
     setEditableSource((current) => current ? updateHsAreaSourceField(current, field, trimmed) : current);
     return true;
   };
+  const jumpToAreaCellSource = (field: FieldEntry, target: HsAreaCellTarget, value: string) => {
+    if (!editableSource || !onSourceJump) return;
+    const fieldsOnLine = orderedSourceFieldsOnLine(editableSource.fields, field.line);
+    const ordinal = fieldsOnLine.findIndex((item) => sameFieldEntry(item, field));
+    const suffix = target.kind === "value" ? `${target.rowIndex}.${target.columnIndex}`
+      : target.kind === "rowHeader" ? `BV.${target.rowIndex}` : `${axisLabel}.${target.columnIndex}`;
+    onSourceJump(`${sourceJumpLabel}.${suffix}`, {
+      paths: [field.path], jump_to: "first", highlight: "ranges",
+    }, { selection: { line: field.line, value, ordinal } });
+  };
 
   return (
-    <section id={domId} style={thresholdCardStyle}>
-      <div style={thresholdHeaderStyle}>
+    <section id={domId} style={{ ...thresholdCardStyle, minWidth: 0, height: "100%", margin: 0, boxSizing: "border-box" }}>
+      <div style={{ ...thresholdHeaderStyle, background: faceBvDrCardHeaderStyle.background }}>
         <div style={thresholdTitleStyle}>{title}</div>
         <div style={thresholdGroupActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
+          <button
+            type="button"
+            title={showHeatmap
+              ? `左键关闭热力图，右键切换${showHitCounts ? "参数值" : "命中数"}`
+              : `显示 ${title} 笛卡尔热力图`}
+            aria-label={showHeatmap ? `关闭 ${title} 笛卡尔热力图` : `显示 ${title} 笛卡尔热力图`}
+            aria-pressed={showHeatmap}
+            disabled={!editableSource}
+            onClick={() => {
+              if (!showHeatmap) onHeatmapRequest();
+              updateHeatmapMode(!showHeatmap, showHitCounts);
+            }}
+            onContextMenu={(event) => {
+              if (!showHeatmap) return;
+              event.preventDefault();
+              updateHeatmapMode(true, !showHitCounts);
+            }}
+            style={{ ...groupSourceButtonStyle(Boolean(editableSource)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
+          >
+            <DataHistogram24Regular className="h-4 w-4" />
+          </button>
           <button
             type="button"
             title={`Jump to ${title} source`}
@@ -8591,16 +8998,19 @@ function HsAreaCard({
           </button>
           <button
             type="button"
-            title={expanded ? `Collapse ${title}` : `Expand ${title}`}
-            aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
-            onClick={() => setExpanded((current) => {
-              const next = !current;
-              onExpandedChange?.(next);
-              return next;
-            })}
+            title={`当前：${layoutLabel}；左键切换${preferVerticalLayout ? "水平" : "垂直"}布局，右键恢复自动布局`}
+            aria-label={`当前${layoutLabel}，将三个 HS Area 卡片切换为${preferVerticalLayout ? "水平" : "垂直"}布局`}
+            onClick={onLayoutToggle}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onLayoutReset();
+            }}
             style={sourceButtonStyle(true)}
           >
-            {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+            {layoutColumns === 3 ? <LayoutColumnThree24Regular className="h-4 w-4" />
+              : layoutColumns === 2 ? <LayoutRowTwoSplitTop24Regular className="h-4 w-4" />
+              : <LayoutRowThree24Regular className="h-4 w-4" />}
           </button>
         </div>
       </div>
@@ -8615,7 +9025,7 @@ function HsAreaCard({
           <span style={hsWeightInterpolatedValueStyle}>{formatComputedNumber(interpolatedThd)}</span>
         </span>
       </div>
-      {expanded && <div style={hsDarkAreaBodyStyle}>
+      <div style={hsDarkAreaBodyStyle}>
         {editableSource ? (
           <HsAreaGrid
             source={editableSource}
@@ -8623,13 +9033,22 @@ function HsAreaCard({
             editable={canEdit}
             cornerLabel={cornerLabel}
             columnLabel={axisLabel}
+            heatmapCounts={heatmapCounts}
+            maxHeatmapCount={maxHeatmapCount}
+            showHeatmap={showHeatmap}
+            showHitCounts={showHitCounts}
+            heatmapPoints={heatmapPoints}
+            onSelectHeatmapImages={onSelectHeatmapImages}
+            heatmapLoading={heatmapLoading}
+            heatmapFailed={heatmapFailed}
             onCellPreview={previewAreaCell}
             onCellCommit={updateAreaCell}
+            onCellSourceJump={jumpToAreaCellSource}
           />
         ) : (
           <div style={hsWeightPendingStyle}>loading...</div>
         )}
-      </div>}
+      </div>
     </section>
   );
 }
@@ -8640,16 +9059,34 @@ function HsAreaGrid({
   editable,
   cornerLabel,
   columnLabel,
+  heatmapCounts,
+  maxHeatmapCount,
+  showHeatmap,
+  showHitCounts,
+  heatmapPoints,
+  onSelectHeatmapImages,
+  heatmapLoading,
+  heatmapFailed,
   onCellPreview,
   onCellCommit,
+  onCellSourceJump,
 }: {
   source: HsAreaSource | null;
   selected: HsAreaSelection;
   editable: boolean;
   cornerLabel: string;
   columnLabel: string;
+  heatmapCounts: number[][];
+  maxHeatmapCount: number;
+  showHeatmap: boolean;
+  showHitCounts: boolean;
+  heatmapPoints: HsAreaHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
   onCellPreview?: (target: HsAreaCellTarget, value: string) => void;
   onCellCommit?: (target: HsAreaCellTarget, value: string) => boolean | void;
+  onCellSourceJump?: (field: FieldEntry, target: HsAreaCellTarget, value: string) => void;
 }) {
   const rowCount = Math.max(1, source?.rowCount ?? 1);
   const columnCount = Math.max(1, source?.columnCount ?? 1);
@@ -8657,7 +9094,11 @@ function HsAreaGrid({
   return (
     <div style={hsDarkAreaTableWrapStyle}>
       <div style={hsDarkAreaGridStyle(columnCount)}>
-        <div style={hsDarkAreaCornerStyle}>{cornerLabel}</div>
+        <div style={{
+          ...hsDarkAreaCornerStyle,
+          background: faceBvDrCornerCellStyle.background,
+          color: faceBvDrCornerCellStyle.color,
+        }}>{cornerLabel}</div>
         {Array.from({ length: columnCount }, (_, columnIndex) => {
           const field = source?.columnHeaderFields[columnIndex] ?? null;
           const value = source?.columnHeaders[columnIndex] ?? NaN;
@@ -8667,9 +9108,12 @@ function HsAreaGrid({
               value={field?.value ?? formatHsAreaAxisValue(value, columnIndex, "C")}
               editable={editable && Boolean(field)}
               title={field ? `${source?.columnHeaderPath} #${columnIndex}` : columnLabel}
-              style={hsDarkAreaColumnHeaderStyle(selected.columnIndexes.has(columnIndex))}
+              style={faceBvDrColumnHeaderStyle(selected.columnIndexes.has(columnIndex))}
               onPreview={(nextValue) => onCellPreview?.({ kind: "columnHeader", columnIndex }, nextValue)}
               onCommit={(nextValue) => onCellCommit?.({ kind: "columnHeader", columnIndex }, nextValue)}
+              onSourceJump={field && onCellSourceJump
+                ? (currentValue) => onCellSourceJump(field, { kind: "columnHeader", columnIndex }, currentValue)
+                : undefined}
             />
           );
         })}
@@ -8685,20 +9129,54 @@ function HsAreaGrid({
                 style={hsDarkAreaRowHeaderStyle(selected.rowIndexes.has(rowIndex))}
                 onPreview={(nextValue) => onCellPreview?.({ kind: "rowHeader", rowIndex }, nextValue)}
                 onCommit={(nextValue) => onCellCommit?.({ kind: "rowHeader", rowIndex }, nextValue)}
+                onSourceJump={rowField && onCellSourceJump
+                  ? (currentValue) => onCellSourceJump(rowField, { kind: "rowHeader", rowIndex }, currentValue)
+                  : undefined}
               />
               {Array.from({ length: columnCount }, (_, columnIndex) => {
                 const field = source?.valueFields[rowIndex]?.[columnIndex] ?? null;
                 const value = source?.values[rowIndex]?.[columnIndex] ?? NaN;
                 const active = selected.rowIndexes.has(rowIndex) && selected.columnIndexes.has(columnIndex);
+                const hitCount = heatmapCounts[rowIndex]?.[columnIndex] ?? 0;
+                const heatmapStatus = heatmapLoading ? "统计中" : heatmapFailed ? "读取失败" : `${hitCount} 张图片命中`;
+                if (showHeatmap && showHitCounts) return (
+                  <button
+                    key={`cell:${rowIndex}:${columnIndex}`}
+                    type="button"
+                    style={{
+                      ...faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active),
+                      appearance: "none", borderTop: 0, borderLeft: 0, font: "inherit", cursor: "pointer",
+                    }}
+                    title={`${source?.valuePath} #${rowIndex}:${columnIndex} · ${heatmapStatus}`}
+                    aria-label={`HS Area BV 第 ${rowIndex + 1} 行，${columnLabel} 第 ${columnIndex + 1} 列，${heatmapStatus}`}
+                    onClick={() => {
+                      if (source && !heatmapLoading && !heatmapFailed) {
+                        onSelectHeatmapImages?.(hsAreaHitPaths(source, heatmapPoints, rowIndex, columnIndex));
+                      }
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (source && !heatmapLoading && !heatmapFailed) {
+                        onSelectHeatmapImages?.(hsAreaHitPaths(source, heatmapPoints, rowIndex, columnIndex));
+                      }
+                    }}
+                  >
+                    {heatmapLoading ? "…" : heatmapFailed ? "-" : hitCount}
+                  </button>
+                );
                 return (
                   <HsWeightEditableCell
                     key={`cell:${rowIndex}:${columnIndex}`}
                     value={field?.value ?? formatHsAreaCellValue(value)}
                     editable={editable && Boolean(field)}
-                    title={field ? `${source?.valuePath} #${rowIndex}:${columnIndex}` : "THD"}
-                    style={hsDarkAreaDataCellStyle(active)}
+                    title={`${field ? `${source?.valuePath} #${rowIndex}:${columnIndex}` : "THD"}${showHeatmap ? ` · ${heatmapStatus}` : ""}`}
+                    style={showHeatmap ? faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active) : hsDarkAreaDataCellStyle(active)}
                     onPreview={(nextValue) => onCellPreview?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
                     onCommit={(nextValue) => onCellCommit?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
+                    onSourceJump={field && onCellSourceJump
+                      ? (currentValue) => onCellSourceJump(field, { kind: "value", rowIndex, columnIndex }, currentValue)
+                      : undefined}
                   />
                 );
               })}
@@ -8831,60 +9309,79 @@ function ThresholdEditableCell({
   value,
   highlighted,
   editable,
-  title,
+  heatmapCount,
+  showHitCounts,
+  onSelectHeatmapImages,
+  maxHeatmapCount,
+  heatmapLoading,
+  heatmapFailed,
   onCommit,
+  onSourceJump,
 }: {
   label: MainTargetThresholdRow["label"];
   value: string;
   highlighted: boolean;
   editable: boolean;
-  title: string;
-  onCommit: (value: string) => void;
+  heatmapCount?: number;
+  showHitCounts: boolean;
+  onSelectHeatmapImages?: () => void;
+  maxHeatmapCount: number;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onCommit: (value: string) => boolean;
+  onSourceJump?: (value: string) => void;
 }) {
-  const [focused, setFocused] = useState(false);
-  const [draftValue, setDraftValue] = useState(value);
-
-  useEffect(() => {
-    setDraftValue(value);
-  }, [value]);
-
-  const resetDraft = () => {
-    setDraftValue(value);
-  };
-
-  const commitDraft = () => {
-    if (!editable) return;
-    const nextValue = draftValue.trim();
-    if (nextValue === value.trim()) return;
-    onCommit(nextValue);
-  };
+  const heatmapStyle = label !== "BV" && heatmapCount !== undefined
+    ? faceBvDrHeatCellStyle(heatmapCount, maxHeatmapCount, false) : undefined;
+  const heatmapStatus = heatmapCount === undefined ? "" : heatmapLoading ? "，统计中"
+    : heatmapFailed ? "，读取失败" : `，${heatmapCount} 张图片命中`;
 
   return (
-    <td title={title} style={thresholdValueCellStyle(label, highlighted, focused, editable)}>
-      <input
-        aria-label={`${label}-${title}`}
-        value={draftValue}
-        readOnly={!editable}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          resetDraft();
-        }}
-        onChange={(event) => setDraftValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commitDraft();
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            resetDraft();
-            event.currentTarget.blur();
-          }
-        }}
-        inputMode="decimal"
-        style={thresholdCellInputStyle(editable)}
-      />
+    <td
+      style={{
+        ...thresholdValueCellStyle(label, highlighted, editable && !showHitCounts),
+        ...(heatmapStyle ? { background: heatmapStyle.background } : {}),
+      }}
+      onContextMenu={(event) => {
+        if (showHitCounts) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+          return;
+        }
+        if (event.target !== event.currentTarget || !onSourceJump) return;
+        event.preventDefault();
+        onSourceJump(value);
+      }}
+    >
+      {showHitCounts ? (
+        <div
+          aria-label={`${label}${heatmapStatus}，右键筛选命中图片`}
+          style={{
+            ...thresholdCellInputStyle(false),
+            cursor: onSelectHeatmapImages && !heatmapLoading && !heatmapFailed ? "pointer" : "default",
+            color: highlighted ? "var(--colorBrandForeground1)"
+              : heatmapStyle?.color,
+          }}
+        >
+          {heatmapLoading ? "…" : heatmapFailed ? "-" : heatmapCount ?? 0}
+        </div>
+      ) : (
+        <EditableNumberTableCell
+          value={value}
+          editable={editable}
+          ariaLabel={`${label} ${value}${heatmapStatus}`}
+          frameStyle={({ focused }) => ({ width: "100%", outline: focused ? "1.5px solid var(--colorBrandForeground1)" : undefined })}
+          inputStyle={() => ({
+            ...thresholdCellInputStyle(editable),
+            color: highlighted ? "var(--colorBrandForeground1)"
+              : heatmapStyle?.color ?? "inherit",
+          })}
+          onCommit={onCommit}
+          onSourceJump={onSourceJump}
+          commitBeforeSourceJump
+        />
+      )}
     </td>
   );
 }
@@ -9100,7 +9597,13 @@ function MidRatioChart({
 
   return (
     <div style={chartWrapStyle}>
-      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={chartSvgStyle} role="img" aria-label="Main THD chart">
+      <svg viewBox={`0 0 ${chart.width} ${chart.height}`} style={{
+        ...chartSvgStyle,
+        border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
+        borderRadius: 8,
+        overflow: "hidden",
+        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+      }} role="img" aria-label="Main THD chart">
         <text x={12} y={17} textAnchor="start" style={chartTitleTextStyle}>Main THD</text>
         <line x1={chart.left} y1={axisY} x2={chart.left} y2={chart.top + 16} style={chartAxisLineStyle} />
         <line x1={chart.left} y1={axisY} x2={chart.left + plotW + 10} y2={axisY} style={chartAxisLineStyle} />
@@ -13773,8 +14276,10 @@ const thresholdTableWrapStyle: CSSProperties = {
 
 const thresholdTableSurfaceStyle: CSSProperties = {
   position: "relative",
-  width: "min(100%, 560px)",
-  minHeight: 190,
+  width: "100%",
+  maxWidth: 620,
+  minHeight: 220,
+  aspectRatio: "420 / 190",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -14072,7 +14577,7 @@ const chartFreeDragHitStyle: CSSProperties = {
 };
 
 function thresholdLabelCellStyle(label: MainTargetThresholdRow["label"]): CSSProperties {
-  const header = label === "BV";
+  const palette = faceBvDrRowHeaderStyle(false);
   return {
     width: 54,
     padding: "6px 7px",
@@ -14080,10 +14585,8 @@ function thresholdLabelCellStyle(label: MainTargetThresholdRow["label"]): CSSPro
     borderBottom: label === "Exp"
       ? "none"
       : "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-    background: header
-      ? "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 68%, var(--colorNeutralBackground1))"
-      : "color-mix(in srgb, var(--colorNeutralForeground1) 9%, var(--colorNeutralBackground2))",
-    color: header ? "var(--normal-sheet-palegreen-fg)" : "var(--colorNeutralForeground2)",
+    background: palette.background,
+    color: palette.color,
     fontSize: 11,
     fontWeight: 800,
     letterSpacing: "0.02em",
@@ -14094,13 +14597,10 @@ function thresholdLabelCellStyle(label: MainTargetThresholdRow["label"]): CSSPro
 function thresholdValueCellStyle(
   label: MainTargetThresholdRow["label"],
   highlighted = false,
-  focused = false,
   editable = false,
 ): CSSProperties {
   const header = label === "BV";
-  const baseBackground = header
-    ? "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 58%, var(--colorNeutralBackground1))"
-    : "color-mix(in srgb, var(--colorNeutralForeground1) 8%, var(--colorNeutralBackground1))";
+  const palette = header ? faceBvDrColumnHeaderStyle(highlighted) : hsDarkAreaDataCellStyle(highlighted);
   return {
     position: "relative",
     minWidth: 0,
@@ -14109,18 +14609,10 @@ function thresholdValueCellStyle(
     borderBottom: label === "Exp"
       ? "none"
       : "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 58%, transparent)",
-    outline: focused
-      ? "1.5px solid var(--colorBrandForeground1)"
-      : highlighted
-        ? "1.5px solid var(--colorBrandStroke1)"
-        : "none",
-    outlineOffset: -3,
-    background: highlighted
-      ? `linear-gradient(0deg, color-mix(in srgb, var(--colorBrandBackground2) 54%, transparent), color-mix(in srgb, var(--colorBrandBackground2) 54%, transparent)), ${baseBackground}`
-      : baseBackground,
-    color: header ? "var(--normal-sheet-palegreen-fg)" : "var(--colorNeutralForeground1)",
+    background: palette.background,
+    color: palette.color,
     fontSize: 11,
-    fontWeight: highlighted ? 800 : header ? 700 : 500,
+    fontWeight: header ? 700 : 500,
     cursor: editable ? "text" : "default",
     overflow: "hidden",
     textOverflow: "ellipsis",

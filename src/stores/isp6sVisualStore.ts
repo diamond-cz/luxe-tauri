@@ -29,6 +29,7 @@ const DEFAULT: Isp6sAeVisual = {
   chart_main_t_card_collapsed: [],
   chart_hs_card_order:         ["hsTarget", "hsWeight", "hsBright", "hsMiddle", "hsDark"],
   chart_hs_card_collapsed:     [],
+  chart_hs_area_layout:        "auto",
   chart_ns_card_order:         ["nsTarget", "nsProb", "nsNorT", "nsBT", "nsDT"],
   chart_ns_card_collapsed:     [],
   chart_face_card_collapsed:   [],

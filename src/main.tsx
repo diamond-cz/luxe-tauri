@@ -10,6 +10,8 @@ import "./locales/i18n";
 import App from "./App";
 import "./styles/globals.css";
 
+document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

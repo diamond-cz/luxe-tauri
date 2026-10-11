@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Code24Regular, DataHistogram24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { Code24Regular, DataHistogram24Regular, Save24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { parseCppFile, type CardSourceSpec } from "@/ipc/cppParser";
@@ -542,7 +542,7 @@ function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
             jump_to: "first", highlight: "ranges",
           });
         }}>
-        <TableLink24Regular className="h-4 w-4" />
+        <Code24Regular className="h-4 w-4" />
       </button>
     </div>
   </div>;
