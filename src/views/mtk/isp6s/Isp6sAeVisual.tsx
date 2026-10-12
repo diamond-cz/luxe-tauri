@@ -49,7 +49,7 @@ import {
   computeFaceTouchBadges, computeNormalBadges,
   type NormalBadges, type FaceTouchBadges,
 } from "./badges";
-import type { PreviewMode } from "./ImagePane/ImagePane";
+import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
@@ -156,6 +156,7 @@ export function Isp6sAeVisual({
   const [chartCardTarget, setChartCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [detailsTab, setDetailsTab] = useState<"normal" | "face" | "lce" | "bcompare">("normal");
+  const [sourceEditorBinding, setSourceEditorBinding] = useState<SourceEditorBinding | null>(null);
   const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>("param_map");
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
@@ -487,7 +488,7 @@ export function Isp6sAeVisual({
     patchVis({ preview_mode: "param_map" });
   };
 
-  const setPreviewMode = (m: PreviewMode) => patchVis({ preview_mode: m });
+  const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
 
   // Kept for backward-compatible hidden header actions; layout switching is
   // now exposed through the collapse chevron context menu.
@@ -713,6 +714,8 @@ export function Isp6sAeVisual({
               filePath={filePath ?? ""}
               schema={schema}
               tomlData={imageDir.tomlData}
+              sourceEditor={sourceEditorBinding?.filePath === filePath
+                && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null}
             />
           )}
         </div>
@@ -892,6 +895,7 @@ export function Isp6sAeVisual({
           tomlData={imageDir.tomlData}
           onSelectHeatmapImages={onSelectHeatmapImages}
           onCalculatorSourcePathChange={setCalculatorSourcePath}
+          onSourceEditorBindingChange={setSourceEditorBinding}
           chartCardTarget={chartCardTarget}
           sourceCardTarget={sourceCardTarget}
         />

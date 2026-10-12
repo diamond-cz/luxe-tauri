@@ -23,6 +23,18 @@ import {
 
 export type PreviewMode = "para_check" | "param_map" | "chart_map";
 
+export interface SourceEditorBinding {
+  filePath: string;
+  importRevision: number;
+  resolveFilePath: string | null;
+  text: string;
+  savedText: string;
+  getText: () => string;
+  onTextChange: (text: string) => void;
+  onSave: () => Promise<void>;
+  onSourceJump: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+}
+
 interface Props {
   mode:        PreviewMode | "image" | "image_split";
   toneMode?: boolean;
@@ -37,6 +49,7 @@ interface Props {
   tomlData:    Record<string, string>;
   onSelectHeatmapImages?: (paths: string[]) => void;
   onCalculatorSourcePathChange?: (path: string | null) => void;
+  onSourceEditorBindingChange?: (binding: SourceEditorBinding | null) => void;
   chartCardTarget?: CardJumpTarget;
   sourceCardTarget?: CardJumpTarget;
 }
@@ -54,7 +67,7 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 const sourceHistorySnapshots = new Map<string, { revision: number; text: string }>();
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, chartCardTarget, sourceCardTarget,
+  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, chartCardTarget, sourceCardTarget,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
@@ -228,10 +241,10 @@ export function ImagePane({
     onMode(nextMode);
   };
 
-  const handleSourceJump = (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => {
+  const handleSourceJump = useCallback((label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => {
     setSourceOverride({ label, spec, details });
     onMode("param_map");
-  };
+  }, [onMode]);
 
   const handleBackToChart = useCallback((target?: ChartPreviewTarget) => {
     if (target?.label) {
@@ -284,6 +297,23 @@ export function ImagePane({
     }
     if (current?.text === draft.text) setTempDraft(null);
   }, [filePath]);
+
+  const getDraftText = useCallback(() => sourceDraftRef.current?.text ?? "", []);
+  useEffect(() => {
+    onSourceEditorBindingChange?.(sourceDraft?.filePath === filePath ? {
+      filePath,
+      importRevision,
+      resolveFilePath: draftDirty ? (tempDraftReady ? tempDraft!.path : null) : filePath,
+      text: sourceDraft.text,
+      savedText: sourceDraft.savedText,
+      getText: getDraftText,
+      onTextChange: handleDraftTextChange,
+      onSave: handleSaveDraft,
+      onSourceJump: handleSourceJump,
+    } : null);
+  }, [filePath, importRevision, sourceDraft, draftDirty, tempDraftReady, tempDraft, getDraftText,
+    handleDraftTextChange, handleSaveDraft, handleSourceJump, onSourceEditorBindingChange]);
+  useEffect(() => () => onSourceEditorBindingChange?.(null), [onSourceEditorBindingChange]);
 
   const handleSaveDraftAs = useCallback(async (path: string) => {
     const draft = sourceDraft;
