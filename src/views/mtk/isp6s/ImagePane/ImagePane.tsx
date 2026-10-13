@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@fluentui/react-components";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ImageEntry } from "@/ipc/imageScan";
 import type { ParseResult } from "@/types/cpp_parser";
+import { rememberSourceScroll, type WorkspaceSession } from "../workspaceSession";
 import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
@@ -52,6 +53,7 @@ interface Props {
   onSourceEditorBindingChange?: (binding: SourceEditorBinding | null) => void;
   chartCardTarget?: CardJumpTarget;
   sourceCardTarget?: CardJumpTarget;
+  scrollSession?: WorkspaceSession;
 }
 
 interface CardJumpTarget {
@@ -65,11 +67,30 @@ const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
 ];
 
 const sourceHistorySnapshots = new Map<string, { revision: number; text: string }>();
+const SOURCE_HISTORY_LIMIT = 3;
+
+function sourceHistorySnapshot(path: string) {
+  const snapshot = sourceHistorySnapshots.get(path);
+  if (snapshot) {
+    sourceHistorySnapshots.delete(path);
+    sourceHistorySnapshots.set(path, snapshot);
+  }
+  return snapshot;
+}
+
+function rememberSourceHistory(path: string, snapshot: { revision: number; text: string }) {
+  sourceHistorySnapshots.delete(path);
+  sourceHistorySnapshots.set(path, snapshot);
+  while (sourceHistorySnapshots.size > SOURCE_HISTORY_LIMIT) {
+    sourceHistorySnapshots.delete(sourceHistorySnapshots.keys().next().value!);
+  }
+}
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, chartCardTarget, sourceCardTarget,
+  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, chartCardTarget, sourceCardTarget, scrollSession,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const chartWrapRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
   const [internalCard] = useState<string | undefined>(undefined);
@@ -86,6 +107,22 @@ export function ImagePane({
   const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: Exclude<PreviewMode, "para_check"> =
     mode === "chart_map" ? "chart_map" : "param_map";
+
+  useLayoutEffect(() => {
+    if (effectiveMode !== "chart_map" || !scrollSession) return;
+    const scroller = chartWrapRef.current?.querySelector<HTMLElement>("[data-isp6s-chart-scroll]");
+    const saved = scrollSession.sourceScroll[`${filePath}|chart_map`];
+    if (!scroller || !saved) return;
+    const restore = () => {
+      scroller.scrollTop = saved.top;
+      scroller.scrollLeft = saved.left;
+      if (scroller.scrollTop >= saved.top - 1 && scroller.scrollLeft >= saved.left - 1) observer.disconnect();
+    };
+    const observer = new ResizeObserver(restore);
+    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
+    const frame = window.requestAnimationFrame(restore);
+    return () => { window.cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [effectiveMode, filePath, scrollSession, chartMounted]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -180,10 +217,10 @@ export function ImagePane({
       .then((rawText) => {
         if (cancelled) return;
         const normalized = normalizeSourceText(rawText);
-        const previousSnapshot = sourceHistorySnapshots.get(filePath);
+        const previousSnapshot = sourceHistorySnapshot(filePath);
         const initialText = previousSnapshot?.revision === importRevision ? previousSnapshot.text : normalized.text;
         if (previousSnapshot?.revision !== importRevision) {
-          sourceHistorySnapshots.set(filePath, { revision: importRevision, text: normalized.text });
+          rememberSourceHistory(filePath, { revision: importRevision, text: normalized.text });
         }
         const nextDraft: SourceCodeDraft = {
           filePath,
@@ -376,7 +413,14 @@ export function ImagePane({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {chartMounted && chartFilePath && (!toneMode || toneParsed) && (
-          <div style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}>
+          <div ref={chartWrapRef}
+               style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}
+               onScrollCapture={(event) => {
+                 const target = event.target;
+                 if (target instanceof HTMLElement && target.matches("[data-isp6s-chart-scroll]") && scrollSession) {
+                   rememberSourceScroll(scrollSession, `${filePath}|chart_map`, { top: target.scrollTop, left: target.scrollLeft });
+                 }
+               }}>
             {toneMode && toneParsed ? <ToneChartMapMode
               filePath={chartFilePath}
               parsed={toneParsed}
@@ -438,6 +482,7 @@ export function ImagePane({
             onBackToChart={handleBackToChart}
             sourceFields={toneSourceFields}
             sourceTree={toneImportedPathsMatchDraft ? toneParsed?.tree : undefined}
+            scrollSession={scrollSession}
           />
         )}
       </div>

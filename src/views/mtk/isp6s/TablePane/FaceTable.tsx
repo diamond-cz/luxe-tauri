@@ -274,6 +274,7 @@ export function FaceTable({ tomlData }: Props) {
     <div
       ref={viewportRef}
       className="h-full w-full overflow-auto"
+      data-isp6s-details-scroll="true"
       style={{
         backgroundColor: "var(--normal-sheet-bg, #ffffff)",
         overflowX: fitWidthLayout ? "hidden" : "auto",

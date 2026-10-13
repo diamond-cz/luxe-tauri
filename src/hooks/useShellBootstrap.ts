@@ -50,37 +50,42 @@ export function useShellBootstrap(handlers: ShellHandlers) {
   const setShortcuts  = useShortcutStore((s) => s.setAll);
   const handlersRef   = useRef(handlers);
   handlersRef.current = handlers;
-  const booted = useRef(false);
-
   useEffect(() => {
-    if (booted.current) return;     // StrictMode double-mount guard
-    booted.current = true;
-
-    let unlisteners: Array<() => void> = [];
-    let geomUnlisteners: Array<Promise<() => void>> = [];
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
     let cancelPersist: (() => void) | undefined;
+    const win = getCurrentWindow();
+    const track = async (registration: Promise<() => void>) => {
+      const unlisten = await registration;
+      if (disposed) unlisten();
+      else unlisteners.push(unlisten);
+    };
 
     (async () => {
       /* 1. Load persistent state, hydrate stores. */
       const root = await loadState();
+      if (disposed) return;
       setMainWindow(root.main_window);
       setSettings(root.settings);
       setShortcuts(root.shortcuts);
       useMtkStore.setState((s) => { s.mtk = root.mtk; });
       useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
+      void win.show().catch((err) => console.warn("show main window failed", err));
 
-      /* 2. Boot i18n with the saved locale index. */
+      /* 2. Load translations without delaying the first visible frame. */
       const lang = localeAt(root.settings.language);
-      await bootstrapI18n(lang);
+      void bootstrapI18n(lang).catch((err) => console.warn("i18n bootstrap failed", err));
 
       /* 3. Compute & apply adaptive geometry, then reveal the window. */
       const avail = await currentAvailRect();
+      if (disposed) return;
       const target = await computeAdaptiveGeometry(root.main_window, avail);
+      if (disposed) return;
       await applyWindowGeometry(target);
+      if (disposed) return;
 
       /* 4. Wire close handler: backend decision → quit / hide / ask. */
-      const win = getCurrentWindow();
-      const unCloseRequested = await win.onCloseRequested(async (event) => {
+      await track(win.onCloseRequested(async (event) => {
         const decision: CloseDecision = await resolveCloseDecision();
         if (decision === "tray") {
           event.preventDefault();
@@ -101,11 +106,11 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           event.preventDefault();
           await quitApp().catch(() => {});
         }
-      });
-      unlisteners.push(unCloseRequested);
+      }));
+      if (disposed) return;
 
       /* 5. Listen for global shortcut & tray events. */
-      const unShortcut = await listen<{ action: string }>(
+      await track(listen<{ action: string }>(
         EVT_SHORTCUT_TRIGGERED,
         ({ payload }) => {
           switch (payload.action) {
@@ -115,10 +120,10 @@ export function useShellBootstrap(handlers: ShellHandlers) {
             case "poetry":   fetchPoetry().catch(() => {});                  break;
           }
         },
-      );
-      unlisteners.push(unShortcut);
+      ));
+      if (disposed) return;
 
-      const unTray = await listen<{ kind: string }>(
+      await track(listen<{ kind: string }>(
         EVT_TRAY_ACTION,
         ({ payload }) => {
           switch (payload.kind) {
@@ -130,16 +135,16 @@ export function useShellBootstrap(handlers: ShellHandlers) {
               break;
           }
         },
-      );
-      unlisteners.push(unTray);
+      ));
+      if (disposed) return;
 
-      const unPoetry = await listen<string>(EVT_POETRY_UPDATED, ({ payload }) => {
+      await track(listen<string>(EVT_POETRY_UPDATED, ({ payload }) => {
         usePoetryStore.getState().setLine(payload);
         handlersRef.current.onPoetryChanged?.(payload);
         // Keep window title in sync too — taskbar tooltip / Alt+Tab still uses it.
         win.setTitle(`👀 ${payload}`).catch(() => {});
-      });
-      unlisteners.push(unPoetry);
+      }));
+      if (disposed) return;
 
       /* 6. Persist geometry on resize / move (debounced). */
       const persist = debounceVoid(() => {
@@ -148,8 +153,10 @@ export function useShellBootstrap(handlers: ShellHandlers) {
         );
       }, 300);
       cancelPersist = persist.cancel;
-      geomUnlisteners.push(win.onResized(() => persist()));
-      geomUnlisteners.push(win.onMoved(() => persist()));
+      await track(win.onResized(() => persist()));
+      if (disposed) return;
+      await track(win.onMoved(() => persist()));
+      if (disposed) return;
 
       /* 7. Initial poetry fetch (don't block boot if it fails). */
       fetchPoetry().catch(() => {});
@@ -176,13 +183,14 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           });
       }
     })().catch((err) => {
+      if (disposed) return;
       console.error("[bootstrap]", err);
-      getCurrentWindow().show().catch(() => {});
+      win.show().catch(() => {});
     });
 
     return () => {
+      disposed = true;
       unlisteners.forEach((fn) => fn());
-      geomUnlisteners.forEach((p) => p.then((fn) => fn()));
       cancelPersist?.();
     };
   }, [setMainWindow, setSettings, setShortcuts]);

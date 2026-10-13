@@ -2159,7 +2159,7 @@ export function ChartMapMode({
         </div>
       </div>
 
-      <div className="chart-map-scrollbar-hidden min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2" style={hiddenScrollbarStyle}>
+      <div className="chart-map-scrollbar-hidden min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2" style={hiddenScrollbarStyle} data-isp6s-chart-scroll="true">
         <div style={innerCanvasStyle}>
           {loading && (!isFaceTab || !currentFaceFbtSource) && (
             <div className="mb-2 text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>

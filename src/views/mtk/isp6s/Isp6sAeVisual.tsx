@@ -14,7 +14,7 @@ import {
 } from "@fluentui/react-icons";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { open } from "@tauri-apps/plugin-fs";
 
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
@@ -51,6 +51,7 @@ import {
 } from "./badges";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
+import { workspaceSession, type DetailsTab } from "./workspaceSession";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -95,6 +96,7 @@ const CHART_TARGET_BY_CARD: Record<string, string> = {
   Face: "Face_FLT",
   Touch: "Touch",
 };
+let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
 interface CardJumpTarget {
   label: string;
@@ -128,6 +130,24 @@ interface CaptureMetadata {
   iso: string | null;
 }
 
+const EXIF_READ_LIMIT = 1024 * 1024;
+
+async function readImageExifHeader(path: string): Promise<Uint8Array> {
+  const file = await open(path, { read: true });
+  try {
+    const header = new Uint8Array(EXIF_READ_LIMIT);
+    let length = 0;
+    while (length < header.length) {
+      const count = await file.read(header.subarray(length));
+      if (!count) break;
+      length += count;
+    }
+    return header.subarray(0, length);
+  } finally {
+    await file.close();
+  }
+}
+
 function formatExposureTime(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     if (value < 1) return `1/${Math.round(1 / value)} s`;
@@ -150,14 +170,16 @@ function formatImageMetadata(path: string, data: Record<string, string>, capture
 export function Isp6sAeVisual({
   isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
 }: Props) {
+  const workspaceKey = `${isp}|${tabIdx}`;
+  const session = workspaceSession(workspaceKey);
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
   /** Card that was last clicked — drives the source jump in `param_map` mode. */
   const [chartCardTarget, setChartCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
-  const [detailsTab, setDetailsTab] = useState<"normal" | "face" | "lce" | "bcompare">("normal");
+  const [detailsTab, setDetailsTab] = useState<DetailsTab>(() => session.detailsTab);
   const [sourceEditorBinding, setSourceEditorBinding] = useState<SourceEditorBinding | null>(null);
-  const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>("param_map");
+  const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>(() => session.sourceMode);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
@@ -170,6 +192,38 @@ export function Isp6sAeVisual({
   const exifParsingRef = useRef(false);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
+  const infoScrollRef = useRef<HTMLDivElement | null>(null);
+  const detailsBodyRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = infoScrollRef.current;
+    if (!el || !session.infoScroll) return;
+    el.scrollTop = session.infoScroll.top;
+    el.scrollLeft = session.infoScroll.left;
+  }, [schema, session]);
+
+  useLayoutEffect(() => {
+    const body = detailsBodyRef.current;
+    if (!body) return;
+    const saved = session.detailsScroll[detailsTab];
+    if (!saved) return;
+    let frame: number | null = null;
+    const restore = () => {
+      const scroller = body.querySelector<HTMLElement>(".normal-sheet-viewport, [data-isp6s-details-scroll]");
+      if (!scroller) return false;
+      frame = window.requestAnimationFrame(() => {
+        scroller.scrollTop = saved.top;
+        scroller.scrollLeft = saved.left;
+      });
+      return true;
+    };
+    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
+    if (!restore()) observer.observe(body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [detailsTab, schema, session]);
   const reportWorkspaceDivider = useCallback(() => {
     const rect = document.getElementById(WORKSPACE_DIVIDER_ID)?.getBoundingClientRect();
     if (rect) onWorkspaceDividerChange(rect.left + rect.width / 2);
@@ -192,6 +246,35 @@ export function Isp6sAeVisual({
   const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
   const currentEntry = imageDir.entries[imageDir.current];
   const setImageDir   = useMtkStore((s) => s.setImageDir);
+
+  useEffect(() => {
+    if (!imageDir.dir || imageDir.entries.length === 0) return;
+    if (session.imageDir !== imageDir.dir) {
+      session.imageDir = imageDir.dir;
+      session.imagePath = currentEntry?.jpg_path ?? null;
+      session.imageScroll = null;
+      return;
+    }
+    if (!session.imagePath) {
+      session.imagePath = currentEntry?.jpg_path ?? null;
+      return;
+    }
+    const savedIndex = imageDir.entries.findIndex((entry) => entry.jpg_path === session.imagePath);
+    if (savedIndex >= 0 && savedIndex !== imageDir.current) void onPickImage(savedIndex);
+  // Restore only when the workspace mounts or the folder changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageDir.dir, imageDir.entries]);
+
+  useEffect(() => {
+    if (imageDir.status === "done" && currentEntry
+      && session.imagePath === currentEntry.jpg_path) {
+      session.selectedToml = {
+        entries: imageDir.entries,
+        path: currentEntry.toml_path,
+        data: imageDir.tomlData,
+      };
+    }
+  }, [currentEntry, imageDir.entries, imageDir.status, imageDir.tomlData, session]);
 
   const handleParseExif = async () => {
     if (exifParsingRef.current) return;
@@ -249,7 +332,7 @@ export function Isp6sAeVisual({
     const path = currentEntry.jpg_path;
     (async () => {
       try {
-        const bytes = await readFile(path);
+        const bytes = await readImageExifHeader(path);
         const { parse } = await import("exifr");
         const exif = await parse(bytes, { pick: ["ExposureTime", "ISO", "ISOSpeedRatings", "PhotographicSensitivity"] });
         if (!cancelled) {
@@ -282,9 +365,10 @@ export function Isp6sAeVisual({
 
   useEffect(() => {
     let cancelled = false;
-    getIsp6sSchema()
+    isp6sSchemaPromise ??= getIsp6sSchema();
+    isp6sSchemaPromise
       .then((s) => { if (!cancelled) setSchema(s); })
-      .catch((e) => { if (!cancelled) setErr(String(e)); });
+      .catch((e) => { isp6sSchemaPromise = null; if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
   }, []);
 
@@ -293,6 +377,8 @@ export function Isp6sAeVisual({
   const onPickImage = async (idx: number) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
     const selectedEntry = imageDir.entries[idx];
+    session.imageDir = imageDir.dir;
+    session.imagePath = selectedEntry.jpg_path;
     const imageDirKey = `${isp}|${imageTabIdx}`;
     const selectionIsCurrent = () => {
       const current = useMtkStore.getState().imageDir[imageDirKey];
@@ -300,13 +386,18 @@ export function Isp6sAeVisual({
         && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
     };
     setHeatmapSelection(null);
+    const cachedToml = session.selectedToml?.entries === imageDir.entries
+      && session.selectedToml.path === selectedEntry.toml_path
+      ? session.selectedToml.data : null;
     setImageDir(isp, imageTabIdx, {
       dir: imageDir.dir, entries: imageDir.entries,
-      current: idx, tomlData: {}, status: "loading", message: null,
+      current: idx, tomlData: cachedToml ?? {}, status: cachedToml ? "done" : "loading", message: null,
     });
+    if (cachedToml) return;
     try {
       const tomlData = await loadImageToml(selectedEntry.toml_path);
       if (!selectionIsCurrent()) return;
+      session.selectedToml = { entries: imageDir.entries, path: selectedEntry.toml_path, data: tomlData };
       setImageDir(isp, imageTabIdx, {
         tomlData, status: "done",
         message: `当前 ${imageDir.entries[idx].name}`,
@@ -612,7 +703,11 @@ export function Isp6sAeVisual({
         </div>
 
         {/* Scrollable body */}
-       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3"
+       <div ref={infoScrollRef}
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3"
+            onScroll={(event) => {
+              session.infoScroll = { top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft };
+            }}
             style={{ background: "var(--colorNeutralBackground1)" }}>
          <DndContext
           sensors={sensors}
@@ -674,7 +769,7 @@ export function Isp6sAeVisual({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setDetailsTab(tab.id)}
+                onClick={() => { session.detailsTab = tab.id; setDetailsTab(tab.id); }}
                 className="px-3 text-xs transition-colors"
                 style={{
                   color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)",
@@ -700,7 +795,13 @@ export function Isp6sAeVisual({
             <PanelBottomContract20Regular />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div ref={detailsBodyRef} className="min-h-0 flex-1 overflow-hidden"
+             onScrollCapture={(event) => {
+               const target = event.target;
+               if (target instanceof HTMLElement && target !== detailsBodyRef.current) {
+                 session.detailsScroll[detailsTab] = { top: target.scrollTop, left: target.scrollLeft };
+               }
+             }}>
           {detailsTab === "normal" && <NormalTable tomlData={imageDir.tomlData} />}
           {detailsTab === "face" && <FaceTable tomlData={imageDir.tomlData} />}
           {detailsTab === "lce" && (
@@ -854,12 +955,15 @@ export function Isp6sAeVisual({
           schema={schema}
           toneMode={toneMode}
           filePath={filePath}
+          cppImportRevision={cppImportRevision}
           calculatorSourcePath={calculatorSourcePath}
           entries={imageDir.entries}
           current={imageDir.current}
           selectedHeatmapPaths={selectedHeatmapPaths}
           imageDir={imageDir.dir}
           imageDataRevision={imageDataRevision}
+          scrollPosition={session.imageDir === imageDir.dir ? session.imageScroll : null}
+          onScrollPositionChange={(position) => { session.imageScroll = position; }}
           exifParsing={exifParsing}
           onParseExif={() => void handleParseExif()}
           onPickImage={onPickImage}
@@ -886,7 +990,7 @@ export function Isp6sAeVisual({
           toneParsed={toneParsed}
           importRevision={cppImportRevision}
           mode={toneMode ? tonePreviewMode : visual.preview_mode ?? "param_map"}
-          onMode={toneMode ? setTonePreviewMode : setPreviewMode}
+          onMode={toneMode ? (mode) => { session.sourceMode = mode; setTonePreviewMode(mode); } : (mode) => { session.sourceMode = mode; setPreviewMode(mode); }}
           filePath={filePath ?? ""}
           onCppPathChange={onCppPathChange}
           schema={schema}
@@ -898,6 +1002,7 @@ export function Isp6sAeVisual({
           onSourceEditorBindingChange={setSourceEditorBinding}
           chartCardTarget={chartCardTarget}
           sourceCardTarget={sourceCardTarget}
+          scrollSession={session}
         />
       </Suspense>
     </div>
@@ -960,14 +1065,16 @@ export function Isp6sAeVisual({
           </div>
         )}
         <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
-          <Panel defaultSize={60} minSize={30} className="min-w-0 overflow-hidden">
+          <Panel defaultSize={100 - session.toneSourceSize} minSize={30} className="min-w-0 overflow-hidden">
             <div ref={workspaceLeftRef} className="h-full w-full min-w-0">
               <PanelGroup direction="vertical" className="h-full w-full min-w-0">
-                <Panel defaultSize={58} minSize={25} className="min-h-0 overflow-hidden">
+                <Panel defaultSize={100 - session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden">
                   {renderTablePanel()}
                 </Panel>
                 <ResizeHandle direction="vertical" size={CARD_GAP_PX} />
-                <Panel defaultSize={42} minSize={25} className="min-h-0 overflow-hidden">
+                <Panel defaultSize={session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden" onResize={(size) => {
+                  if (Number.isFinite(size) && size >= 25 && size <= 75) session.toneLceSize = size;
+                }}>
                   <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-lg border"
                        style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
                     <div className="flex h-8 shrink-0 items-end border-b px-2"
@@ -984,7 +1091,9 @@ export function Isp6sAeVisual({
             </div>
           </Panel>
           <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />
-          <Panel defaultSize={40} minSize={25} className="min-w-0 overflow-hidden">
+          <Panel defaultSize={session.toneSourceSize} minSize={25} className="min-w-0 overflow-hidden" onResize={(size) => {
+            if (Number.isFinite(size) && size >= 25 && size <= 70) session.toneSourceSize = size;
+          }}>
             {renderSourceCodePanel()}
           </Panel>
         </PanelGroup>

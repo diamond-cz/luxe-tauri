@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { WorkspaceSession } from "../workspaceSession";
 import { Button } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular,
@@ -36,6 +37,7 @@ interface Props {
   onBackToChart?: (target?: ChartPreviewTarget) => void;
   sourceFields?: FieldEntry[];
   sourceTree?: StructNode;
+  scrollSession?: WorkspaceSession;
 }
 
 export interface SourceOverride {
@@ -151,6 +153,7 @@ export function ParamMapMode({
   onBackToChart,
   sourceFields,
   sourceTree,
+  scrollSession,
 }: Props) {
   const [ranges, setRanges] = useState<Array<[number, number]>>([]);
   const [jumpLine, setJumpLine] = useState(1);
@@ -303,6 +306,7 @@ export function ParamMapMode({
           onTextChange={onDraftTextChange}
           chartJumpLabel={activeLabel}
           rangeGroups={sourceRangeGroupsForLabel(activeLabel)}
+          scrollSession={scrollSession}
           onPreviewChart={(targetLabel) => {
             const label = targetLabel ?? activeLabel;
             onBackToChart?.(label ? { label } : undefined);

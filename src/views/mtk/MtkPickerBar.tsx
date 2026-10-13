@@ -24,9 +24,10 @@ export function MtkPickerBar(props: Props) {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     (async () => {
       const win = getCurrentWindow();
-      unlisten = await win.onDragDropEvent((event) => {
+      const stop = await win.onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === "enter") {
           const slot = hitTest(payload.position);
@@ -57,8 +58,11 @@ export function MtkPickerBar(props: Props) {
           if (path) props.onCppPathChange(path);
         }
       });
-    })();
+      if (disposed) stop();
+      else unlisten = stop;
+    })().catch((error) => console.warn("register MTK drop listener failed", error));
     return () => {
+      disposed = true;
       lastHoverValidRef.current = null;
       unlisten?.();
     };

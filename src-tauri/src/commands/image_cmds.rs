@@ -23,8 +23,10 @@ pub async fn parse_image_exif(
 }
 
 #[tauri::command]
-pub fn scan_image_dir(dir: String) -> AppResult<Vec<image_scan::ImageEntry>> {
-    image_scan::scan_directory(&PathBuf::from(dir))
+pub async fn scan_image_dir(dir: String) -> AppResult<Vec<image_scan::ImageEntry>> {
+    tauri::async_runtime::spawn_blocking(move || image_scan::scan_directory(&PathBuf::from(dir)))
+        .await
+        .map_err(|err| AppError::Other(format!("image scan task failed: {err}")))?
 }
 
 #[tauri::command]

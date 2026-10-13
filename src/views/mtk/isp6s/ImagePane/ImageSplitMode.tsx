@@ -32,7 +32,6 @@ type HistogramPalette = {
   composite: GlobalCompositeOperation;
 };
 
-const HISTOGRAM_EXACT_MAX_PIXELS = 16 * 1024 * 1024;
 const HISTOGRAM_MAX_SAMPLE_EDGE = 1024;
 const HISTOGRAM_MAX_SAMPLE_PIXELS = 1024 * 768;
 const HISTOGRAM_TICKS = [0, 51, 102, 153, 204, 255] as const;
@@ -59,13 +58,14 @@ export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: P
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
+      if (cancelled) return;
       const sample = getHistogramSampleSize(img);
       const off = document.createElement("canvas");
       off.width = sample.width;
       off.height = sample.height;
       const offCtx = off.getContext("2d");
       if (!offCtx) return;
-      // Use exact pixels for normal captures; only downsample very large images.
+      // Keep histogram allocation bounded even for high-resolution captures.
       offCtx.imageSmoothingEnabled = sample.scale === 1 ? true : false;
       offCtx.drawImage(img, 0, 0, off.width, off.height);
       const data = offCtx.getImageData(0, 0, off.width, off.height).data;
@@ -86,6 +86,9 @@ export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: P
 
     return () => {
       cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute("src");
     };
   }, [url]);
 
@@ -236,9 +239,6 @@ function prepareHistogramCanvas(canvas: HTMLCanvasElement) {
 function getHistogramSampleSize(img: HTMLImageElement) {
   const width = Math.max(1, img.naturalWidth || img.width);
   const height = Math.max(1, img.naturalHeight || img.height);
-  if (width * height <= HISTOGRAM_EXACT_MAX_PIXELS) {
-    return { width, height, scale: 1 };
-  }
   const edgeScale = Math.min(1, HISTOGRAM_MAX_SAMPLE_EDGE / Math.max(width, height));
   const pixelScale = Math.min(1, Math.sqrt(HISTOGRAM_MAX_SAMPLE_PIXELS / (width * height)));
   const scale = Math.min(edgeScale, pixelScale);

@@ -16,6 +16,7 @@ import {
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { cppGetFieldsByLine } from "@/ipc/cppParser";
 import type { FieldEntry, StructNode } from "@/types/cpp_parser";
+import type { WorkspaceSession } from "./workspaceSession";
 
 interface Props {
   draft: SourceCodeDraft | null;
@@ -33,6 +34,7 @@ interface Props {
   onPreviewChart?: (targetLabel?: string) => void;
   chartJumpLabel?: string;
   rangeGroups?: SourceRangeGroup[];
+  scrollSession?: WorkspaceSession;
 }
 
 export interface SourceRangeGroup {
@@ -93,8 +95,10 @@ export function SourceCodeView({
   onPreviewChart,
   chartJumpLabel,
   rangeGroups,
+  scrollSession,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const restoredFileRef = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const copyTimerRef = useRef<number | null>(null);
   const [scrollFrame, setScrollFrame] = useState({ top: 0, height: 0 });
@@ -344,6 +348,17 @@ export function SourceCodeView({
     setActiveColumn(sourceSelection.columnStart ?? new TextEncoder().encode(lineText.slice(0, tokenStart)).length);
   }, [jumpKey, draft?.loadVersion, sourceSelection]);
 
+  useLayoutEffect(() => {
+    const file = draft?.filePath;
+    const scroller = scrollerRef.current;
+    if (!file || !scroller || restoredFileRef.current === file) return;
+    const saved = scrollSession?.sourceScroll[file];
+    if (!saved) return;
+    scroller.scrollTop = saved.top;
+    scroller.scrollLeft = saved.left;
+    restoredFileRef.current = file;
+  }, [draft?.filePath, draft?.loadVersion, scrollSession]);
+
   useEffect(() => {
     if (!jumpLine) return;
     setActiveLine(clampNumber(jumpLine, 1, lineCount));
@@ -403,6 +418,9 @@ export function SourceCodeView({
         style={sourceScrollerStyle}
         onScroll={(event) => {
           const target = event.currentTarget;
+          if (draft?.filePath && scrollSession) {
+            scrollSession.sourceScroll[draft.filePath] = { top: target.scrollTop, left: target.scrollLeft };
+          }
           setScrollFrame((current) => {
             const next = { top: target.scrollTop, height: target.clientHeight };
             return current.top === next.top && current.height === next.height ? current : next;

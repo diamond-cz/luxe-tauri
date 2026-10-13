@@ -437,7 +437,7 @@ export function ToneChartMapMode({
                   }}>{item}</button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3" role="tabpanel">
+      <div className="min-h-0 flex-1 overflow-auto p-3" role="tabpanel" data-isp6s-chart-scroll="true">
         {error && <div className="mb-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</div>}
         {tab === "LCE" ? (
           <div className="flex flex-col gap-3">

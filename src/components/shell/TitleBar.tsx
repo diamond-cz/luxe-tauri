@@ -37,12 +37,23 @@ export function TitleBar({ sideNavVisible, onToggleSideNav }: TitleBarProps) {
 
   useEffect(() => {
     const win = getCurrentWindow();
+    let disposed = false;
     let unlisten: (() => void) | undefined;
-    win.isMaximized().then(setMaximized).catch(() => {});
+    win.isMaximized().then((value) => {
+      if (!disposed) setMaximized(value);
+    }).catch(() => {});
     win.onResized(() => {
-      win.isMaximized().then(setMaximized).catch(() => {});
-    }).then((fn) => { unlisten = fn; }).catch(() => {});
-    return () => { unlisten?.(); };
+      win.isMaximized().then((value) => {
+        if (!disposed) setMaximized(value);
+      }).catch(() => {});
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   const togglePin = useCallback(async () => {

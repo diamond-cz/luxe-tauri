@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
   Image24Regular,
+  Person24Regular,
   TableSimple24Regular,
   ChartMultiple24Regular,
   FolderAdd24Regular,
@@ -24,6 +25,8 @@ import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
+import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
+import type { ScrollPosition } from "../workspaceSession";
 
 type ImageSortDirection = "asc" | "desc";
 type ImageSortState = {
@@ -53,6 +56,7 @@ interface Props {
   schema:    Isp6sSchemaRoot;
   toneMode?: boolean;
   filePath:  string | null;
+  cppImportRevision: number;
   calculatorSourcePath: string | null;
   entries:   ImageEntry[];
   current:   number;
@@ -67,6 +71,8 @@ interface Props {
   onParseExif: () => void;
   exifParsing: boolean;
   imageDataRevision: number;
+  scrollPosition?: ScrollPosition | null;
+  onScrollPositionChange?: (position: ScrollPosition) => void;
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png"];
@@ -80,6 +86,9 @@ const IMAGE_DROPDOWN_THUMBNAIL_CACHE_LIMIT = 160;
 const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 36;
 const IMAGE_TABLE_ROW_HEIGHT = 58;
+const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
+const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 10;
+const IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH = 62;
 const IMAGE_TABLE_OVERSCAN = 12;
 const IMAGE_TABLE_LOAD_DEBOUNCE_MS = 8;
 const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
@@ -90,6 +99,76 @@ const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-contr
 const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
+const IMAGE_TABLE_GLOBAL_CACHE_LIMIT = 4096;
+
+// TablePane is remounted when switching AE Basic/ToneMap. Keep parsed fields
+// outside the component so switching tabs can reuse the data immediately.
+const globalImageTableFieldCache = new WeakMap<ImageEntry[], {
+  revision: number;
+  rows: Map<string, Record<string, string>>;
+}>();
+const faceCalculatorCache = new Map<string, Promise<FaceLinkTargetCalculator>>();
+const globalImageKinds = new WeakMap<ImageEntry[], {
+  keySignature: string;
+  revision: number;
+  calculator: FaceLinkTargetCalculator;
+  byPath: Record<string, ImageTableKind>;
+}>();
+const imageTableThumbnailCache = new WeakMap<ImageEntry, string>();
+
+function getFaceCalculator(filePath: string | null, revision: string): Promise<FaceLinkTargetCalculator> {
+  const key = `${revision}\u0000${filePath ?? ""}`;
+  const cached = faceCalculatorCache.get(key);
+  if (cached) return cached;
+  const pending = import("../ImagePane/ChartMapMode")
+    .then(({ loadFaceLinkTargetCalculator }) => loadFaceLinkTargetCalculator(filePath));
+  faceCalculatorCache.set(key, pending);
+  pending.catch(() => { if (faceCalculatorCache.get(key) === pending) faceCalculatorCache.delete(key); });
+  while (faceCalculatorCache.size > 4) {
+    const oldest = faceCalculatorCache.keys().next().value;
+    if (oldest) faceCalculatorCache.delete(oldest);
+  }
+  return pending;
+}
+
+function globalImageTableCacheKey(path: string, keySignature: string): string {
+  return `${keySignature}\u0000${path}`;
+}
+
+function readGlobalImageTableFields(entries: ImageEntry[], revision: number, path: string, keySignature: string): Record<string, string> | undefined {
+  const key = globalImageTableCacheKey(path, keySignature);
+  const saved = globalImageTableFieldCache.get(entries);
+  if (saved?.revision !== revision) return undefined;
+  const cache = saved.rows;
+  const value = cache?.get(key);
+  if (!value) return undefined;
+  cache?.delete(key);
+  cache?.set(key, value);
+  return value;
+}
+
+function rememberGlobalImageTableFields(
+  entries: ImageEntry[],
+  revision: number,
+  rows: Record<string, Record<string, string>>,
+  keySignature: string,
+) {
+  let saved = globalImageTableFieldCache.get(entries);
+  if (saved?.revision !== revision) {
+    saved = { revision, rows: new Map() };
+    globalImageTableFieldCache.set(entries, saved);
+  }
+  const cache = saved.rows;
+  for (const [path, data] of Object.entries(rows)) {
+    const key = globalImageTableCacheKey(path, keySignature);
+    cache.delete(key);
+    cache.set(key, data);
+  }
+  while (cache.size > IMAGE_TABLE_GLOBAL_CACHE_LIMIT) {
+    const stale = cache.keys().next().value;
+    if (stale) cache.delete(stale);
+  }
+}
 const FACE_LINK_TARGET_IMAGE_KEYS = [
   "AE_TAG_FACE_20_CWV", "AE_TAG_CWV", "AE_TAG_FLT_FDY", "AE_TAG_FLT_DR",
   "AE_TAG_NS_PROB", "AE_TAG_FACE_20_NORMAL_TARGET", "AE_TAG_FLT_OE_SYS",
@@ -162,6 +241,7 @@ export function TablePane({
   schema,
   toneMode = false,
   filePath,
+  cppImportRevision,
   calculatorSourcePath,
   entries,
   current,
@@ -176,6 +256,8 @@ export function TablePane({
   onParseExif,
   exifParsing,
   imageDataRevision,
+  scrollPosition,
+  onScrollPositionChange,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
@@ -368,6 +450,9 @@ export function TablePane({
         <ImageTab schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
           imageDataRevision={imageDataRevision}
+          cppImportRevision={cppImportRevision}
+          scrollPosition={scrollPosition}
+          onScrollPositionChange={onScrollPositionChange}
           entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
       </div>
     </div>
@@ -765,20 +850,33 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
 }
 
 function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; columnWidth: number }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const thumbnailSize = Math.max(1, Math.min(48, columnWidth - 18));
+  const [url, setUrl] = useState<string | null>(() => imageTableThumbnailCache.get(entry) ?? null);
+  const thumbnailSize = Math.max(1, Math.min(IMAGE_TABLE_THUMBNAIL_SIZE, columnWidth - 10));
 
   useEffect(() => {
+    const cached = imageTableThumbnailCache.get(entry);
+    if (cached) {
+      setUrl(cached);
+      return;
+    }
     let cancelled = false;
     loadImageThumbnailBatch([entry.jpg_path], 52)
       .then((batch) => {
-        if (!cancelled) setUrl(batch[entry.jpg_path] || safeImageUrl(entry.jpg_path));
+        if (!cancelled) {
+          const next = batch[entry.jpg_path] || safeImageUrl(entry.jpg_path);
+          if (next) imageTableThumbnailCache.set(entry, next);
+          setUrl(next);
+        }
       })
       .catch(() => {
-        if (!cancelled) setUrl(safeImageUrl(entry.jpg_path));
+        if (!cancelled) {
+          const next = safeImageUrl(entry.jpg_path);
+          if (next) imageTableThumbnailCache.set(entry, next);
+          setUrl(next);
+        }
       });
     return () => { cancelled = true; };
-  }, [entry.jpg_path]);
+  }, [entry]);
 
   return (
     <span style={{
@@ -797,24 +895,32 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 }
 
 export function ImageTab({
-  schema, toneMode = false, filePath, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
+  schema, toneMode = false, filePath, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
   entries, current, selectedHeatmapPaths, onPick,
   imageDataRevision = 0,
+  scrollPosition,
+  onScrollPositionChange,
 }: {
   schema:   Isp6sSchemaRoot;
   toneMode?: boolean;
   filePath: string | null;
+  cppImportRevision: number;
   calculatorSourcePath?: string | null;
   parseAllVersion?: number;
   applyAllVersion?: number;
   onParseProgress?: (progress: { done: number; total: number; error?: string } | null) => void;
   imageDataRevision?: number;
+  scrollPosition?: ScrollPosition | null;
+  onScrollPositionChange?: (position: ScrollPosition) => void;
   entries:  ImageEntry[];
   current:  number;
   selectedHeatmapPaths: string[];
   onPick:   (idx: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const restoreScrollRef = useRef(scrollPosition);
+  const preserveRestoredScrollRef = useRef(Boolean(scrollPosition));
+  const filterMountedRef = useRef(false);
   const tableWindowPathsRef = useRef<string[]>([]);
   const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
   const tableFieldAccessOrderRef = useRef<string[]>([]);
@@ -832,6 +938,7 @@ export function ImageTab({
     [schema, toneMode],
   );
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
+  const faceFdyKey = schema.Image?.FDY ?? "AE_TAG_FLT_FDY";
   const tableColumns = useMemo<ImageTableColumn[]>(
     () => [
       { id: "idx", kind: "idx", label: "idx", align: "center" },
@@ -905,12 +1012,111 @@ export function ImageTab({
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
+  const [showScene, setShowScene] = useState(true);
+  const [showPortrait, setShowPortrait] = useState(true);
+  const [imageKinds, setImageKinds] = useState<{
+    entries: ImageEntry[];
+    keySignature: string;
+    revision: number;
+    calculator: FaceLinkTargetCalculator;
+    byPath: Record<string, ImageTableKind>;
+  } | null>(null);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const saved = restoreScrollRef.current;
+    if (!el || !saved) return;
+    el.scrollTop = saved.top;
+    el.scrollLeft = saved.left;
+    scrollTopRef.current = el.scrollTop;
+    setScrollTop(el.scrollTop);
+    restoreScrollRef.current = null;
+  }, [entries]);
+
+  useEffect(() => {
+    setShowScene(true);
+    setShowPortrait(true);
+  }, [entries, imageDataRevision]);
+
+  useEffect(() => {
+    if (!faceLinkTargetCalculator || toneMode || entries.length === 0) return;
+    const savedKinds = globalImageKinds.get(entries);
+    if (savedKinds?.revision === imageDataRevision
+      && savedKinds.keySignature === imageTomlKeySignature
+      && savedKinds.calculator === faceLinkTargetCalculator
+      && !allParsedRows) {
+      setImageKinds({ entries, ...savedKinds });
+      return;
+    }
+    let cancelled = false;
+    const publishKinds = (byPath: Record<string, ImageTableKind>) => {
+      const result = { keySignature: imageTomlKeySignature, revision: imageDataRevision, calculator: faceLinkTargetCalculator, byPath };
+      globalImageKinds.set(entries, result);
+      setImageKinds({ entries, ...result });
+    };
+    const extraKeys = extraCols.map(([, key]) => key);
+    const classifyBatch = (rows: Record<string, Record<string, string>>, byPath: Record<string, ImageTableKind>) => {
+      for (const [path, data] of Object.entries(rows)) {
+        if (path in byPath) continue;
+        const face = imageFaceTargetValues(faceLinkTargetCalculator(data, faceBvKey));
+        byPath[path] = classifyImageTableRow(data, face, faceFdyKey, extraKeys);
+      }
+    };
+    void (async () => {
+      const byPath: Record<string, ImageTableKind> = {};
+      const cachedRows: Record<string, Record<string, string>> = {};
+      for (const entry of entries) {
+        const cached = readGlobalImageTableFields(entries, imageDataRevision, entry.toml_path, imageTomlKeySignature);
+        if (cached) cachedRows[entry.toml_path] = cached;
+      }
+      classifyBatch(cachedRows, byPath);
+      if (allParsedRows) {
+        rememberGlobalImageTableFields(entries, imageDataRevision, allParsedRows, imageTomlKeySignature);
+        classifyBatch(allParsedRows, byPath);
+      }
+      try {
+        const paths = entries.map((entry) => entry.toml_path).filter((path) => !(path in byPath));
+        if (paths.length === 0) {
+          if (!cancelled) publishKinds(byPath);
+          return;
+        }
+        for (let start = 0; start < paths.length; start += 128) {
+          const batch = await loadImageTomlFieldsBatch(paths.slice(start, start + 128), imageTomlKeys);
+          if (cancelled) return;
+          rememberGlobalImageTableFields(entries, imageDataRevision, batch, imageTomlKeySignature);
+          classifyBatch(batch, byPath);
+        }
+        if (!cancelled) publishKinds(byPath);
+      } catch (error) {
+        if (!cancelled) console.warn("Image table classification failed", error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [allParsedRows, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, toneMode]);
+
+  const classifiedKinds = imageKinds?.entries === entries
+    && imageKinds.keySignature === imageTomlKeySignature
+    && imageKinds.revision === imageDataRevision
+    && imageKinds.calculator === faceLinkTargetCalculator
+    ? imageKinds.byPath : null;
+  const hasScene = entries.some((entry) => classifiedKinds?.[entry.toml_path] === "scene");
+  const hasPortrait = entries.some((entry) => classifiedKinds?.[entry.toml_path] === "portrait");
+  const bothKinds = hasScene && hasPortrait;
+  const classificationReady = Boolean(classifiedKinds);
+  const showSceneIcon = classificationReady ? hasScene : true;
+  const showPortraitIcon = classificationReady && hasPortrait;
+  const sceneOnly = (Boolean(classifiedKinds) && hasScene && !hasPortrait)
+    || (bothKinds && showScene && !showPortrait);
+  const displayedColumns = useMemo(() => orderedColumns.filter((column) => !sceneOnly || (
+    column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr"
+    && column.label !== "FaceSt" && column.label !== "1sSt"
+  )), [orderedColumns, sceneOnly]);
 
   useEffect(() => {
     let cancelled = false;
-    import("../ImagePane/ChartMapMode")
-      .then(({ loadFaceLinkTargetCalculator }) => loadFaceLinkTargetCalculator(requestedCalculatorPath))
+    const calculatorRevision = `${cppImportRevision}:${applyAllVersion}`;
+    getFaceCalculator(requestedCalculatorPath, calculatorRevision)
       .then((calculate) => {
         if (!cancelled) setFaceLinkTargetState({ filePath: requestedCalculatorPath, calculate });
       })
@@ -918,7 +1124,7 @@ export function ImageTab({
         if (!cancelled) setFaceLinkTargetState(null);
       });
     return () => { cancelled = true; };
-  }, [filePath, requestedCalculatorPath, applyAllVersion]);
+  }, [filePath, requestedCalculatorPath, applyAllVersion, cppImportRevision]);
 
   useEffect(() => {
     if (parseAllVersion === 0) return;
@@ -948,7 +1154,9 @@ export function ImageTab({
   }, [entries, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
 
   const sortedRows = useMemo(() => {
-    const rows = entries.map((entry, index) => ({ e: entry, i: index }));
+    const rows = entries.map((entry, index) => ({ e: entry, i: index }))
+      .filter(({ e }) => !bothKinds || !classifiedKinds
+        || shouldShowImageTableRow(classifiedKinds[e.toml_path] ?? "na", showScene, showPortrait));
     if (!sortControlsEnabled || !sortState) return rows;
 
     return rows.slice().sort((a, b) => {
@@ -961,7 +1169,7 @@ export function ImageTab({
       if (av === bv) return a.i - b.i;
       return av < bv ? -direction : direction;
     });
-  }, [entries, sortControlsEnabled, sortState, sortValues]);
+  }, [bothKinds, classifiedKinds, entries, showPortrait, showScene, sortControlsEnabled, sortState, sortValues]);
 
   const currentDisplayIndex = useMemo(
     () => sortedRows.findIndex((row) => row.i === current),
@@ -1103,7 +1311,16 @@ export function ImageTab({
     tableFieldCacheRef.current = {};
     tableFieldAccessOrderRef.current = [];
     loadingTableFieldPathsRef.current.clear();
-    setTomls({});
+    const cachedRows: Record<string, Record<string, string>> = {};
+    for (const entry of entries) {
+      const cached = readGlobalImageTableFields(entries, imageDataRevision, entry.toml_path, imageTomlKeySignature);
+      if (cached) {
+        cachedRows[entry.toml_path] = cached;
+        tableFieldCacheRef.current[entry.toml_path] = cached;
+        tableFieldAccessOrderRef.current.push(entry.toml_path);
+      }
+    }
+    setTomls(cachedRows);
   }, [entries, imageTomlKeySignature, imageDataRevision]);
 
   useEffect(() => {
@@ -1162,6 +1379,7 @@ export function ImageTab({
       order.push(path);
       cache[path] = data;
     }
+    rememberGlobalImageTableFields(entries, imageDataRevision, batch, tableFieldKeySignatureRef.current);
 
     while (order.length > IMAGE_TABLE_FIELD_CACHE_LIMIT) {
       const stalePath = order.shift();
@@ -1245,6 +1463,7 @@ export function ImageTab({
   function pickDisplayRow(displayIndex: number) {
     const nextRow = sortedRows[displayIndex];
     if (!nextRow) return;
+    preserveRestoredScrollRef.current = false;
     ensureImageTableRowVisible(displayIndex);
     onPick(nextRow.i);
   }
@@ -1254,7 +1473,8 @@ export function ImageTab({
     if (sortedRows.length === 0) return;
     event.preventDefault();
 
-    const fallbackIndex = Math.max(0, Math.min(current, sortedRows.length - 1));
+    const nextSourceIndex = sortedRows.findIndex(({ i }) => i > current);
+    const fallbackIndex = nextSourceIndex < 0 ? sortedRows.length - 1 : nextSourceIndex;
     const activeIndex = currentDisplayIndex >= 0 ? currentDisplayIndex : fallbackIndex;
     const nextIndex = event.key === "ArrowUp"
       ? Math.max(0, activeIndex - 1)
@@ -1311,7 +1531,8 @@ export function ImageTab({
   }
 
   function swapImageTableColumns(firstId: string, secondId: string) {
-    if (firstId === secondId || firstId === "idx" || secondId === "idx") return;
+    if (firstId === secondId || firstId === "idx" || secondId === "idx"
+      || firstId === "thumbnail" || secondId === "thumbnail") return;
     setColumnOrder((current) => {
       const next = mergeImageTableColumnOrder(
         current,
@@ -1395,10 +1616,22 @@ export function ImageTab({
   }
 
   useEffect(() => {
-    if (currentDisplayIndex >= 0) {
+    if (!preserveRestoredScrollRef.current && currentDisplayIndex >= 0) {
       ensureImageTableRowVisible(currentDisplayIndex);
     }
   }, [currentDisplayIndex]);
+
+  useEffect(() => {
+    if (!filterMountedRef.current) {
+      filterMountedRef.current = true;
+      return;
+    }
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    scrollTopRef.current = 0;
+    setScrollTop(0);
+  }, [showScene, showPortrait]);
 
   useEffect(() => {
     const firstPath = selectedHeatmapPaths[0];
@@ -1487,7 +1720,7 @@ export function ImageTab({
   }, [imageTomlKeySignature, imageTomlKeys, tablePrefetchPaths, tablePrefetchSignature]);
 
 
-  const colSpan = orderedColumns.length;
+  const colSpan = displayedColumns.length;
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
   const nameColumnWidth = useMemo(() => entries.reduce(
@@ -1498,7 +1731,7 @@ export function ImageTab({
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       if (column.kind === "thumbnail") {
-        byId[column.id] = Math.max(72, estimateImageColumnTextWidth(column.label));
+        byId[column.id] = bothKinds ? IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH : IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH;
         continue;
       }
       if (column.kind === "name") {
@@ -1520,25 +1753,27 @@ export function ImageTab({
           : column.kind === "normalCwr" ? target?.normalCwr ?? "-"
           : column.kind === "backCwr" ? target?.backCwr ?? "-"
           : column.kind === "cwr" ? target?.cwr ?? "-"
-          : target?.delta ?? "-";
+          : sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
         width = Math.max(width, estimateImageColumnTextWidth(text));
       }
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, entries.length, nameColumnWidth, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, bothKinds, entries.length, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       const fallback = baseColumnWidths.byId[column.id] ?? 72;
-      byId[column.id] = columnWidthOverrides[column.id] ?? fallback;
+      const width = columnWidthOverrides[column.id] ?? fallback;
+      byId[column.id] = column.kind === "thumbnail" && bothKinds
+        ? Math.max(IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH, width) : width;
     }
     return {
       byId,
-      table: orderedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
+      table: displayedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
     };
-  }, [baseColumnWidths, columnOrder, columnWidthOverrides, orderedColumns, tableColumns]);
+  }, [baseColumnWidths, bothKinds, columnWidthOverrides, displayedColumns, tableColumns]);
 
   const startColumnResize = (column: string, initialWidth: number, minWidth: number) =>
     (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -1575,6 +1810,7 @@ export function ImageTab({
       }}
       onScroll={(event) => {
         const nextScrollTop = event.currentTarget.scrollTop;
+        onScrollPositionChange?.({ top: nextScrollTop, left: event.currentTarget.scrollLeft });
         scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
         scrollTopRef.current = nextScrollTop;
         setScrollTop(nextScrollTop);
@@ -1591,7 +1827,7 @@ export function ImageTab({
                width: columnWidths.table,
              }}>
         <colgroup>
-          {orderedColumns.map((column) => (
+          {displayedColumns.map((column) => (
             <col key={column.id} style={{ width: columnWidths.byId[column.id] }} />
           ))}
         </colgroup>
@@ -1601,12 +1837,12 @@ export function ImageTab({
           position: "sticky", top: 0, zIndex: 3,
           }}>
           <tr>
-            {orderedColumns.map((column) => {
+            {displayedColumns.map((column) => {
               const active = column.kind === "extra" && sortState?.key === column.key;
               const minWidth = column.kind === "idx"
                 ? 34
                 : column.kind === "thumbnail"
-                  ? 56
+                  ? bothKinds ? IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH : IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH
                   : column.kind === "name"
                     ? 120
                     : 52;
@@ -1616,16 +1852,40 @@ export function ImageTab({
                   columnId={column.id}
                   align={column.align}
                   dragOver={dragOverColumnId === column.id}
-                  stickyLeft={column.kind === "idx"}
-                  onPointerDown={column.kind === "idx" ? undefined : startImageTableColumnDrag(column.id)}
+                  stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
+                  onPointerDown={column.kind === "idx" || column.kind === "thumbnail" ? undefined : startImageTableColumnDrag(column.id)}
                   onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
                 >
                   {column.kind === "idx" ? (
-                    <HoverTooltip content="IDX 鍘熷椤哄簭" positioning="below-center" inline>
+                    <HoverTooltip content="IDX 原始顺序" positioning="below-center" inline>
                       <span>idx</span>
                     </HoverTooltip>
                   ) : column.kind === "thumbnail" ? (
-                    column.label
+                    <span className="inline-flex items-center justify-center gap-1">
+                      {classificationReady && !hasScene && !hasPortrait && (
+                        <span aria-label="图片无法解析" className="text-[10px]">NA</span>
+                      )}
+                      {(["scene", "portrait"] as const).filter((kind) => kind === "scene" ? showSceneIcon : showPortraitIcon).map((kind) => {
+                        const enabled = kind === "scene" ? showScene : showPortrait;
+                        const label = kind === "scene" ? "空景" : "人像";
+                        return <HoverTooltip key={kind} content={bothKinds ? `${label}（左键筛选）` : label} positioning="below-center" inline>
+                          <button
+                            type="button"
+                            className="inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 text-inherit"
+                            style={{ opacity: bothKinds && !enabled ? 0.35 : 1, cursor: bothKinds ? "pointer" : "default" }}
+                            aria-label={label}
+                            aria-pressed={bothKinds ? enabled : undefined}
+                            disabled={!bothKinds}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={() => kind === "scene" ? setShowScene((value) => !value) : setShowPortrait((value) => !value)}
+                            onContextMenu={(event) => event.preventDefault()}
+                          >
+                            {kind === "scene" ? <Image24Regular className="h-4 w-4" aria-hidden="true" />
+                              : <Person24Regular className="h-4 w-4" aria-hidden="true" />}
+                          </button>
+                        </HoverTooltip>;
+                      })}
+                    </span>
                   ) : column.kind === "name" ? (
                     <ImageSortToggleHeader
                       enabled={sortControlsEnabled}
@@ -1664,6 +1924,7 @@ export function ImageTab({
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
                   onClick={() => {
+                    preserveRestoredScrollRef.current = false;
                     scrollRef.current?.focus({ preventScroll: true });
                     onPick(i);
                   }}
@@ -1673,11 +1934,12 @@ export function ImageTab({
                      background: i === current ? "var(--colorBrandBackground2)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "transparent",
                      color: i === current ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground1)",
                    }}>
-                 {orderedColumns.map((column) => (
+                 {displayedColumns.map((column) => (
                    <Td
                      key={column.id}
                      align={column.align}
-                     stickyLeft={column.kind === "idx"}
+                     compact={column.kind === "thumbnail"}
+                     stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
                      stickyBackground={i === current ? "var(--colorBrandBackground)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "var(--colorNeutralBackground3)"}
                    >
                      {column.kind === "idx"
@@ -1694,6 +1956,8 @@ export function ImageTab({
                              ? target?.backCwr ?? "-"
                            : column.kind === "cwr"
                              ? target?.cwr ?? "-"
+                             : column.kind === "delta" && sceneOnly
+                               ? <span style={faceTargetDeltaStyle(target?.normalDelta ?? null)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
                              : column.kind === "delta"
                                ? <><span style={faceTargetDeltaStyle(target?.normalDelta ?? null)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
                                    <span>|</span>
@@ -1909,7 +2173,7 @@ function LcePreviewInfoTable({
 }) {
   const items = schema.preview_info?.items ?? [];
   return (
-    <div className="h-full w-full overflow-auto p-3">
+    <div className="h-full w-full overflow-auto p-3" data-isp6s-details-scroll="true">
       <table className="w-full text-xs" style={{ fontFamily: "ui-monospace, monospace" }}>
         <tbody>
           {(items as LcePreviewInfoItem[]).map((it, i) => (
@@ -2045,7 +2309,10 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
       .find((candidate) => next.includes(candidate));
     next.splice(followingId ? next.indexOf(followingId) : next.length, 0, id);
   }
-  if (defaults.includes("idx")) return ["idx", ...next.filter((id) => id !== "idx")];
+  if (defaults.includes("idx")) {
+    return ["idx", ...(defaults.includes("thumbnail") ? ["thumbnail"] : []),
+      ...next.filter((id) => id !== "idx" && id !== "thumbnail")];
+  }
   return next;
 }
 
@@ -2183,7 +2450,7 @@ function Th({
   onResizeStart,
   columnId,
   dragOver = false,
-  stickyLeft = false,
+  stickyLeft,
   onPointerDown,
 }: {
   children: React.ReactNode;
@@ -2191,7 +2458,7 @@ function Th({
   onResizeStart?: (event: ReactPointerEvent<HTMLSpanElement>) => void;
   columnId?: string;
   dragOver?: boolean;
-  stickyLeft?: boolean;
+  stickyLeft?: number;
   onPointerDown?: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
 }) {
   return (
@@ -2203,10 +2470,10 @@ function Th({
           border: "1px solid var(--colorNeutralStroke2)",
           height: IMAGE_TABLE_HEADER_HEIGHT,
           boxSizing: "border-box",
-          position: stickyLeft ? "sticky" : undefined,
-          left: stickyLeft ? 0 : undefined,
-          zIndex: stickyLeft ? 4 : undefined,
-          background: dragOver ? "var(--colorBrandBackground2)" : stickyLeft ? "var(--colorNeutralBackground3)" : undefined,
+          position: stickyLeft !== undefined ? "sticky" : undefined,
+          left: stickyLeft,
+          zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 5 : 4) : undefined,
+          background: dragOver ? "var(--colorBrandBackground2)" : stickyLeft !== undefined ? "var(--colorNeutralBackground3)" : undefined,
           boxShadow: dragOver ? "inset 2px 0 0 var(--colorBrandForeground1)" : undefined,
           cursor: onPointerDown ? "grab" : undefined,
         }}>
@@ -2236,27 +2503,29 @@ function Th({
 function Td({
   children,
   align = "left",
-  stickyLeft = false,
+  compact = false,
+  stickyLeft,
   stickyBackground,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
-  stickyLeft?: boolean;
+  compact?: boolean;
+  stickyLeft?: number;
   stickyBackground?: string;
 }) {
   return (
-    <td className="px-2 py-1"
+    <td className={compact ? "px-1 py-1" : "px-2 py-1"}
         style={{
           border: "1px solid var(--colorNeutralStroke2)",
           textAlign: align,
           whiteSpace: "nowrap",
           height: IMAGE_TABLE_ROW_HEIGHT,
           boxSizing: "border-box",
-          position: stickyLeft ? "sticky" : undefined,
-          left: stickyLeft ? 0 : undefined,
-          zIndex: stickyLeft ? 2 : undefined,
-          background: stickyLeft ? stickyBackground : undefined,
-          boxShadow: stickyLeft ? "inset -2px 0 0 var(--colorNeutralStroke1), 2px 0 4px rgba(0,0,0,0.08)" : undefined,
+          position: stickyLeft !== undefined ? "sticky" : undefined,
+          left: stickyLeft,
+          zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 3 : 2) : undefined,
+          background: stickyLeft !== undefined ? stickyBackground : undefined,
+          boxShadow: stickyLeft !== undefined ? "inset -2px 0 0 var(--colorNeutralStroke1), 2px 0 4px rgba(0,0,0,0.08)" : undefined,
         }}>
       <span className="block min-w-0 truncate">{children}</span>
     </td>

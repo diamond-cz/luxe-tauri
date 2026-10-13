@@ -216,6 +216,7 @@ export function MtkView() {
             {isIsp6sWorkspace ? (
               <Suspense fallback={<Hint hint="正在加载 ISP6S AE 可视化..." />}>
                 <Isp6sAeVisual
+                  key={`${ispId}|${tabIdx}`}
                   isp={ispId}
                   tabIdx={tabIdx}
                   filePath={imports.filePath}
