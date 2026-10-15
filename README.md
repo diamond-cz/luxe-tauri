@@ -95,7 +95,7 @@ npm run tauri:dev         # 启动 Tauri dev，Vite 在 :1420 提供 HMR
 ### 单独运行测试
 
 ```bash
-npm run typecheck         # 前端 TS 类型检查（0 错误为通过）
+npm run build             # 类型检查并生成 dist/，Rust 测试需要此目录
 npm run rust:test         # Rust 单测；外部 AE.cpp/TONE.cpp 样例存在时追加验证
 ```
 
@@ -191,7 +191,7 @@ npm run tauri:debug
 npm run version:sync
 
 # 3. 发版前检查
-npm run typecheck
+npm run build
 npm run rust:test
 npm run tauri:build
 

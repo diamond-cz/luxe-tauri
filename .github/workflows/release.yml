@@ -117,8 +117,10 @@ jobs:
           git diff --exit-code -- package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock
           if ($LASTEXITCODE -ne 0) { throw 'Commit the synchronized version files before tagging' }
 
-      - name: Check frontend
-        run: npm run typecheck
+      # tauri::generate_context! also runs while compiling cargo test and
+      # requires the configured frontendDist (../dist) to exist.
+      - name: Build frontend for Rust tests
+        run: npm run build
 
       - name: Test release manifest generation
         run: node --test scripts/prepare-release.test.mjs

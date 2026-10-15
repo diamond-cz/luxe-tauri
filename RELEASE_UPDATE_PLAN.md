@@ -70,7 +70,7 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 | 触发 | `push.tags: ["v*"]`；`workflow_dispatch` 可手动指定已有 tag；`watch.started` 从默认分支版本解析已有 tag，并检出该 tag 构建。 |
 | 权限和并发 | 仅发布任务授予 `contents: write`；所有触发方式共用一个发布并发组，避免同时修改 Release。 |
 | 版本校验 | 校验 tag 为 `vX.Y.Z`，且去掉 `v` 后等于 `tauri.conf.json.version`；运行版本同步后确认没有产生未提交差异。 |
-| 依赖与检查 | 固定 Node/Rust 工具链版本，运行 `npm ci`、`npm run typecheck`、`npm run rust:test`。工具链版本写入 workflow，后续更新需显式修改。 |
+| 依赖与检查 | 固定 Node/Rust 工具链版本，运行 `npm ci`、`npm run build`、`npm run rust:test`。`cargo test` 编译 `tauri::generate_context!` 时需要前端 `dist/`，因此先构建前端。工具链版本写入 workflow，后续更新需显式修改。 |
 | 构建 | 在 `windows-2022` x64 环境构建 NSIS、MSI 和 updater 签名产物；构建失败即终止。 |
 | 更新清单 | 从本次 NSIS `.exe` 及对应 `.exe.sig` 生成 `latest.json`。`version` 等于 tag，`platforms.windows-x86_64.url` 指向本次 Release 中的 NSIS 安装包，`signature` 使用对应签名文件内容。不得把 MSI 地址写入自动更新字段。 |
 | 发布 | 构建和本地校验全部通过后创建 Draft Release；上传 NSIS、MSI、签名和 `latest.json`，核对 Release 资产与清单引用，再自动发布正式版。 |
@@ -102,7 +102,7 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 npm run version:sync
 
 # 3. 本地验证
-npm run typecheck
+npm run build
 npm run rust:test
 npm run tauri:build
 
