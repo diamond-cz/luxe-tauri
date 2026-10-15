@@ -119,6 +119,8 @@ git push origin vX.Y.Z
 
 Actions 应检出该 tag，而不是构建随后可能变化的 `main`。手动触发时也必须输入已经存在且版本一致的 tag。`watch.started` 从默认分支读取版本后，只用于重试该版本已存在的 tag；若 tag 不存在或正式 Release 已发布，工作流会停止。
 
+如果 tag 推送后才修复工作流或源码，重新运行旧任务仍会使用该 tag 指向的旧提交。保留已发布的 tag，新建下一个版本并同步版本文件，提交后再推送新 tag。对于 `v0.1.7`，它指向的旧工作流只运行 `npm run typecheck`，未生成 Rust 测试所需的 `dist/`；修复已在 `main`，因此应从包含修复的提交发布 `v0.1.8`。推送前可用 `git show v0.1.8:.github/workflows/release.yml` 核对 tag 内的工作流。
+
 ## 验收清单
 
 | 场景 | 预期结果 |

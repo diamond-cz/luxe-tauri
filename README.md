@@ -233,7 +233,7 @@ GitHub Actions 发版前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE
    `.tauri-updater.password` 的内容。注意此项是 updater 私钥的密码，不是 GitHub 密码。
 4. 返回 **Repository secrets** 列表，确认两个名称都存在。GitHub 不会再次显示
    Secret 的值；如果填错，请用同名 Secret 的 **Update** 重新设置。
-5. 提交版本同步后的文件并推送与配置版本一致的 tag（例如 `v0.1.7`）。Actions 的 **Publish Windows release**
+5. 提交版本同步后的文件并推送与配置版本一致的 tag（例如 `v0.1.8`）。Actions 的 **Publish Windows release**
    会检查两个 Secret、运行测试、签名打包并在资产校验完成后发布 Release。
 
 若 Actions 报 `failed to decode secret key` 或 `Invalid padding`，请用 PowerShell
