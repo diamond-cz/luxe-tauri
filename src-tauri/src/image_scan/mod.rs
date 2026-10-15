@@ -123,14 +123,22 @@ pub fn parse_exif_directory(
     }
 
     let existing_exif = total - copied_images.len();
-    on_progress(ExifParseProgress { stage: "EXIF", completed: existing_exif, total });
+    let mut exif_completed = 0;
+    if existing_exif > exif_completed {
+        exif_completed = existing_exif;
+        on_progress(ExifParseProgress { stage: "EXIF", completed: exif_completed, total });
+    }
     if !copied_images.is_empty() {
         match spawn_debug_parser(parser_path, &temp_root) {
             Ok(mut child) => loop {
                 let generated = copied_images.iter().filter(|(image, _)| {
                     PathBuf::from(format!("{}.exif", image.display())).is_file()
                 }).count();
-                on_progress(ExifParseProgress { stage: "EXIF", completed: existing_exif + generated, total });
+                let completed = existing_exif + generated;
+                if completed > exif_completed {
+                    exif_completed = completed;
+                    on_progress(ExifParseProgress { stage: "EXIF", completed, total });
+                }
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         if !status.success() {
@@ -158,7 +166,9 @@ pub fn parse_exif_directory(
             }
         }
     }
-    on_progress(ExifParseProgress { stage: "EXIF", completed: total, total });
+    if exif_completed < total {
+        on_progress(ExifParseProgress { stage: "EXIF", completed: total, total });
+    }
 
     on_progress(ExifParseProgress { stage: "TOML", completed: 0, total });
     for (index, (entry, exif)) in pending.iter().zip(exif_paths.iter()).enumerate() {

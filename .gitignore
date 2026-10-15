@@ -21,3 +21,6 @@ Thumbs.db
 # Local config
 .env
 .env.local
+.tauri-updater.key
+.tauri-updater.key.pub
+.tauri-updater.password

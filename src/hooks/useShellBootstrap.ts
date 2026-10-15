@@ -161,8 +161,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       /* 7. Initial poetry fetch (don't block boot if it fails). */
       fetchPoetry().catch(() => {});
 
-      /* 8. Optional startup update check. Download/install is intentionally
-         not attempted until the Tauri updater signing chain is configured. */
+      /* 8. Startup checks only notify. Installation requires a user action. */
       if (root.settings.auto_update) {
         const updateStore = useUpdateStore.getState();
         updateStore.setChecking("startup");

@@ -11,6 +11,7 @@ import {
 } from "@dnd-kit/sortable";
 import {
   ArrowSync24Regular,
+  ArrowDownload24Regular,
   Code24Regular,
   DocumentText24Regular,
 } from "@fluentui/react-icons";
@@ -70,9 +71,16 @@ export function HomeView() {
   const updateStatus = useUpdateStore((s) => s.status);
   const updateMessage = useUpdateStore((s) => s.message);
   const releaseUrl = useUpdateStore((s) => s.releaseUrl);
+  const updateNotes = useUpdateStore((s) => s.notes);
+  const availableUpdate = useUpdateStore((s) => s.update);
+  const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
+  const downloadTotal = useUpdateStore((s) => s.totalBytes);
   const setUpdateChecking = useUpdateStore((s) => s.setChecking);
   const setUpdateResult = useUpdateStore((s) => s.setResult);
   const setUpdateError = useUpdateStore((s) => s.setError);
+  const setDownloadStart = useUpdateStore((s) => s.setDownloadStart);
+  const setDownloadProgress = useUpdateStore((s) => s.setDownloadProgress);
+  const setInstalling = useUpdateStore((s) => s.setInstalling);
   const [platformOrder, setPlatformOrder] = useState(
     PLATFORM_CARDS.map((card) => card.to),
   );
@@ -81,11 +89,15 @@ export function HomeView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const shouldOpenRelease = updateStatus === "available" || updateStatus === "unknown";
+  const updateBusy = updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing";
   const primaryUpdateLabel = updateStatus === "checking"
     ? "检查中"
-    : shouldOpenRelease
-      ? (updateStatus === "available" ? "打开新版" : "打开 Releases")
+    : updateStatus === "downloading"
+      ? "下载中"
+      : updateStatus === "installing"
+        ? "安装中"
+        : updateStatus === "available"
+          ? "下载并安装"
       : "检查更新";
 
   const orderedCards = platformOrder
@@ -117,12 +129,32 @@ export function HomeView() {
   };
 
   const checkUpdate = async () => {
-    if (updateStatus === "checking") return;
+    if (updateBusy) return;
+    const oldUpdate = useUpdateStore.getState().update;
+    if (oldUpdate) await oldUpdate.close().catch(() => {});
     setUpdateChecking("manual");
     try {
       const result = await checkForUpdate();
       setUpdateResult(result, "manual");
     } catch (err) {
+      setUpdateError(err, "manual");
+    }
+  };
+
+  const installUpdate = async () => {
+    if (!availableUpdate || updateBusy) return;
+    setDownloadStart();
+    try {
+      await availableUpdate.download((event) => {
+        if (event.event === "Started") setDownloadProgress(0, event.data.contentLength);
+        if (event.event === "Progress") setDownloadProgress(event.data.chunkLength);
+      });
+      setInstalling();
+      // On Windows, the updater launches the installer and exits this process.
+      // The NSIS installer restarts the app after it finishes.
+      await availableUpdate.install();
+    } catch (err) {
+      await availableUpdate.close().catch(() => {});
       setUpdateError(err, "manual");
     }
   };
@@ -221,6 +253,15 @@ export function HomeView() {
                    style={{ color: "var(--colorBrandForeground1)" }}>
                 {updateMessage}
               </div>
+              {updateStatus === "available" && updateNotes && (
+                <details className="mt-2 max-w-lg text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+                  <summary className="cursor-pointer">版本说明</summary>
+                  <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{updateNotes}</p>
+                </details>
+              )}
+              {updateStatus === "downloading" && downloadTotal && (
+                <progress className="mt-2 block w-full" value={downloadBytes} max={downloadTotal} aria-label="更新下载进度" />
+              )}
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -230,11 +271,16 @@ export function HomeView() {
               <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={() => setUpdateLogOpen(true)}>
                 更新日志
               </Button>
+              {(updateStatus === "available" || updateStatus === "error") && (
+                <Button appearance="secondary" onClick={openLatestRelease}>
+                  打开 Release
+                </Button>
+              )}
               <Button
                 appearance="primary"
-                icon={<ArrowSync24Regular />}
-                disabled={updateStatus === "checking"}
-                onClick={shouldOpenRelease ? openLatestRelease : checkUpdate}
+                icon={updateStatus === "available" ? <ArrowDownload24Regular /> : <ArrowSync24Regular />}
+                disabled={updateBusy}
+                onClick={updateStatus === "available" ? installUpdate : checkUpdate}
               >
                 {primaryUpdateLabel}
               </Button>

@@ -17,7 +17,7 @@
   "cache_path": "Chemin du cache",
   "cache_path_desc": "Laisser vide pour utiliser le chemin par défaut",
   "auto_update": "Check for Updates on Startup",
-  "auto_update_desc": "Check GitHub Releases on startup; currently opens the Release page instead of installing silently",
+  "auto_update_desc": "Check for updates on startup; installation requires confirmation",
   "update_notify": "Notification de mise à jour",
   "update_notify_desc": "Show a system notification and a Home sidebar badge when a new version is found",
   "save": "Enregistrer",

@@ -36,6 +36,10 @@ fn scalar_path_does_not_match_larger_index() {
 #[test]
 fn supplied_tone_lce_tables_have_expected_dimensions() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../TONE.cpp");
+    if !path.is_file() {
+        eprintln!("skipping optional TONE.cpp fixture test: {}", path.display());
+        return;
+    }
     let parsed = parser::parse_file(&path).expect("parse TONE.cpp");
 
     for index in 0..3 {

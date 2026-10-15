@@ -10,15 +10,24 @@ use luxe_tauri_lib::cpp_parser::{parser as cpp_parser, search};
 
 const AE_CPP: &str = r"D:\Image_process\hiz\src\adapters\mtk\isp6s\AE.cpp";
 
-fn parsed() -> luxe_tauri_lib::cpp_parser::types::ParseResult {
-    let p = Path::new(AE_CPP);
-    assert!(p.exists(), "AE.cpp fixture missing — expected at {AE_CPP}");
-    cpp_parser::parse_file(p).expect("parse_file")
+fn fixture_path() -> std::path::PathBuf {
+    std::env::var_os("LUXE_AE_CPP_FIXTURE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| AE_CPP.into())
+}
+
+fn parsed() -> Option<luxe_tauri_lib::cpp_parser::types::ParseResult> {
+    let path = fixture_path();
+    if !path.is_file() {
+        eprintln!("skipping optional AE.cpp fixture test: {}", path.display());
+        return None;
+    }
+    Some(cpp_parser::parse_file(&path).expect("parse_file"))
 }
 
 #[test]
 fn header_metadata_matches_python() {
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     assert_eq!(r.var_name, "AE_BASE");
     assert_eq!(r.var_type, "AE_NVRAM_T");
     assert_eq!(r.fields.len(), 6163, "total flat fields");
@@ -26,7 +35,7 @@ fn header_metadata_matches_python() {
 
 #[test]
 fn search_by_comment_focuses_length() {
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     let hits = search::search_by_comment(&r, "FocusLength", false);
     assert_eq!(hits.len(), 1);
     let h = hits[0];
@@ -38,7 +47,7 @@ fn search_by_comment_focuses_length() {
 
 #[test]
 fn hw_block_field_count() {
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     let fields = path_query::get_fields_at_path(&r, "[0][0][1]");
     assert_eq!(fields.len(), 40);
 }
@@ -46,7 +55,7 @@ fn hw_block_field_count() {
 #[test]
 fn values_at_path_one_dim() {
     // [0][4][1][0] is a single-line array — Python returns flat list of 4.
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     let v = path_query::get_values_at_path(&r, "[0][4][1][0]", 0);
     match v {
         ValuesAtPath::Flat(list) =>
@@ -58,7 +67,7 @@ fn values_at_path_one_dim() {
 #[test]
 fn values_at_path_two_dim() {
     // MT_WT_table_2st: 15x15 weight table — Python returns nested list-of-lists.
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     let v = path_query::get_values_at_path(&r, "[0][3][1][20]", 0);
     match v {
         ValuesAtPath::Grouped(rows) => {
@@ -79,7 +88,7 @@ fn values_at_path_two_dim() {
 
 #[test]
 fn ae_tag_versions() {
-    let r = parsed();
+    let Some(r) = parsed() else { return };
     let v = |path: &str| {
         path_query::get_fields_at_path(&r, path)
             .first()
@@ -98,7 +107,12 @@ fn ae_tag_versions() {
 fn cache_hit_on_second_parse() {
     use luxe_tauri_lib::cpp_parser::CppParserCache;
     let cache = CppParserCache::new();
-    let p = Path::new(AE_CPP);
+    let path = fixture_path();
+    let p = Path::new(&path);
+    if !p.is_file() {
+        eprintln!("skipping optional AE.cpp fixture test: {}", p.display());
+        return;
+    }
     let _ = cache.get(p).expect("first parse");
     let len_after_first = cache.len();
     let _ = cache.get(p).expect("second parse");

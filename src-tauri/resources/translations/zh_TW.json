@@ -17,7 +17,7 @@
   "cache_path": "快取路徑",
   "cache_path_desc": "留空則使用預設路徑",
   "auto_update": "啟動時自動檢查更新",
-  "auto_update_desc": "啟動後自動檢查 GitHub 最新版本；目前僅提醒並開啟 Release",
+  "auto_update_desc": "啟動後自動檢查更新；安裝需要手動確認",
   "update_notify": "更新提醒",
   "update_notify_desc": "偵測到新版本時傳送系統通知，並在側邊欄首頁入口顯示提示",
   "save": "儲存設置",

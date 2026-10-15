@@ -17,7 +17,7 @@
   "cache_path": "キャッシュパス",
   "cache_path_desc": "空欄の場合はデフォルトパスを使用",
   "auto_update": "Check for Updates on Startup",
-  "auto_update_desc": "Check GitHub Releases on startup; currently opens the Release page instead of installing silently",
+  "auto_update_desc": "Check for updates on startup; installation requires confirmation",
   "update_notify": "更新通知",
   "update_notify_desc": "Show a system notification and a Home sidebar badge when a new version is found",
   "save": "設定を保存",

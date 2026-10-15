@@ -153,7 +153,7 @@ export function GeneralPanel() {
         <SettingRow
           icon="ic_fluent_arrow_sync_regular"
           title={t("auto_update", { defaultValue: "启动时自动检查更新" })}
-          desc={t("auto_update_desc", { defaultValue: "启动后自动检查 GitHub 最新版本；当前仅提醒并打开 Release" })}
+          desc={t("auto_update_desc", { defaultValue: "启动后自动检查最新版本；安装更新需要手动确认" })}
         >
           <Select
             value={settings.auto_update ? "true" : "false"}

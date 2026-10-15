@@ -1,0 +1,122 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to publish
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
+          targets: x86_64-pc-windows-msvc
+
+      - name: Validate release input and signing secrets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected vX.Y.Z tag' }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $env:RELEASE_TAG.Substring(1)) { throw "Tag $env:RELEASE_TAG does not match $version" }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY -or -not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+            throw 'Tauri updater signing secrets are required'
+          }
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0 -and -not ($existing | ConvertFrom-Json).isDraft) {
+            throw "Published release $env:RELEASE_TAG already exists"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify synchronized version files
+        shell: pwsh
+        run: |
+          npm run version:sync
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code -- package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Commit the synchronized version files before tagging' }
+
+      - name: Check frontend
+        run: npm run typecheck
+
+      - name: Test release manifest generation
+        run: node --test scripts/prepare-release.test.mjs
+
+      - name: Test Rust
+        run: npm run rust:test
+
+      - name: Build NSIS and MSI
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri -- build --bundles nsis,msi
+
+      - name: Validate packages and create updater manifest
+        id: assets
+        run: node scripts/prepare-release.mjs ${{ env.RELEASE_TAG }}
+
+      - name: Create draft, upload, verify, and publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET1: ${{ steps.assets.outputs.asset1 }}
+          ASSET2: ${{ steps.assets.outputs.asset2 }}
+          ASSET3: ${{ steps.assets.outputs.asset3 }}
+          ASSET4: ${{ steps.assets.outputs.asset4 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --draft --verify-tag --title "LUXE $env:RELEASE_TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
+          } elseif (-not ($existing | ConvertFrom-Json).isDraft) {
+            throw "Published release $env:RELEASE_TAG already exists"
+          }
+          $assets = @($env:ASSET1, $env:ASSET2, $env:ASSET3, $env:ASSET4)
+          gh release upload $env:RELEASE_TAG @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload release assets' }
+          $published = gh release view $env:RELEASE_TAG --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect draft release' }
+          foreach ($asset in $assets) {
+            $name = Split-Path $asset -Leaf
+            if ($name -notin @($published.assets.name)) { throw "Missing uploaded asset: $name" }
+          }
+          gh release edit $env:RELEASE_TAG --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release' }

@@ -17,7 +17,7 @@
   "cache_path": "缓存路径",
   "cache_path_desc": "留空则使用默认路径",
   "auto_update": "启动时自动检查更新",
-  "auto_update_desc": "启动后自动检查 GitHub 最新版本；当前仅提醒并打开 Release",
+  "auto_update_desc": "启动后自动检查更新；安装需要手动确认",
   "update_notify": "更新提醒",
   "update_notify_desc": "检测到新版本时发送系统通知，并在侧边栏首页入口显示提示",
   "save": "保存设置",

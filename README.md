@@ -96,7 +96,7 @@ npm run tauri:dev         # 启动 Tauri dev，Vite 在 :1420 提供 HMR
 
 ```bash
 npm run typecheck         # 前端 TS 类型检查（0 错误为通过）
-npm run rust:test         # Rust 单测 + AE.cpp diff 测试（12 项）
+npm run rust:test         # Rust 单测；外部 AE.cpp/TONE.cpp 样例存在时追加验证
 ```
 
 注：跑 `rust:test` 前需要先停掉 `npm run tauri:dev`（exe 被占用无法重链）。
@@ -165,7 +165,7 @@ npm run tauri:debug
 
 ### 5.5 当前版本与发版流程
 
-当前程序版本为 `v0.1.1`。应用版本的唯一来源是
+当前程序版本以配置为准（本文更新时为 `v0.1.3`）。应用版本的唯一来源是
 `src-tauri/tauri.conf.json` 的 `"version"` 字段：
 
 
@@ -179,7 +179,7 @@ npm run tauri:debug
 
 ```bash
 # 1. 只改这一个配置文件
-# src-tauri/tauri.conf.json: "version": "0.1.1"
+# src-tauri/tauri.conf.json: "version": "X.Y.Z"
 
 # 2. 同步 npm / Rust 元数据（dev/build/tauri:* 脚本会自动执行）
 npm run version:sync
@@ -192,124 +192,30 @@ npm run tauri:build
 # 4. 提交并打 tag
 git add src-tauri/tauri.conf.json package.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 # 如果存在 package-lock.json 且被 version:sync 更新，也一起提交
-git commit -m "chore: release v0.1.1"
-git tag v0.1.1
+git commit -m "chore: release vX.Y.Z"
+git tag vX.Y.Z
 git push origin main --tags
 ```
 
-GitHub Release 建议使用 tag `v0.1.1`，标题 `LUXE v0.1.1`，并上传
-`src-tauri/target/release/bundle/` 下生成的安装包。首页“检查更新”读取 GitHub
-latest release tag；只要最新 tag 大于当前 `tauri.conf.json` 版本，就会提示有新版本。
+发布流程、签名配置与验收清单见 [RELEASE_UPDATE_PLAN.md](RELEASE_UPDATE_PLAN.md)。
+推送与应用版本一致的 `vX.Y.Z` tag 后，GitHub Actions 构建 Windows 安装包，
+校验更新清单和资产，再公开正式 Release。
 
 ### 5.6 自动检查更新与自动安装
 
-当前已完成基础联动：
+首页和启动检查使用 Tauri updater，从 GitHub 最新正式 Release 的 `latest.json`
+获取版本信息。`auto_update` 只控制启动检查，默认关闭；`update_notify` 控制系统通知和
+侧边栏提示。用户在首页点击“下载并安装”后，程序下载并验证签名，启动 NSIS 安装器；
+Windows 安装器负责结束旧进程并在完成后重新启动应用。失败时可重试或打开 Release。
 
+发布前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。本地生成的 `.tauri-updater.key` 和
+`.tauri-updater.password` 已被忽略；将各自内容设置为同名 Secret，妥善备份且不要提交。
+客户端公钥已写入 `src-tauri/tauri.conf.json`。当前版本 `0.1.3` 尚未内置新流程，
+首次发布集成更新的版本仍需手动下载安装；之后才可验证真实应用内升级。
 
-| 设置项                 | 行为                                                             |
-| ---------------------- | ---------------------------------------------------------------- |
-| `auto_update = true`   | 启动后自动请求 GitHub latest release，并把结果同步到首页更新卡片 |
-| `update_notify = true` | 检测到新版本时发送系统通知，并在侧边栏首页入口显示提示点         |
-
-首页“检查更新”和启动自动检查共用同一套状态。发现新版本后，主按钮会从“检查更新”
-切换为“打开新版”，跳转到最新 GitHub Release 下载安装包。
-
-程序打开的 Release 页面为：
-
-```text
-https://github.com/diamond-cz/luxe-tauri/releases
-```
-
-自动版本比较会优先读取 GitHub API：
-
-```text
-https://api.github.com/repos/diamond-cz/luxe-tauri/releases/latest
-```
-
-如果 GitHub API 返回 404，程序会降级提示打开 Release 页面，不再把 404 作为阻塞错误。
-常见原因：
-
-
-| 原因               | 处理                                                                     |
-| ------------------ | ------------------------------------------------------------------------ |
-| Release 还是 Draft | 在 GitHub Release 页面点击 Publish release                               |
-| 只有 Pre-release   | 程序会 fallback 到 Release 列表；仍建议正式发布稳定版                    |
-| 私有仓库           | 未登录的桌面程序无法访问 GitHub 私有 Release API，需要公开仓库或接入鉴权 |
-
-当前仍不会静默下载或自动安装。要实现“检查到 `v0.1.1` 后自动下载、安装并重启”，
-需要补齐 Tauri updater 插件、签名密钥和 updater manifest：
-
-```bash
-npm install @tauri-apps/plugin-updater @tauri-apps/plugin-process
-cargo add tauri-plugin-updater tauri-plugin-process --manifest-path src-tauri/Cargo.toml
-```
-
-Rust 侧在 `src-tauri/src/lib.rs` 的 builder 中注册插件：
-
-```rust
-.plugin(tauri_plugin_updater::Builder::new().build())
-.plugin(tauri_plugin_process::init())
-```
-
-`src-tauri/tauri.conf.json` 增加 updater endpoint 和公钥。endpoint 可以固定指向
-GitHub latest release 里的 `latest.json`：
-
-```json
-"plugins": {
-  "updater": {
-    "pubkey": "<TAURI_UPDATER_PUBLIC_KEY>",
-    "endpoints": [
-      "https://github.com/diamond-cz/luxe-tauri/releases/latest/download/latest.json"
-    ]
-  }
-}
-```
-
-`src-tauri/capabilities/default.json` 增加 updater/process 权限：
-
-```json
-"updater:default",
-"process:allow-restart"
-```
-
-前端可把现有“检查更新”按钮改为 updater 插件调用，并联动设置页的
-`settings.auto_update`：
-
-```ts
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-
-export async function checkAndInstallUpdate(autoInstall: boolean) {
-  const update = await check();
-  if (!update) return null;
-
-  if (autoInstall) {
-    await update.downloadAndInstall();
-    await relaunch();
-  }
-
-  return update;
-}
-```
-
-发布时还要上传 updater manifest。`latest.json` 示例：
-
-```json
-{
-  "version": "0.1.1",
-  "notes": "LUXE v0.1.1",
-  "pub_date": "2026-06-05T00:00:00Z",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "<Tauri 生成的 .sig 内容>",
-      "url": "https://github.com/diamond-cz/luxe-tauri/releases/download/v0.1.1/<updater-artifact>"
-    }
-  }
-}
-```
-
-注意：Tauri updater 使用自己的签名密钥，和 Windows 代码签名证书不是同一个东西。
-自动安装只应在 release 安装包中验证；dev 模式可以检查逻辑，但不能代表真实升级行为。
+Tauri updater 签名与 Windows 代码签名证书不同。开发模式不能验证真实安装行为，
+须从上一版已安装的 NSIS 客户端测试升级。
 
 ### 5.7 代码签名（可选，企业分发推荐）
 
