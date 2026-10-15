@@ -1,6 +1,6 @@
 {
   "name": "luxe-tauri",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.12.1",
@@ -15,11 +15,11 @@
     "pretauri:dev": "npm run version:sync",
     "tauri:dev": "tauri dev",
     "pretauri:build": "npm run version:sync",
-    "tauri:build": "tauri build",
+    "tauri:build": "node scripts/build-tauri-local.mjs",
     "pretauri:msi": "npm run version:sync",
-    "tauri:msi": "tauri build --bundles msi",
+    "tauri:msi": "node scripts/build-tauri-local.mjs --bundles msi",
     "pretauri:debug": "npm run version:sync",
-    "tauri:debug": "tauri build --debug",
+    "tauri:debug": "node scripts/build-tauri-local.mjs --debug",
     "typecheck": "tsc --noEmit",
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },

@@ -111,6 +111,12 @@ npm run rust:test         # Rust 单测；外部 AE.cpp/TONE.cpp 样例存在时
 
 ### 5.1 一键打包（最常用）
 
+本地构建会生成 updater 签名产物，因此需要项目根目录的
+`.tauri-updater.key` 和 `.tauri-updater.password`。`tauri:build`、`tauri:msi`、
+`tauri:debug` 会自动读取这两个被 `.gitignore` 忽略的文件；若当前终端已设置
+`TAURI_SIGNING_PRIVATE_KEY` 或 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，则优先使用对应环境变量。
+GitHub Secrets 只会注入 GitHub Actions，不会自动传入本机 PowerShell。
+
 ```bash
 npm run tauri:build       # Windows: 同时输出 msi + nsis
 ```
@@ -152,7 +158,7 @@ WiX 会自动下载到 `%LOCALAPPDATA%\tauri\WixTools`（首次执行）。如�
 ### 5.3 仅打 nsis（体积更小、自带卸载器）
 
 ```bash
-npm run tauri -- build --bundles nsis
+npm run tauri:build -- --bundles nsis
 ```
 
 ### 5.4 带 debug 信息的版本（用于排查 release 模式 only 的 crash）
@@ -165,7 +171,7 @@ npm run tauri:debug
 
 ### 5.5 当前版本与发版流程
 
-当前程序版本以配置为准（本文更新时为 `v0.1.5`）。应用版本的唯一来源是
+当前程序版本以配置为准。应用版本的唯一来源是
 `src-tauri/tauri.conf.json` 的 `"version"` 字段：
 
 
@@ -208,7 +214,7 @@ git push origin main --tags
 侧边栏提示。用户在首页点击“下载并安装”后，程序下载并验证签名，启动 NSIS 安装器；
 Windows 安装器负责结束旧进程并在完成后重新启动应用。失败时可重试或打开 Release。
 
-发布前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和
+GitHub Actions 发版前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。本地生成的 `.tauri-updater.key` 和
 `.tauri-updater.password` 已被忽略；将各自内容设置为同名 Secret，妥善备份且不要提交。
 客户端公钥已写入 `src-tauri/tauri.conf.json`。先前发布的 `0.1.3` 尚未内置新流程，
@@ -225,7 +231,7 @@ Windows 安装器负责结束旧进程并在完成后重新启动应用。失败
    `.tauri-updater.password` 的内容。注意此项是 updater 私钥的密码，不是 GitHub 密码。
 4. 返回 **Repository secrets** 列表，确认两个名称都存在。GitHub 不会再次显示
    Secret 的值；如果填错，请用同名 Secret 的 **Update** 重新设置。
-5. 提交版本同步后的文件并推送 `v0.1.5` tag。Actions 的 **Publish Windows release**
+5. 提交版本同步后的文件并推送与配置版本一致的 tag（例如 `v0.1.6`）。Actions 的 **Publish Windows release**
    会检查两个 Secret、运行测试、签名打包并在资产校验完成后发布 Release。
 
 不要重新生成密钥对来“修复”GitHub Secret：现有应用配置已经绑定当前公钥；
