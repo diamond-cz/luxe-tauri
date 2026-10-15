@@ -90,7 +90,22 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
             throw 'Missing GitHub Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD'
           }
-          Write-Host 'Updater signing secrets are available.'
+          # The private key is the Base64 text in .tauri-updater.key. Check it
+          # before the lengthy Rust build, and remove copied line endings.
+          $key = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          try {
+            $keyBytes = [Convert]::FromBase64String($key)
+          } catch {
+            throw 'TAURI_SIGNING_PRIVATE_KEY is not valid Base64. Replace this GitHub Secret with the complete contents of .tauri-updater.key, not the public key or file path.'
+          }
+          if ([Convert]::ToBase64String($keyBytes) -cne $key) {
+            throw 'TAURI_SIGNING_PRIVATE_KEY contains extra characters or line breaks. Copy the complete .tauri-updater.key value again.'
+          }
+          $password = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
+          if ([string]::IsNullOrWhiteSpace($password) -or $password.Contains("`r") -or $password.Contains("`n")) {
+            throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD must be the single-line contents of .tauri-updater.password.'
+          }
+          Write-Host 'Updater signing secrets have valid shape.'
           $headers = @{
             Authorization = "Bearer $env:GH_TOKEN"
             Accept = 'application/vnd.github+json'
@@ -108,6 +123,25 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify updater signing key and password
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
+          $probe = Join-Path $env:RUNNER_TEMP 'updater-signing-probe.txt'
+          Set-Content -LiteralPath $probe -Value 'updater signing probe' -NoNewline
+          $version = (Get-Content src-tauri/tauri.conf.json -Encoding UTF8 -Raw | ConvertFrom-Json).version
+          node node_modules/@tauri-apps/cli/tauri.js signer sign $probe --app-version $version | Out-Null
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$probe.sig" -PathType Leaf)) {
+            throw 'Updater signing probe failed. Recheck the GitHub private-key and password Secrets.'
+          }
+          Write-Host 'Updater signing key and password work.'
 
       - name: Verify synchronized version files
         shell: pwsh
@@ -129,10 +163,15 @@ jobs:
         run: npm run rust:test
 
       - name: Build NSIS and MSI
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri -- build --bundles nsis,msi
+        run: |
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
+          npm run tauri -- build --bundles nsis,msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate packages and create updater manifest
         id: assets

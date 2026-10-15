@@ -59,7 +59,7 @@ TAURI_SIGNING_PRIVATE_KEY
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
-缺少签名材料时，workflow 必须失败，禁止发布无签名更新。Tauri updater 签名与 Windows 代码签名证书是两套机制，后者不能替代前者。
+缺少签名材料时，workflow 必须失败，禁止发布无签名更新。工作流在构建前检查私钥的 Base64 格式，并试签临时文件以验证私钥和密码。若出现 `Invalid padding`，需用本地 `.tauri-updater.key` 的完整内容更新 GitHub Secret，不能用公钥或文件路径代替。Tauri updater 签名与 Windows 代码签名证书是两套机制，后者不能替代前者。
 
 ### 3. GitHub Actions 设计
 

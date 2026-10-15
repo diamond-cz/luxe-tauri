@@ -233,8 +233,22 @@ GitHub Actions 发版前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE
    `.tauri-updater.password` 的内容。注意此项是 updater 私钥的密码，不是 GitHub 密码。
 4. 返回 **Repository secrets** 列表，确认两个名称都存在。GitHub 不会再次显示
    Secret 的值；如果填错，请用同名 Secret 的 **Update** 重新设置。
-5. 提交版本同步后的文件并推送与配置版本一致的 tag（例如 `v0.1.6`）。Actions 的 **Publish Windows release**
+5. 提交版本同步后的文件并推送与配置版本一致的 tag（例如 `v0.1.7`）。Actions 的 **Publish Windows release**
    会检查两个 Secret、运行测试、签名打包并在资产校验完成后发布 Release。
+
+若 Actions 报 `failed to decode secret key` 或 `Invalid padding`，请用 PowerShell
+分别将本地文件的完整内容复制到剪贴板，然后在 GitHub 对应 Secret 的 **Update** 页面粘贴：
+
+```powershell
+Set-Clipboard -Value (Get-Content -LiteralPath .tauri-updater.key -Encoding UTF8 -Raw).Trim()
+# 更新 TAURI_SIGNING_PRIVATE_KEY 并保存，然后执行下一行
+Set-Clipboard -Value (Get-Content -LiteralPath .tauri-updater.password -Encoding UTF8 -Raw).TrimEnd("`r", "`n")
+# 更新 TAURI_SIGNING_PRIVATE_KEY_PASSWORD 并保存
+Set-Clipboard -Value ''
+```
+
+不要填文件路径、`.tauri-updater.key.pub` 的内容或引号。工作流会先检查私钥的
+Base64 格式，再试签一份临时文件，确认私钥和密码可用后才开始耗时的构建。
 
 不要重新生成密钥对来“修复”GitHub Secret：现有应用配置已经绑定当前公钥；
 更换私钥必须同步更新公钥并重新发布应用。建议将私钥和密码分别备份在安全的密码管理器中。
