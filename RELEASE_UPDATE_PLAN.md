@@ -10,7 +10,7 @@
 | 目标平台 | Windows x64 |
 | 应用内更新包 | NSIS 安装包 |
 | 手动下载包 | MSI 安装包 |
-| 发布触发 | 推送 `vX.Y.Z` tag；支持手动重跑已有 tag |
+| 发布触发 | 推送 `vX.Y.Z` tag；手动指定已有 tag；`watch.started` 根据默认分支版本选择已有 tag |
 | 发布时机 | 构建、签名、上传和校验完成后，再发布正式 Release |
 | 客户端行为 | 可在启动时自动检查；发现新版后由用户确认下载、安装和重启 |
 | 版本规则 | 稳定版使用 `vX.Y.Z`；预发布版本暂不进入自动更新通道 |
@@ -67,8 +67,8 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
 | 阶段 | 必须完成的动作 |
 | --- | --- |
-| 触发 | `push.tags: ["v*"]`；`workflow_dispatch` 可手动指定已有 tag；不使用 `watch.started`。 |
-| 权限和并发 | 仅发布任务授予 `contents: write`；以 tag 为 concurrency group；同一 tag 禁止并行发布。 |
+| 触发 | `push.tags: ["v*"]`；`workflow_dispatch` 可手动指定已有 tag；`watch.started` 从默认分支版本解析已有 tag，并检出该 tag 构建。 |
+| 权限和并发 | 仅发布任务授予 `contents: write`；所有触发方式共用一个发布并发组，避免同时修改 Release。 |
 | 版本校验 | 校验 tag 为 `vX.Y.Z`，且去掉 `v` 后等于 `tauri.conf.json.version`；运行版本同步后确认没有产生未提交差异。 |
 | 依赖与检查 | 固定 Node/Rust 工具链版本，运行 `npm ci`、`npm run typecheck`、`npm run rust:test`。工具链版本写入 workflow，后续更新需显式修改。 |
 | 构建 | 在 `windows-2022` x64 环境构建 NSIS、MSI 和 updater 签名产物；构建失败即终止。 |
@@ -113,10 +113,11 @@ git commit -m "chore: release vX.Y.Z"
 
 # 5. 创建并推送 tag
 git tag vX.Y.Z
-git push origin main --tags
+git push origin main
+git push origin vX.Y.Z
 ```
 
-Actions 应检出该 tag，而不是构建随后可能变化的 `main`。手动触发时也必须输入已经存在且版本一致的 tag。
+Actions 应检出该 tag，而不是构建随后可能变化的 `main`。手动触发时也必须输入已经存在且版本一致的 tag。`watch.started` 从默认分支读取版本后，只用于重试该版本已存在的 tag；若 tag 不存在或正式 Release 已发布，工作流会停止。
 
 ## 验收清单
 

@@ -200,12 +200,14 @@ git add src-tauri/tauri.conf.json package.json src-tauri/Cargo.toml src-tauri/Ca
 # 如果存在 package-lock.json 且被 version:sync 更新，也一起提交
 git commit -m "chore: release vX.Y.Z"
 git tag vX.Y.Z
-git push origin main --tags
+git push origin main
+git push origin vX.Y.Z
 ```
 
 发布流程、签名配置与验收清单见 [RELEASE_UPDATE_PLAN.md](RELEASE_UPDATE_PLAN.md)。
 推送与应用版本一致的 `vX.Y.Z` tag 后，GitHub Actions 构建 Windows 安装包，
 校验更新清单和资产，再公开正式 Release。
+工作流也支持 `watch.started`：Star 事件发生时，从默认分支读取版本并检出对应的已有 tag；正式 Release 已存在时不会重复发布。不要用 `git push --tags`，以免把其他本地标签一并推送。
 
 ### 5.6 自动检查更新与自动安装
 
@@ -217,8 +219,8 @@ Windows 安装器负责结束旧进程并在完成后重新启动应用。失败
 GitHub Actions 发版前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。本地生成的 `.tauri-updater.key` 和
 `.tauri-updater.password` 已被忽略；将各自内容设置为同名 Secret，妥善备份且不要提交。
-客户端公钥已写入 `src-tauri/tauri.conf.json`。先前发布的 `0.1.3` 尚未内置新流程，
-首次发布集成更新的 `0.1.5` 仍需手动下载安装；之后才可验证真实应用内升级。
+客户端公钥已写入 `src-tauri/tauri.conf.json`。未内置 updater 的旧版本需先手动安装新版，
+之后才可验证真实应用内升级。
 
 配置 GitHub 仓库 Secrets：
 
