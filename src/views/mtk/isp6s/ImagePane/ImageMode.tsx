@@ -1,28 +1,15 @@
-import { useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ImageEntry } from "@/ipc/imageScan";
+import { useImagePreview } from "@/hooks/useImagePreviewUrl";
 
 interface Props {
   entry: ImageEntry | undefined;
 }
 
 /**
- * Image preview mode — just renders the current jpg via Tauri's
- * `convertFileSrc` asset protocol. Auto-fits to container, preserves aspect.
+ * Renders a bounded preview while preserving the image aspect ratio.
  */
 export function ImageMode({ entry }: Props) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!entry) { setUrl(null); setErr(null); return; }
-    try {
-      setUrl(convertFileSrc(entry.jpg_path));
-      setErr(null);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
-  }, [entry?.jpg_path]);
+  const { url, error } = useImagePreview(entry?.jpg_path);
 
   if (!entry) {
     return (
@@ -32,11 +19,11 @@ export function ImageMode({ entry }: Props) {
       </div>
     );
   }
-  if (err) {
+  if (error) {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs"
            style={{ color: "var(--colorPaletteRedForeground1)" }}>
-        加载图片失败：{err}
+        加载图片失败
       </div>
     );
   }

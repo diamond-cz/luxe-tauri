@@ -58,3 +58,6 @@ export const loadImageThumbnailBatch = async (paths: string[], size: number, emb
   }
   return out;
 };
+
+export const loadImagePreview = async (path: string): Promise<string> =>
+  convertFileSrc(await call<string>("load_image_preview", { path }));

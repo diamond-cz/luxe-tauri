@@ -248,13 +248,22 @@ export function Isp6sAeVisual({
   const setImageDir   = useMtkStore((s) => s.setImageDir);
 
   useEffect(() => {
-    if (!imageDir.dir || imageDir.entries.length === 0) return;
+    if (!imageDir.dir) {
+      session.selectedToml = null;
+      setHeatmapSelection(null);
+      setCaptureMetadata(null);
+      return;
+    }
     if (session.imageDir !== imageDir.dir) {
       session.imageDir = imageDir.dir;
       session.imagePath = currentEntry?.jpg_path ?? null;
       session.imageScroll = null;
+      session.selectedToml = null;
+      setHeatmapSelection(null);
+      setCaptureMetadata(null);
       return;
     }
+    if (imageDir.entries.length === 0) return;
     if (!session.imagePath) {
       session.imagePath = currentEntry?.jpg_path ?? null;
       return;
@@ -263,13 +272,13 @@ export function Isp6sAeVisual({
     if (savedIndex >= 0 && savedIndex !== imageDir.current) void onPickImage(savedIndex);
   // Restore only when the workspace mounts or the folder changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageDir.dir, imageDir.entries]);
+  }, [imageDir.dir, imageDir.entries, session]);
 
   useEffect(() => {
     if (imageDir.status === "done" && currentEntry
       && session.imagePath === currentEntry.jpg_path) {
       session.selectedToml = {
-        entries: imageDir.entries,
+        dir: imageDir.dir ?? "",
         path: currentEntry.toml_path,
         data: imageDir.tomlData,
       };
@@ -386,7 +395,7 @@ export function Isp6sAeVisual({
         && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
     };
     setHeatmapSelection(null);
-    const cachedToml = session.selectedToml?.entries === imageDir.entries
+    const cachedToml = session.selectedToml?.dir === imageDir.dir
       && session.selectedToml.path === selectedEntry.toml_path
       ? session.selectedToml.data : null;
     setImageDir(isp, imageTabIdx, {
@@ -397,7 +406,7 @@ export function Isp6sAeVisual({
     try {
       const tomlData = await loadImageToml(selectedEntry.toml_path);
       if (!selectionIsCurrent()) return;
-      session.selectedToml = { entries: imageDir.entries, path: selectedEntry.toml_path, data: tomlData };
+      session.selectedToml = { dir: imageDir.dir ?? "", path: selectedEntry.toml_path, data: tomlData };
       setImageDir(isp, imageTabIdx, {
         tomlData, status: "done",
         message: `当前 ${imageDir.entries[idx].name}`,

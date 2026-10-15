@@ -13,12 +13,12 @@ import {
   CalculatorArrowClockwise24Regular,
   Search24Regular,
 } from "@fluentui/react-icons";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { loadImageThumbnailBatch, loadImageTomlFieldsBatch, type ImageEntry } from "@/ipc/imageScan";
+import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
@@ -825,12 +825,6 @@ function getPortalMenuColors() {
       };
 }
 
-function safeImageUrl(path: string | undefined): string | null {
-  if (!path) return null;
-  try { return convertFileSrc(path); }
-  catch { return null; }
-}
-
 function Thumb({ url, alt }: { url: string | null; alt: string }) {
   return (
     <span
@@ -863,16 +857,14 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
     loadImageThumbnailBatch([entry.jpg_path], 52)
       .then((batch) => {
         if (!cancelled) {
-          const next = batch[entry.jpg_path] || safeImageUrl(entry.jpg_path);
+          const next = batch[entry.jpg_path] || null;
           if (next) imageTableThumbnailCache.set(entry, next);
           setUrl(next);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          const next = safeImageUrl(entry.jpg_path);
-          if (next) imageTableThumbnailCache.set(entry, next);
-          setUrl(next);
+          setUrl(null);
         }
       });
     return () => { cancelled = true; };
@@ -2097,7 +2089,7 @@ export function LceTab({
 }
 
 export function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
-  const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
+  const { url, loading, error } = useImagePreview(entry?.jpg_path);
 
   if (!entry) {
     return (
@@ -2111,8 +2103,8 @@ export function LceImagePreview({ entry }: { entry: ImageEntry | undefined }) {
   if (!url) {
     return (
       <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs"
-           style={{ color: "var(--colorPaletteRedForeground1)" }}>
-        图片预览加载失败
+           style={{ color: error ? "var(--colorPaletteRedForeground1)" : "var(--colorNeutralForeground3)" }}>
+        {loading ? "加载中..." : "图片预览加载失败"}
       </div>
     );
   }
@@ -2139,7 +2131,7 @@ function LceImageTableMode({
   tomlData: Record<string, string>;
   hideImage?: boolean;
 }) {
-  const url = useMemo(() => safeImageUrl(entry?.jpg_path), [entry?.jpg_path]);
+  const url = useImagePreviewUrl(hideImage ? undefined : entry?.jpg_path);
 
   if (hideImage) {
     return <LcePreviewInfoTable schema={schema} tomlData={tomlData} />;

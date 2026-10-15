@@ -19,7 +19,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
-use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageEncoder};
+use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageEncoder, Limits};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -30,6 +30,9 @@ use crate::error::{AppError, AppResult};
 const TOML_CACHE_LIMIT: usize = 96;
 const TOML_FIELD_CACHE_LIMIT: usize = 512;
 const THUMBNAIL_CACHE_LIMIT: usize = 256;
+const PREVIEW_CACHE_LIMIT: usize = 16;
+const PREVIEW_SIZE: u32 = 1600;
+const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageEntry {
@@ -317,6 +320,7 @@ struct EncodedThumbnail {
 static TOML_CACHE: Lazy<DashMap<String, Arc<CachedToml>>> = Lazy::new(DashMap::new);
 static TOML_FIELD_CACHE: Lazy<DashMap<String, Arc<CachedTomlFields>>> = Lazy::new(DashMap::new);
 static THUMBNAIL_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
+static PREVIEW_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
 static CACHE_TICK: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_IMAGE_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
@@ -373,6 +377,7 @@ fn clear_runtime_caches_if_dir_changed(dir: &Path) {
     TOML_CACHE.clear();
     TOML_FIELD_CACHE.clear();
     THUMBNAIL_CACHE.clear();
+    PREVIEW_CACHE.clear();
     let _ = fs::remove_dir_all(thumbnail_cache_dir());
     *active = Some(next_dir);
 }
@@ -568,6 +573,45 @@ pub fn load_image_thumbnail_batch(
     Ok(out)
 }
 
+pub fn load_image_preview(path: &Path) -> AppResult<String> {
+    let signature = toml_signature(path)?;
+    let key = path.to_string_lossy().into_owned();
+    if let Some(cached) = PREVIEW_CACHE.get(&key) {
+        if cached.signature == signature && Path::new(&cached.path).exists() {
+            cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+            return Ok(cached.path.clone());
+        }
+    }
+
+    let encoded = generate_image_thumbnail(path, PREVIEW_SIZE, false)?;
+    let preview_path = write_thumbnail_cache_file(path, PREVIEW_SIZE, false, &signature, encoded)?;
+    let replaced = PREVIEW_CACHE.insert(key, Arc::new(CachedThumbnail {
+        signature,
+        path: preview_path.clone(),
+        last_used: AtomicU64::new(next_cache_tick()),
+    }));
+    if let Some(old) = replaced {
+        if old.path != preview_path {
+            let _ = fs::remove_file(&old.path);
+        }
+    }
+    prune_preview_cache();
+    Ok(preview_path)
+}
+
+fn prune_preview_cache() {
+    if PREVIEW_CACHE.len() <= PREVIEW_CACHE_LIMIT { return; }
+    let mut entries: Vec<_> = PREVIEW_CACHE.iter()
+        .map(|entry| (entry.key().clone(), entry.last_used.load(Ordering::Relaxed)))
+        .collect();
+    entries.sort_by_key(|(_, used)| *used);
+    for (key, _) in entries.into_iter().take(PREVIEW_CACHE.len().saturating_sub(PREVIEW_CACHE_LIMIT)) {
+        if let Some((_, cached)) = PREVIEW_CACHE.remove(&key) {
+            let _ = fs::remove_file(&cached.path);
+        }
+    }
+}
+
 fn toml_signature(path: &Path) -> AppResult<TomlSignature> {
     let meta = fs::metadata(path)?;
     Ok(TomlSignature {
@@ -605,7 +649,7 @@ fn load_image_thumbnail(path: &Path, size: u32, fast_only: bool) -> AppResult<St
         embedded_thumbnail_data_url_from_jpeg_file(path, size)
             .or_else(|| platform_thumbnail_data_url(path, size))
     } else {
-        Some(generate_image_thumbnail(path, size)?)
+        Some(generate_image_thumbnail(path, size, true)?)
     }) else {
         THUMBNAIL_CACHE.insert(
             cache_key,
@@ -673,9 +717,11 @@ fn signature_modified_key(signature: &TomlSignature) -> u128 {
         .unwrap_or(0)
 }
 
-fn generate_image_thumbnail(path: &Path, size: u32) -> AppResult<EncodedThumbnail> {
-    if let Some(data_url) = embedded_thumbnail_data_url_from_jpeg_file(path, size) {
-        return Ok(data_url);
+fn generate_image_thumbnail(path: &Path, size: u32, allow_embedded: bool) -> AppResult<EncodedThumbnail> {
+    if allow_embedded {
+        if let Some(thumbnail) = embedded_thumbnail_data_url_from_jpeg_file(path, size) {
+            return Ok(thumbnail);
+        }
     }
     if let Some(data_url) = platform_thumbnail_data_url(path, size) {
         return Ok(data_url);
@@ -686,15 +732,24 @@ fn generate_image_thumbnail(path: &Path, size: u32) -> AppResult<EncodedThumbnai
         .with_guessed_format()?
         .into_decoder()
         .map_err(|err| AppError::Other(format!("thumbnail decode error: {err}")))?;
+    let mut decode_limits = Limits::default();
+    decode_limits.max_image_width = Some(16_000);
+    decode_limits.max_image_height = Some(16_000);
+    decode_limits.max_alloc = Some(MAX_DECODE_ALLOC);
+    decoder
+        .set_limits(decode_limits)
+        .map_err(|err| AppError::Other(format!("thumbnail decode limits exceeded: {err}")))?;
     let exif = decoder
         .exif_metadata()
         .map_err(|err| AppError::Other(format!("thumbnail EXIF read error: {err}")))?;
     let orientation = decoder
         .orientation()
         .map_err(|err| AppError::Other(format!("thumbnail orientation error: {err}")))?;
-    if let Some(exif) = exif.as_deref() {
-        if let Some(data_url) = embedded_thumbnail_data_url(exif, orientation, size) {
-            return Ok(data_url);
+    if allow_embedded {
+        if let Some(exif) = exif.as_deref() {
+            if let Some(thumbnail) = embedded_thumbnail_data_url(exif, orientation, size) {
+                return Ok(thumbnail);
+            }
         }
     }
 
@@ -825,7 +880,7 @@ fn platform_thumbnail_data_url(path: &Path, size: u32) -> Option<EncodedThumbnai
         CoInitializeEx, CoUninitialize, IBindCtx, COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{
-        SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_BIGGERSIZEOK,
+        SHCreateItemFromParsingName, IShellItemImageFactory,
         SIIGBF_RESIZETOFIT,
     };
 
@@ -858,7 +913,7 @@ fn platform_thumbnail_data_url(path: &Path, size: u32) -> Option<EncodedThumbnai
                 cx: size as i32,
                 cy: size as i32,
             },
-            SIIGBF_RESIZETOFIT | SIIGBF_BIGGERSIZEOK,
+            SIIGBF_RESIZETOFIT,
         ) {
             Ok(hbitmap) => hbitmap,
             Err(_) => {
@@ -902,6 +957,9 @@ unsafe fn hbitmap_to_png_data_url(
 
     let width = bitmap.bmWidth as usize;
     let height = bitmap.bmHeight.unsigned_abs() as usize;
+    if width > size as usize || height > size as usize {
+        return None;
+    }
     let mut info = BITMAPINFO::default();
     info.bmiHeader.biSize = size_of::<windows::Win32::Graphics::Gdi::BITMAPINFOHEADER>() as u32;
     info.bmiHeader.biWidth = width as i32;

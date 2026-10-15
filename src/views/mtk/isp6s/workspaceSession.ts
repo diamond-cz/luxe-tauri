@@ -1,5 +1,4 @@
 import type { PreviewMode } from "./ImagePane/ImagePane";
-import type { ImageEntry } from "@/ipc/imageScan";
 
 export interface ScrollPosition {
   top: number;
@@ -11,7 +10,7 @@ export type DetailsTab = "normal" | "face" | "lce" | "bcompare";
 export interface WorkspaceSession {
   imageDir: string | null;
   imagePath: string | null;
-  selectedToml: { entries: ImageEntry[]; path: string; data: Record<string, string> } | null;
+  selectedToml: { dir: string; path: string; data: Record<string, string> } | null;
   imageScroll: ScrollPosition | null;
   infoScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
@@ -24,6 +23,7 @@ export interface WorkspaceSession {
 
 const sessions = new Map<string, WorkspaceSession>();
 const SOURCE_SCROLL_LIMIT = 8;
+const WORKSPACE_SESSION_LIMIT = 16;
 
 export function rememberSourceScroll(session: WorkspaceSession, key: string, position: ScrollPosition) {
   delete session.sourceScroll[key];
@@ -34,21 +34,30 @@ export function rememberSourceScroll(session: WorkspaceSession, key: string, pos
 
 export function workspaceSession(key: string): WorkspaceSession {
   let session = sessions.get(key);
-  if (!session) {
-    session = {
-      imageDir: null,
-      imagePath: null,
-      selectedToml: null,
-      imageScroll: null,
-      infoScroll: null,
-      detailsTab: "normal",
-      detailsScroll: {},
-      sourceMode: "param_map",
-      sourceScroll: {},
-      toneSourceSize: 40,
-      toneLceSize: 42,
-    };
+  if (session) {
+    // Refresh insertion order so the least recently used workspace is evicted.
+    sessions.delete(key);
     sessions.set(key, session);
+    return session;
+  }
+  session = {
+    imageDir: null,
+    imagePath: null,
+    selectedToml: null,
+    imageScroll: null,
+    infoScroll: null,
+    detailsTab: "normal",
+    detailsScroll: {},
+    sourceMode: "param_map",
+    sourceScroll: {},
+    toneSourceSize: 40,
+    toneLceSize: 42,
+  };
+  sessions.set(key, session);
+  while (sessions.size > WORKSPACE_SESSION_LIMIT) {
+    const oldest = sessions.keys().next().value;
+    if (oldest === undefined) break;
+    sessions.delete(oldest);
   }
   return session;
 }

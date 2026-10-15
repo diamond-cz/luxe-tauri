@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { Panel, PanelGroup } from "react-resizable-panels";
 import type { ImageEntry } from "@/ipc/imageScan";
+import { useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 
@@ -42,16 +42,13 @@ const HISTOGRAM_TICKS = [0, 51, 102, 153, 204, 255] as const;
  */
 export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: Props) {
   const histRef = useRef<HTMLCanvasElement | null>(null);
-  const [url, setUrl] = useState<string | null>(null);
+  const url = useImagePreviewUrl(hideImage ? undefined : entry?.jpg_path);
   const [histogram, setHistogram] = useState<HistogramData | null>(null);
 
   useEffect(() => {
-    if (!entry) { setUrl(null); return; }
-    setUrl(convertFileSrc(entry.jpg_path));
-  }, [entry?.jpg_path]);
-
-  useEffect(() => {
     let cancelled = false;
+    let offscreen: HTMLCanvasElement | null = null;
+    let imageData: ImageData | null = null;
     setHistogram(null);
     if (!url) return;
 
@@ -60,15 +57,16 @@ export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: P
     img.onload = () => {
       if (cancelled) return;
       const sample = getHistogramSampleSize(img);
-      const off = document.createElement("canvas");
-      off.width = sample.width;
-      off.height = sample.height;
-      const offCtx = off.getContext("2d");
+      offscreen = document.createElement("canvas");
+      offscreen.width = sample.width;
+      offscreen.height = sample.height;
+      const offCtx = offscreen.getContext("2d");
       if (!offCtx) return;
       // Keep histogram allocation bounded even for high-resolution captures.
       offCtx.imageSmoothingEnabled = sample.scale === 1 ? true : false;
-      offCtx.drawImage(img, 0, 0, off.width, off.height);
-      const data = offCtx.getImageData(0, 0, off.width, off.height).data;
+      offCtx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+      imageData = offCtx.getImageData(0, 0, offscreen.width, offscreen.height);
+      const data = imageData.data;
       const r = new Uint32Array(256);
       const g = new Uint32Array(256);
       const b = new Uint32Array(256);
@@ -78,6 +76,11 @@ export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: P
         b[data[i + 2]]++;
       }
       if (!cancelled) setHistogram({ r, g, b });
+      imageData = null;
+      offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+      offscreen.width = 0;
+      offscreen.height = 0;
+      offscreen = null;
     };
     img.onerror = () => {
       if (!cancelled) setHistogram(null);
@@ -88,7 +91,13 @@ export function ImageSplitMode({ entry, schema, tomlData, hideImage = false }: P
       cancelled = true;
       img.onload = null;
       img.onerror = null;
-      img.removeAttribute("src");
+      img.src = "";
+      if (offscreen) {
+        offscreen.width = 0;
+        offscreen.height = 0;
+        offscreen = null;
+      }
+      imageData = null;
     };
   }, [url]);
 

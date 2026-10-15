@@ -3,7 +3,12 @@ use std::path::PathBuf;
 
 use crate::error::{AppError, AppResult};
 use crate::image_scan;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use tauri::ipc::Channel;
+
+static PREVIEW_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(1));
+static PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
 
 #[tauri::command]
 pub async fn parse_image_exif(
@@ -68,4 +73,24 @@ pub async fn load_image_thumbnail_batch(
     })
     .await
     .map_err(|err| AppError::Other(format!("thumbnail batch task failed: {err}")))?
+}
+
+#[tauri::command]
+pub async fn load_image_preview(path: String) -> AppResult<String> {
+    let generation = {
+        let mut selection = PREVIEW_SELECTION.lock();
+        if selection.0 != path {
+            selection.0 = path.clone();
+            selection.1 = selection.1.wrapping_add(1);
+        }
+        selection.1
+    };
+    let _permit = PREVIEW_TASKS.acquire().await
+        .map_err(|err| AppError::Other(format!("image preview queue closed: {err}")))?;
+    if PREVIEW_SELECTION.lock().1 != generation {
+        return Err(AppError::Other("image preview superseded".into()));
+    }
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_preview(&PathBuf::from(path)))
+        .await
+        .map_err(|err| AppError::Other(format!("image preview task failed: {err}")))?
 }
