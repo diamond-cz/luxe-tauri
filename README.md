@@ -165,7 +165,7 @@ npm run tauri:debug
 
 ### 5.5 当前版本与发版流程
 
-当前程序版本以配置为准（本文更新时为 `v0.1.3`）。应用版本的唯一来源是
+当前程序版本以配置为准（本文更新时为 `v0.1.5`）。应用版本的唯一来源是
 `src-tauri/tauri.conf.json` 的 `"version"` 字段：
 
 
@@ -211,8 +211,25 @@ Windows 安装器负责结束旧进程并在完成后重新启动应用。失败
 发布前必须在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。本地生成的 `.tauri-updater.key` 和
 `.tauri-updater.password` 已被忽略；将各自内容设置为同名 Secret，妥善备份且不要提交。
-客户端公钥已写入 `src-tauri/tauri.conf.json`。当前版本 `0.1.3` 尚未内置新流程，
-首次发布集成更新的版本仍需手动下载安装；之后才可验证真实应用内升级。
+客户端公钥已写入 `src-tauri/tauri.conf.json`。先前发布的 `0.1.3` 尚未内置新流程，
+首次发布集成更新的 `0.1.5` 仍需手动下载安装；之后才可验证真实应用内升级。
+
+配置 GitHub 仓库 Secrets：
+
+1. 打开 `https://github.com/diamond-cz/luxe-tauri/settings/secrets/actions`，进入
+   **Repository secrets**，点击 **New repository secret**。
+2. 名称填 `TAURI_SIGNING_PRIVATE_KEY`；值填仓库根目录
+   `.tauri-updater.key` 的**完整文件内容**，包括所有行。保存后不要把内容粘贴到
+   Issue、日志、聊天或提交中。
+3. 再创建 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；值填仓库根目录
+   `.tauri-updater.password` 的内容。注意此项是 updater 私钥的密码，不是 GitHub 密码。
+4. 返回 **Repository secrets** 列表，确认两个名称都存在。GitHub 不会再次显示
+   Secret 的值；如果填错，请用同名 Secret 的 **Update** 重新设置。
+5. 提交版本同步后的文件并推送 `v0.1.5` tag。Actions 的 **Publish Windows release**
+   会检查两个 Secret、运行测试、签名打包并在资产校验完成后发布 Release。
+
+不要重新生成密钥对来“修复”GitHub Secret：现有应用配置已经绑定当前公钥；
+更换私钥必须同步更新公钥并重新发布应用。建议将私钥和密码分别备份在安全的密码管理器中。
 
 Tauri updater 签名与 Windows 代码签名证书不同。开发模式不能验证真实安装行为，
 须从上一版已安装的 NSIS 客户端测试升级。
