@@ -268,11 +268,13 @@ export function HomeView() {
         </section>
       </div>
 
-      <UpdateLogDialog
-        open={updateLogOpen}
-        onClose={() => setUpdateLogOpen(false)}
-        onOpenRelease={openReleaseUrl}
-      />
+      {updateLogOpen && (
+        <UpdateLogDialog
+          open
+          onClose={() => setUpdateLogOpen(false)}
+          onOpenRelease={openReleaseUrl}
+        />
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import logo from "@/assets/luxe-logo.png";
@@ -5,6 +6,7 @@ import { SectionTitle } from "@/components/settings/SectionTitle";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { APP_VERSION } from "@/services/appVersion";
 import { openUrl } from "@/ipc/shell";
+import { UpdateLogDialog } from "@/components/common/UpdateLogDialog";
 
 const AUTHOR_URL = "https://github.com/diamond-cz";
 const REPO_URL = "https://github.com/diamond-cz/luxe-tauri";
@@ -15,6 +17,7 @@ function openExternal(url: string) {
 
 export function AboutPanel() {
   const { t } = useTranslation();
+  const [updateLogOpen, setUpdateLogOpen] = useState(false);
 
   return (
     <div className="flex flex-col items-center gap-4 pt-2">
@@ -26,6 +29,10 @@ export function AboutPanel() {
         <span className="mx-2 text-pink-400">❤</span>
         {t("app_desc", { defaultValue: "影像效果跨平台AE算法可视化" })}
       </div>
+
+      <Button appearance="secondary" onClick={() => setUpdateLogOpen(true)}>
+        更新日志
+      </Button>
 
       {/* ────────── 开源 ────────── */}
       <section className="mt-4 flex w-full max-w-3xl flex-col gap-3">
@@ -80,6 +87,13 @@ export function AboutPanel() {
           </SettingRow>
         </div>
       </section>
+      {updateLogOpen && (
+        <UpdateLogDialog
+          open
+          onClose={() => setUpdateLogOpen(false)}
+          onOpenRelease={openExternal}
+        />
+      )}
     </div>
   );
 }

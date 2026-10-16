@@ -9,8 +9,6 @@ on:
       tag:
         description: Existing vX.Y.Z tag to publish
         required: true
-  watch:
-    types: [started]
 
 permissions:
   contents: read
@@ -22,13 +20,14 @@ concurrency:
 jobs:
   release:
     runs-on: windows-2022
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'watch' && github.event.repository.default_branch || inputs.tag || github.ref_name }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -36,25 +35,17 @@ jobs:
         id: release_tag
         shell: pwsh
         env:
-          EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:EVENT_NAME -eq 'watch') {
-            $version = (Get-Content src-tauri/tauri.conf.json -Encoding UTF8 -Raw | ConvertFrom-Json).version
-            $tag = "v$version"
-          } elseif ($env:INPUT_TAG) {
+          if ($env:INPUT_TAG) {
             $tag = $env:INPUT_TAG
           } else {
             $tag = $env:REF_NAME
           }
-          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected vX.Y.Z tag' }
+          if ($tag -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Expected vX.Y.Z tag' }
           if ((git tag --list $tag) -ne $tag) { throw "Tag $tag does not exist" }
-          if ($env:EVENT_NAME -eq 'watch') {
-            git checkout --detach "refs/tags/$tag"
-            if ($LASTEXITCODE -ne 0) { throw "Could not check out $tag" }
-          }
           $tagCommit = git rev-list -n 1 "refs/tags/$tag"
           $headCommit = git rev-parse HEAD
           if ($tagCommit -ne $headCommit) { throw "Checkout does not match tag $tag" }
@@ -144,23 +135,25 @@ jobs:
           Write-Host 'Updater signing key and password work.'
 
       - name: Verify synchronized version files
-        shell: pwsh
-        run: |
-          npm run version:sync
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --exit-code -- package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-          if ($LASTEXITCODE -ne 0) { throw 'Commit the synchronized version files before tagging' }
+        run: npm run version:check
 
-      # tauri::generate_context! also runs while compiling cargo test and
-      # requires the configured frontendDist (../dist) to exist.
-      - name: Build frontend for Rust tests
-        run: npm run build
+      - name: Test release scripts
+        run: npm run release:test
 
-      - name: Test release manifest generation
-        run: node --test scripts/prepare-release.test.mjs
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-x64
+          cache-on-failure: true
+
+      # beforeBuildCommand builds the frontend once. The resulting dist/ is
+      # also required by tauri::generate_context! when running Rust tests.
+      - name: Build application without installers
+        run: npm run tauri -- build --no-bundle --ci -- --locked
 
       - name: Test Rust
-        run: npm run rust:test
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Build NSIS and MSI
         shell: pwsh
@@ -168,9 +161,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # Cached build directories can contain installers from another tag.
+          # Only remove the generated bundle subtree, retaining compiled code.
+          $target = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'src-tauri/target'))
+          $bundle = [IO.Path]::GetFullPath((Join-Path $target 'release/bundle'))
+          if (-not $bundle.StartsWith("$target$([IO.Path]::DirectorySeparatorChar)", [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Bundle cleanup path is outside the build directory'
+          }
+          if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
           $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
           $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
-          npm run tauri -- build --bundles nsis,msi
+          npm run tauri -- bundle --bundles nsis,msi --ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate packages and create updater manifest
@@ -179,6 +181,21 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         run: node scripts/prepare-release.mjs $env:RELEASE_TAG
+
+      - name: Archive verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-${{ steps.release_tag.outputs.tag }}
+          path: |
+            ${{ steps.assets.outputs.asset1 }}
+            ${{ steps.assets.outputs.asset2 }}
+            ${{ steps.assets.outputs.asset3 }}
+            ${{ steps.assets.outputs.asset4 }}
+            ${{ steps.assets.outputs.asset5 }}
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 14
 
       - name: Create draft, upload, verify, and publish
         shell: pwsh
@@ -189,6 +206,8 @@ jobs:
           ASSET2: ${{ steps.assets.outputs.asset2 }}
           ASSET3: ${{ steps.assets.outputs.asset3 }}
           ASSET4: ${{ steps.assets.outputs.asset4 }}
+          ASSET5: ${{ steps.assets.outputs.asset5 }}
+          RELEASE_NOTES: ${{ steps.assets.outputs.notesFile }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
@@ -200,21 +219,25 @@ jobs:
           $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
           $response = Invoke-WebRequest -Uri $uri -Headers $headers -SkipHttpErrorCheck
           if ($response.StatusCode -eq 404) {
-            gh release create $env:RELEASE_TAG --draft --verify-tag --title "LUXE $env:RELEASE_TAG" --generate-notes
+            gh release create $env:RELEASE_TAG --draft --verify-tag --title "LUXE $env:RELEASE_TAG" --notes-file $env:RELEASE_NOTES
             if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
           } elseif ($response.StatusCode -eq 200 -and -not ($response.Content | ConvertFrom-Json).draft) {
             throw "Published release $env:RELEASE_TAG already exists"
           } elseif ($response.StatusCode -ne 200) {
             throw "Release lookup failed with HTTP $($response.StatusCode)"
           }
-          $assets = @($env:ASSET1, $env:ASSET2, $env:ASSET3, $env:ASSET4)
+          $assets = @($env:ASSET1, $env:ASSET2, $env:ASSET3, $env:ASSET4, $env:ASSET5)
           gh release upload $env:RELEASE_TAG @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Could not upload release assets' }
           $published = gh release view $env:RELEASE_TAG --json assets | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect draft release' }
+          if (@($published.assets).Count -ne $assets.Count) { throw 'Unexpected draft assets; remove stale assets before retrying' }
           foreach ($asset in $assets) {
             $name = Split-Path $asset -Leaf
-            if ($name -notin @($published.assets.name)) { throw "Missing uploaded asset: $name" }
+            $uploaded = @($published.assets | Where-Object { $_.name -ceq $name })
+            if ($uploaded.Count -ne 1 -or $uploaded[0].size -ne (Get-Item -LiteralPath $asset).Length) {
+              throw "Missing or incomplete uploaded asset: $name"
+            }
           }
-          gh release edit $env:RELEASE_TAG --draft=false
+          gh release edit $env:RELEASE_TAG --notes-file $env:RELEASE_NOTES --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish release' }

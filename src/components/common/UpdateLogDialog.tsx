@@ -1,3 +1,4 @@
+import UPDATE_LOGS from "@/data/changelog.json";
 import {
   Button,
   Dialog,
@@ -15,161 +16,11 @@ import {
   GITHUB_REPOSITORY_URL,
 } from "@/services/updateCheck";
 
-interface UpdateLogItem {
-  title: string;
-  desc: string;
-}
-
-interface UpdateLogSection {
-  title: string;
-  items: UpdateLogItem[];
-}
-
-interface UpdateLogEntry {
-  version: string;
-  date: string;
-  sections: UpdateLogSection[];
-}
-
 interface Props {
   open: boolean;
   onClose: () => void;
   onOpenRelease: (url: string) => void;
 }
-
-const UPDATE_LOGS: UpdateLogEntry[] = [
-  {
-    version: "0.1.3",
-    date: "2026-06-09",
-    sections: [
-      {
-        title: "新增",
-        items: [
-          {
-            title: "图片列表状态记忆",
-            desc: "记忆 Image、Normal、Face、LCE 当前选中项，以及 LCE 图片/三段图/二段图预览模式。",
-          },
-          {
-            title: "Image 表格排序交互",
-            desc: "支持键盘上下键切换选中行，并为 FACEST、1SST、BV 等数值列提供正序、逆序和右键恢复 IDX 顺序。",
-          },
-        ],
-      },
-      {
-        title: "优化",
-        items: [
-          {
-            title: "大批量图片加载",
-            desc: "优化 Image 表格 TOML 字段窗口化加载、缓存和缩略图显示，降低千张以上图片场景的内存占用与滚动等待。",
-          },
-          {
-            title: "Normal / Face / LCE 表格",
-            desc: "完善三类表格的布局、列宽、展开折叠、深浅色配色和持久化状态，提升大表格阅读体验。",
-          },
-          {
-            title: "LCE 可视化",
-            desc: "优化 LCE 预览区域、折线图贴边布局和 RGB 直方图显示，使统计结果更接近标准看图软件。",
-          },
-          {
-            title: "可视化卡片",
-            desc: "调整可视化卡片展开背景、内部层级和间距，并适配深色与浅色主题。",
-          },
-        ],
-      },
-      {
-        title: "修复",
-        items: [
-          {
-            title: "Image 表格恢复刷新",
-            desc: "修复切换到主页或其他平台页面后返回 Image 表格不自动更新，需要手动点击或滚动才加载的问题。",
-          },
-          {
-            title: "首次空状态",
-            desc: "首次启动且未加载图片时，图片列表卡片默认收起，减少空内容占用。",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    version: "0.1.2",
-    date: "2026-06-05",
-    sections: [
-      {
-        title: "新增",
-        items: [
-          {
-            title: "应用内更新记录",
-            desc: "主页更新日志改为弹窗展示，可直接查看版本变更并跳转下载页面。",
-          },
-        ],
-      },
-      {
-        title: "优化",
-        items: [
-          {
-            title: "主页信息区",
-            desc: "调整关于区域的版本、更新状态和操作入口，减少外链跳转带来的割裂感。",
-          },
-        ],
-      },
-      {
-        title: "修复",
-        items: [
-          {
-            title: "ISP6S 图片列表",
-            desc: "修复图片列表状态异常，提升导入、切换和浏览过程的稳定性。",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    version: "0.1.1",
-    date: "2026-06-05",
-    sections: [
-      {
-        title: "新增",
-        items: [
-          {
-            title: "版本发布流程",
-            desc: "补齐 Tauri 打包、版本同步、GitHub Release 发布和安装包上传说明。",
-          },
-          {
-            title: "自动检查更新",
-            desc: "启动后可检查 GitHub 最新版本，并将结果同步到首页更新卡片与侧边栏提示点。",
-          },
-        ],
-      },
-      {
-        title: "优化",
-        items: [
-          {
-            title: "ISP6S 可视化工作区",
-            desc: "调整参数文件、图片列表、可视化卡片和源代码卡片的布局与显示逻辑。",
-          },
-          {
-            title: "LCE 图片能力",
-            desc: "将图片、三段图相关能力归拢到图片列表卡片的 LCE 区域，并优化折线图显示。",
-          },
-          {
-            title: "基础交互",
-            desc: "优化设置界面、悬浮提示、关闭窗口行为和多处卡片细节。",
-          },
-        ],
-      },
-      {
-        title: "修复",
-        items: [
-          {
-            title: "MTK 页面中文显示",
-            desc: "修复 MTK 平台页面中文乱码问题。",
-          },
-        ],
-      },
-    ],
-  },
-];
 
 const SECTION_TONES: Record<string, { bg: string; border: string; fg: string }> = {
   新增: {
