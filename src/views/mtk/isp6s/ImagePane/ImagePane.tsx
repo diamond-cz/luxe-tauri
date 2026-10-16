@@ -51,14 +51,7 @@ interface Props {
   onSelectHeatmapImages?: (paths: string[]) => void;
   onCalculatorSourcePathChange?: (path: string | null) => void;
   onSourceEditorBindingChange?: (binding: SourceEditorBinding | null) => void;
-  chartCardTarget?: CardJumpTarget;
-  sourceCardTarget?: CardJumpTarget;
   scrollSession?: WorkspaceSession;
-}
-
-interface CardJumpTarget {
-  label: string;
-  key:   number;
 }
 
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
@@ -87,7 +80,7 @@ function rememberSourceHistory(path: string, snapshot: { revision: number; text:
 }
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, chartCardTarget, sourceCardTarget, scrollSession,
+  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
@@ -198,11 +191,6 @@ export function ImagePane({
     observer.observe(header);
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    setSourceOverride(undefined);
-    setChartFocus(null);
-  }, [chartCardTarget?.key, sourceCardTarget?.key]);
 
   useEffect(() => {
     let cancelled = false;
@@ -441,8 +429,6 @@ export function ImagePane({
               tomlData={tomlData}
               active={effectiveMode === "chart_map"}
               onSelectHeatmapImages={onSelectHeatmapImages}
-              activeCard={chartCardTarget?.label}
-              activeCardKey={chartCardTarget?.key}
               focusTarget={chartFocus}
               onFocusHandled={(key) => setChartFocus((current) => current?.key === key ? null : current)}
               sourceRevision={chartSourceRevision}
@@ -470,8 +456,6 @@ export function ImagePane({
             filePath={filePath}
             resolveFilePath={draftResolvePath}
             schema={schema}
-            activeCard={sourceCardTarget?.label}
-            activeCardKey={sourceCardTarget?.key}
             sourceOverride={sourceOverride}
             draft={sourceDraft}
             draftLoadError={sourceDraftError}

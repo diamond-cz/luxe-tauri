@@ -38,12 +38,6 @@ export interface Mtk {
   debug_parser_path?: string | null;
 }
 
-export interface NormalSubOrder {
-  MainT: string[];
-  HS:    string[];
-  NS:    string[];
-}
-
 export interface Isp6sAeVisual {
   split_mode:                 boolean;
   split_ratio:                number;
@@ -52,19 +46,8 @@ export interface Isp6sAeVisual {
   image_splitter_orientation: "V" | "H";
   image_inner_ratios:         number[];
   preview_mode:               "param_map" | "chart_map" | "image_split" | "para_check" | "image";
-  workspace_card_order:       string[];
   workspace_column_ratios:    number[];
   workspace_details_ratio:    number;
-  top_card_order:             string[];
-  normal_collapsed:           boolean;
-  face_collapsed:             boolean;
-  normal_wf_row_mode:         boolean;
-  face_wf_row_mode:           boolean;
-  normal_card_order:          string[];
-  face_card_order:            string[];
-  normal_col_ratios:          number[];
-  face_col_ratios:            number[];
-  normal_sub_order:           NormalSubOrder;
   table_collapsed:            boolean;
   table_header_ratios:        number[];
   chart_main_t_card_order:     string[];

@@ -10,19 +10,8 @@ const DEFAULT: Isp6sAeVisual = {
   image_splitter_orientation: "V",
   image_inner_ratios:         [],
   preview_mode:               "param_map",
-  workspace_card_order:       ["imageList", "imageInfo", "sourceCode"],
-  workspace_column_ratios:    [34, 33, 33],
+  workspace_column_ratios:    [67, 33],
   workspace_details_ratio:    42,
-  top_card_order:             ["Normal", "Face"],
-  normal_collapsed:           false,
-  face_collapsed:             false,
-  normal_wf_row_mode:         true,    // true = single-row horizontal, false = grid
-  face_wf_row_mode:           true,
-  normal_card_order:          ["MainT", "HS", "ABL", "NS"],
-  face_card_order:            ["Face", "Touch"],
-  normal_col_ratios:          [],
-  face_col_ratios:            [],
-  normal_sub_order:           { MainT: [], HS: [], NS: [] },
   table_collapsed:            false,
   table_header_ratios:        [24, 18, 58],
   chart_main_t_card_order:     ["mainThd", "mtwv", "mainTarget"],
@@ -42,6 +31,17 @@ const DEFAULT: Isp6sAeVisual = {
   tone_chart_map_tab:         "LTM",
 };
 
+function withoutRemovedImageInfo(next: Isp6sAeVisual): Isp6sAeVisual {
+  const oldRatios = next.workspace_column_ratios;
+  const sourceRatio = oldRatios.at(-1);
+  const sourceSize = sourceRatio !== undefined && Number.isFinite(sourceRatio)
+    ? Math.min(70, Math.max(24, sourceRatio)) : 33;
+  return {
+    ...next,
+    workspace_column_ratios: [100 - sourceSize, sourceSize],
+  };
+}
+
 interface VisualState {
   visual: Isp6sAeVisual;
   setVisual: (next: Isp6sAeVisual) => void;
@@ -54,10 +54,10 @@ export const useIsp6sVisualStore = create<VisualState>()(
     setVisual: (next) => set((s) => {
       // Merge defaults with whatever came from state.toml so newly-added
       // fields (e.g. after a schema bump) always have a sane value.
-      s.visual = { ...DEFAULT, ...next };
+      s.visual = withoutRemovedImageInfo({ ...DEFAULT, ...next });
     }),
     patch: (patch) => set((s) => {
-      s.visual = { ...s.visual, ...patch };
+      s.visual = withoutRemovedImageInfo({ ...s.visual, ...patch });
     }),
   })),
 );

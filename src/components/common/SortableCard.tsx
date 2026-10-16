@@ -14,9 +14,7 @@ interface Props {
   /** Optional icon and label for a header-integrated drag handle. */
   handleIcon?: ReactNode;
   handleTitle?: string;
-  /** Header height in px. Used to vertically center the drag handle on the
-   *  card's header. Defaults to 48 (CollapsibleCard h-12); pass 44 for
-   *  AeParamCard h-11. */
+  /** Header height in px. Used to vertically center the drag handle. */
   headerHeight?: number;
   /** Left offset for the floating handle, in px. */
   handleLeft?: number;

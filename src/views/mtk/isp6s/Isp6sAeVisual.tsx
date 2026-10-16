@@ -1,38 +1,11 @@
-import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Button } from "@fluentui/react-components";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  Apps24Regular,
-  TextBulletList24Regular,
-  DataHistogram24Regular,
-  FolderAdd24Regular,
-  PanelLeftExpand20Filled,
-  PanelRightExpand20Filled,
   PanelBottomContract20Regular,
   PanelBottomExpand20Filled,
-  Search24Regular,
-  TableSimple24Regular,
 } from "@fluentui/react-icons";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { open } from "@tauri-apps/plugin-fs";
-
-import {
-  DndContext, closestCenter, PointerSensor, KeyboardSensor,
-  useSensor, useSensors, type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext, arrayMove,
-  horizontalListSortingStrategy,
-  rectSortingStrategy,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-
-import { CollapsibleCard } from "@/components/common/CollapsibleCard";
-import { BadgeStrip } from "@/components/common/BadgeStrip";
-import { SortableCard } from "@/components/common/SortableCard";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
-import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { loadImageToml, parseImageExif, scanImageDir, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
 import type { ToastKind } from "@/components/common/Toast";
@@ -40,15 +13,10 @@ import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { IspId } from "../ispTabs";
-import { AeParamCard } from "./AeParamCard";
-import { LceImagePreview, LceTab, TablePane } from "./TablePane/TablePane";
+import { LceTab, TablePane } from "./TablePane/TablePane";
 import { NormalTable } from "./TablePane/NormalTable";
 import { FaceTable } from "./TablePane/FaceTable";
 import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
-import {
-  computeFaceTouchBadges, computeNormalBadges,
-  type NormalBadges, type FaceTouchBadges,
-} from "./badges";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab } from "./workspaceSession";
@@ -73,99 +41,11 @@ interface Props {
   onWorkspaceDividerChange: (x: number) => void;
 }
 
-const NORMAL_SUB_ACCENTS: Record<string, string> = {
-  MainT: "#9558C1", HS: "#2D7BF4", ABL: "#3FB56C", NS: "#E0A23F",
-};
-const FACE_TOUCH_ACCENTS: Record<string, string> = {
-  Face:  "#E94B7A", Touch: "#23B0B0",
-};
-const NORMAL_SUB_NAMES = ["MainT", "HS", "ABL", "NS"] as const;
-const FACE_SUB_NAMES   = ["Face", "Touch"] as const;
-const TOP_NAMES        = ["Normal", "Face"] as const;
 const CARD_GAP_PX      = 12;
 const DETAILS_DEFAULT_SIZE = 42;
 const DETAILS_MIN_SIZE = 25;
 const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
-const WORKSPACE_CARD_IDS = ["imageList", "imageInfo", "sourceCode"] as const;
-const UPPER_WORKSPACE_CARD_IDS = ["imageList", "imageInfo"] as const;
-const CHART_TARGET_BY_CARD: Record<string, string> = {
-  MainT: "MainT",
-  HS: "HS",
-  ABL: "ABL",
-  NS: "NS",
-  Face: "Face_FLT",
-  Touch: "Touch",
-};
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
-
-interface CardJumpTarget {
-  label: string;
-  key:   number;
-}
-
-function sanitiseOrder(order: string[], canonical: readonly string[]): string[] {
-  const known = new Set<string>(canonical);
-  const cleaned = order.filter((id) => known.has(id));
-  for (const id of canonical) {
-    if (!cleaned.includes(id)) cleaned.push(id);
-  }
-  return cleaned;
-}
-
-function imageTomlValue(data: Record<string, string>, keys: readonly string[]): string | null {
-  const entries = Object.entries(data);
-  for (const key of keys) {
-    const value = entries.find(([candidate]) =>
-      candidate.toLowerCase() === key.toLowerCase()
-      || candidate.toLowerCase().endsWith(`.${key.toLowerCase()}`),
-    )?.[1]?.trim();
-    if (value) return value;
-  }
-  return null;
-}
-
-interface CaptureMetadata {
-  path: string;
-  exposure: string | null;
-  iso: string | null;
-}
-
-const EXIF_READ_LIMIT = 1024 * 1024;
-
-async function readImageExifHeader(path: string): Promise<Uint8Array> {
-  const file = await open(path, { read: true });
-  try {
-    const header = new Uint8Array(EXIF_READ_LIMIT);
-    let length = 0;
-    while (length < header.length) {
-      const count = await file.read(header.subarray(length));
-      if (!count) break;
-      length += count;
-    }
-    return header.subarray(0, length);
-  } finally {
-    await file.close();
-  }
-}
-
-function formatExposureTime(value: unknown): string | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    if (value < 1) return `1/${Math.round(1 / value)} s`;
-    return `${value} s`;
-  }
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function formatImageMetadata(path: string, data: Record<string, string>, capture: CaptureMetadata | null): string {
-  const name = path.split(/[\\/]/).pop() ?? path;
-  const exposure = (capture?.path === path ? capture.exposure : null) ?? imageTomlValue(data, [
-    "ExposureTime", "Exposure Time", "AE_TAG_EXP_TIME", "AE_TAG_REAL_EXP_TIME",
-  ]);
-  const iso = (capture?.path === path ? capture.iso : null) ?? imageTomlValue(data, [
-    "ISO", "ISOSpeedRatings", "PhotographicSensitivity", "AE_TAG_REAL_ISO", "AE_TAG_ISO",
-  ]);
-  return `${name}  曝光时间 ${exposure ?? "-"}  ISO ${iso ?? "-"}`;
-}
 
 export function Isp6sAeVisual({
   isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
@@ -174,17 +54,12 @@ export function Isp6sAeVisual({
   const session = workspaceSession(workspaceKey);
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
-  /** Card that was last clicked — drives the source jump in `param_map` mode. */
-  const [chartCardTarget, setChartCardTarget] = useState<CardJumpTarget | undefined>(undefined);
-  const [sourceCardTarget, setSourceCardTarget] = useState<CardJumpTarget | undefined>(undefined);
   const [detailsTab, setDetailsTab] = useState<DetailsTab>(() => session.detailsTab);
   const [sourceEditorBinding, setSourceEditorBinding] = useState<SourceEditorBinding | null>(null);
   const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>(() => session.sourceMode);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
-  const [showImageMetadata, setShowImageMetadata] = useState(false);
-  const [captureMetadata, setCaptureMetadata] = useState<CaptureMetadata | null>(null);
   const [calculatorSourcePath, setCalculatorSourcePath] = useState<string | null>(filePath);
   const [exifProgress, setExifProgress] = useState<ExifParseProgress | null>(null);
   const [exifParsing, setExifParsing] = useState(false);
@@ -192,15 +67,7 @@ export function Isp6sAeVisual({
   const exifParsingRef = useRef(false);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
-  const infoScrollRef = useRef<HTMLDivElement | null>(null);
   const detailsBodyRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const el = infoScrollRef.current;
-    if (!el || !session.infoScroll) return;
-    el.scrollTop = session.infoScroll.top;
-    el.scrollLeft = session.infoScroll.left;
-  }, [schema, session]);
 
   useLayoutEffect(() => {
     const body = detailsBodyRef.current;
@@ -239,8 +106,6 @@ export function Isp6sAeVisual({
     reportWorkspaceDivider();
     return () => observer.disconnect();
   }, [schema, reportWorkspaceDivider]);
-  const cardJumpKeyRef = useRef(0);
-
   const imageTabIdx = toneMode ? 0 : tabIdx;
   const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${imageTabIdx}`]);
   const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
@@ -251,7 +116,6 @@ export function Isp6sAeVisual({
     if (!imageDir.dir) {
       session.selectedToml = null;
       setHeatmapSelection(null);
-      setCaptureMetadata(null);
       return;
     }
     if (session.imageDir !== imageDir.dir) {
@@ -260,7 +124,6 @@ export function Isp6sAeVisual({
       session.imageScroll = null;
       session.selectedToml = null;
       setHeatmapSelection(null);
-      setCaptureMetadata(null);
       return;
     }
     if (imageDir.entries.length === 0) return;
@@ -334,31 +197,6 @@ export function Isp6sAeVisual({
       setExifProgress(null);
     }
   };
-
-  useEffect(() => {
-    if (!showImageMetadata || !currentEntry) return;
-    let cancelled = false;
-    const path = currentEntry.jpg_path;
-    (async () => {
-      try {
-        const bytes = await readImageExifHeader(path);
-        const { parse } = await import("exifr");
-        const exif = await parse(bytes, { pick: ["ExposureTime", "ISO", "ISOSpeedRatings", "PhotographicSensitivity"] });
-        if (!cancelled) {
-          setCaptureMetadata({
-            path,
-            exposure: formatExposureTime(exif?.ExposureTime),
-            iso: exif?.ISO != null || exif?.ISOSpeedRatings != null || exif?.PhotographicSensitivity != null
-              ? String(exif.ISO ?? exif.ISOSpeedRatings ?? exif.PhotographicSensitivity)
-              : null,
-          });
-        }
-      } catch {
-        if (!cancelled) setCaptureMetadata({ path, exposure: null, iso: null });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [showImageMetadata, currentEntry?.jpg_path]);
 
   const visual   = useIsp6sVisualStore((s) => s.visual);
   const patchVis = useIsp6sVisualStore((s) => s.patch);
@@ -470,82 +308,16 @@ export function Isp6sAeVisual({
     await onPickImage(matchIndex);
   };
 
-  const pickImageDir = async () => {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked === "string") onImageDirChange(picked);
-  };
-
-  const normalBadges = useMemo(
-    () => schema ? computeNormalBadges(schema, imageDir.tomlData) : null,
-    [schema, imageDir.tomlData],
-  );
-  const faceBadges = useMemo(
-    () => schema ? computeFaceTouchBadges(schema, imageDir.tomlData) : null,
-    [schema, imageDir.tomlData],
-  );
-
-  const topOrder    = useMemo(() => sanitiseOrder(visual.top_card_order,    TOP_NAMES),        [visual.top_card_order]);
-  const normalOrder = useMemo(() => sanitiseOrder(visual.normal_card_order, NORMAL_SUB_NAMES), [visual.normal_card_order]);
-  const faceOrder   = useMemo(() => sanitiseOrder(visual.face_card_order,   FACE_SUB_NAMES),   [visual.face_card_order]);
-  const workspaceOrder = useMemo(
-    () => sanitiseOrder(visual.workspace_card_order ?? [], WORKSPACE_CARD_IDS),
-    [visual.workspace_card_order],
-  );
   const workspaceRatios = useMemo(() => {
     const values = visual.workspace_column_ratios ?? [];
-    return values.length === WORKSPACE_CARD_IDS.length
-      && values.every((value) => Number.isFinite(value) && value >= 0)
-      && values.some((value) => value > 0)
-      ? values
-      : [34, 33, 33];
+    return values.every((value) => Number.isFinite(value) && value >= 0) && values.some((value) => value > 0)
+      ? values : [67, 33];
   }, [visual.workspace_column_ratios]);
-  const upperWorkspaceOrder = useMemo(
-    () => sanitiseOrder(
-      workspaceOrder.filter((id) => id !== "sourceCode"),
-      UPPER_WORKSPACE_CARD_IDS,
-    ),
-    [workspaceOrder],
-  );
-  const workspaceRatioById = useMemo(
-    () => Object.fromEntries(workspaceOrder.map((id, index) => [id, workspaceRatios[index] ?? 0])),
-    [workspaceOrder, workspaceRatios],
-  );
-  const upperWorkspaceSizes = useMemo(() => {
-    const values = upperWorkspaceOrder.map((id) => workspaceRatioById[id] ?? 50);
-    const total = values.reduce((sum, value) => sum + value, 0) || 100;
-    return values.map((value) => (value / total) * 100);
-  }, [upperWorkspaceOrder, workspaceRatioById]);
-  const sourceColumnSize = Math.min(70, Math.max(24, workspaceRatioById.sourceCode || 33));
+  const sourceColumnSize = Math.min(70, Math.max(24, workspaceRatios[workspaceRatios.length - 1] ?? 33));
   const detailsSize = Number.isFinite(visual.workspace_details_ratio)
     ? Math.min(70, Math.max(DETAILS_MIN_SIZE, visual.workspace_details_ratio))
     : DETAILS_DEFAULT_SIZE;
-  const upperPanelRefs = useRef<Record<string, ImperativePanelHandle | null>>({});
   const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
-  const [collapsedUpperCards, setCollapsedUpperCards] = useState<Set<string>>(
-    () => new Set(upperWorkspaceOrder.filter((id) => (workspaceRatioById[id] ?? 0) === 0)),
-  );
-
-  const markUpperCardCollapsed = (cardId: string) => {
-    setCollapsedUpperCards((current) => {
-      const next = new Set(current);
-      next.add(cardId);
-      return next;
-    });
-  };
-
-  const markUpperCardExpanded = (cardId: string) => {
-    setCollapsedUpperCards((current) => {
-      if (!current.has(cardId)) return current;
-      const next = new Set(current);
-      next.delete(cardId);
-      return next;
-    });
-  };
-
-  const restoreUpperCard = (cardId: string) => {
-    upperPanelRefs.current[cardId]?.expand(24);
-    markUpperCardExpanded(cardId);
-  };
 
   const hideDetailsPanel = () => {
     const panel = detailsPanelRef.current;
@@ -555,47 +327,7 @@ export function Isp6sAeVisual({
     panel.collapse();
   };
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  const dragEndHandler =
-    (current: string[], commit: (next: string[]) => void) =>
-    (e: DragEndEvent) => {
-      const { active, over } = e;
-      if (!over || active.id === over.id) return;
-      const oldIdx = current.indexOf(String(active.id));
-      const newIdx = current.indexOf(String(over.id));
-      if (oldIdx < 0 || newIdx < 0) return;
-      requestAnimationFrame(() => commit(arrayMove(current, oldIdx, newIdx)));
-    };
-
-  /** Left click opens the chart tab; right click opens the matching source range. */
-  const nextCardJumpTarget = (label: string): CardJumpTarget => {
-    cardJumpKeyRef.current += 1;
-    return { label, key: cardJumpKeyRef.current };
-  };
-
-  const onCardClick = (card: string) => {
-    setChartCardTarget(nextCardJumpTarget(CHART_TARGET_BY_CARD[card] ?? card));
-    patchVis({ preview_mode: "chart_map" });
-  };
-
-  const onCardContextMenu = (event: MouseEvent<HTMLDivElement>, card: string) => {
-    event.preventDefault();
-    setSourceCardTarget(nextCardJumpTarget(card));
-    patchVis({ preview_mode: "param_map" });
-  };
-
   const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
-
-  // Kept for backward-compatible hidden header actions; layout switching is
-  // now exposed through the collapse chevron context menu.
-  const toggleNormalLayout = () =>
-    patchVis({ normal_wf_row_mode: !visual.normal_wf_row_mode });
-  const toggleFaceLayout = () =>
-    patchVis({ face_wf_row_mode: !visual.face_wf_row_mode });
 
   if (err) {
     return (
@@ -616,139 +348,6 @@ export function Isp6sAeVisual({
       </div>
     );
   }
-
-  /* ── Image information card ── */
-  const renderCardArea = () => (
-    <div className="flex h-full w-full min-w-0 flex-col"
-         style={{
-           background:  "var(--colorNeutralBackground1)",
-           border:      "1px solid var(--colorNeutralStroke2)",
-           borderRadius: 12,
-           overflow:    "hidden",
-         }}>
-      {/* Header bar — kept outside the scroll area so the divider stays put. */}
-        <div className="flex h-8 shrink-0 items-center pl-10 pr-4"
-            style={{
-              background: "var(--colorNeutralBackground2)",
-            }}>
-        <div className="flex min-w-0 items-center text-xs"
-             style={{ color: "var(--colorNeutralForeground2)" }}>
-          <span className="truncate">图片信息卡片</span>
-         </div>
-        </div>
-        <div className="hidden"
-             style={{
-               background: "var(--colorNeutralBackground1)",
-               borderBottom: "1px solid var(--colorNeutralStroke2)",
-             }}>
-          <Search24Regular className="h-4 w-4 shrink-0"
-                           style={{ color: "var(--colorNeutralForeground3)" }} />
-          <input
-            type="search"
-            value={imageSearchQuery}
-            onChange={(event) => {
-              setImageSearchQuery(event.target.value);
-              if (imageSearchError) setImageSearchError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              event.preventDefault();
-              void handleImageSearch();
-            }}
-            placeholder="搜索图片名称"
-            aria-label="搜索图片名称"
-            aria-invalid={Boolean(imageSearchError)}
-            title={imageSearchError ?? "输入图片名称后按 Enter 搜索"}
-            className="min-w-0 flex-1 bg-transparent text-[11px] outline-none"
-            style={{
-              color: "var(--colorNeutralForeground2)",
-              caretColor: "var(--colorBrandForeground1)",
-            }}
-          />
-          {imageSearchError && (
-            <span className="shrink-0 text-[10px]" style={{ color: "var(--colorPaletteRedForeground1)" }}>
-              {imageSearchError}
-            </span>
-          )}
-        </div>
-
-        <div className="flex h-8 shrink-0 items-center gap-2 px-4"
-             style={{
-               background: "var(--colorNeutralBackground1)",
-               borderBottom: "1px solid var(--colorNeutralStroke2)",
-               display: "none",
-             }}>
-          <HoverTooltip content="添加图片文件夹" positioning="below-center" inline>
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<FolderAdd24Regular />}
-              onClick={pickImageDir}
-              aria-label="添加图片文件夹"
-            />
-          </HoverTooltip>
-          <span className="min-w-0 flex-1 truncate text-[11px]"
-                style={{ color: "var(--colorNeutralForeground3)" }}>
-            {imageDir.dir ?? "点击文件夹图标添加图片文件夹"}
-          </span>
-        </div>
-
-        <div className="flex h-8 shrink-0 items-center px-4"
-             style={{
-               background: "var(--colorNeutralBackground1)",
-               borderBottom: "1px solid var(--colorNeutralStroke2)",
-             }}>
-          <span className="min-w-0 flex-1 truncate text-[11px]"
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setShowImageMetadata((shown) => !shown);
-                }}
-                title={showImageMetadata ? "右键显示完整路径" : "右键显示图片名称、曝光时间和 ISO"}
-                style={{ color: "var(--colorNeutralForeground3)" }}>
-            {showImageMetadata && currentEntry
-              ? formatImageMetadata(currentEntry.jpg_path, imageDir.tomlData, captureMetadata)
-              : currentEntry?.jpg_path ?? imageDir.dir ?? "未选择图片文件"}
-          </span>
-        </div>
-
-        {/* Scrollable body */}
-       <div ref={infoScrollRef}
-            className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3"
-            onScroll={(event) => {
-              session.infoScroll = { top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft };
-            }}
-            style={{ background: "var(--colorNeutralBackground1)" }}>
-         <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={dragEndHandler(topOrder, (next) => patchVis({ top_card_order: next }))}
-        >
-          <SortableContext items={topOrder} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-3">
-              {topOrder.map((name) => (
-                <SortableCard
-                  key={name}
-                  id={name}
-                  headerHeight={44}
-                  handleLeft={9}
-                  borderRadius={12}
-                >
-                  {renderTopCard(name)}
-                </SortableCard>
-              ))}
-            </div>
-          </SortableContext>
-         </DndContext>
-         <div className="flex min-h-[260px] min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg border p-3"
-              style={{
-                borderColor: "var(--colorNeutralStroke2)",
-                background: "var(--colorNeutralBackground1)",
-              }}>
-           <LceImagePreview entry={currentEntry} />
-         </div>
-       </div>
-    </div>
-  );
 
   const renderDetailsPanel = () => {
     const tabs: Array<{ id: typeof detailsTab; label: string }> = [
@@ -833,129 +432,6 @@ export function Isp6sAeVisual({
     );
   };
 
-  const renderTopCard = (name: string) => {
-    if (name === "Normal") {
-      return (
-        <CollapsibleCard
-          title="Normal"
-          collapsed={visual.normal_collapsed}
-          onToggle={(c) => patchVis({ normal_collapsed: c })}
-          onToggleContextMenu={() => patchVis({ normal_wf_row_mode: !visual.normal_wf_row_mode })}
-          hideHeaderExtra
-          surface="panel"
-          className="isp6s-info-card-container"
-          badges={
-            <BadgeStrip
-              items={[
-                { label: "CWR",           value: normalBadges?.cwr ?? "—", hint: schema.card?.Normal?.CWR },
-                { label: "Cal",           value: normalBadges?.cal ?? "—" },
-              ]}
-            />
-          }
-          headerExtra={
-            <HoverTooltip content={visual.normal_wf_row_mode ? "切换网格" : "切换单行"}
-                          positioning="below-center" inline>
-              <Button size="small" appearance="subtle"
-                      icon={visual.normal_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
-                      onClick={toggleNormalLayout} />
-            </HoverTooltip>
-          }
-        >
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={dragEndHandler(normalOrder, (next) => patchVis({ normal_card_order: next }))}
-          >
-            <SortableContext
-              items={normalOrder}
-              strategy={visual.normal_wf_row_mode ? horizontalListSortingStrategy : rectSortingStrategy}
-            >
-              <div className={visual.normal_wf_row_mode
-                ? "flex flex-row gap-2.5"
-                : "isp6s-info-normal-grid"}>
-                {normalOrder.map((sub) => (
-                  <SortableCard
-                    key={sub}
-                    id={sub}
-                    className={visual.normal_wf_row_mode ? "min-w-0 flex-1" : undefined}
-                    headerHeight={40}
-                    fullCardHandle
-                    showHandle={false}
-                    borderRadius={8}
-                  >
-                    <NormalSub name={sub} badges={normalBadges}
-                               onClick={() => onCardClick(sub)}
-                               onContextMenu={(event) => onCardContextMenu(event, sub)} />
-                  </SortableCard>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-        </CollapsibleCard>
-      );
-    }
-    if (name === "Face") {
-      return (
-        <CollapsibleCard
-          title="Face"
-          collapsed={visual.face_collapsed}
-          onToggle={(c) => patchVis({ face_collapsed: c })}
-          onToggleContextMenu={() => patchVis({ face_wf_row_mode: !visual.face_wf_row_mode })}
-          hideHeaderExtra
-          surface="panel"
-          badges={
-            <BadgeStrip
-              items={[
-                { label: "CWR",      value: faceBadges?.cwr      ?? "—" },
-                { label: "LCE_Gain", value: faceBadges?.lce_gain ?? "—" },
-              ]}
-            />
-          }
-          headerExtra={
-            <HoverTooltip content={visual.face_wf_row_mode ? "切换网格" : "切换单行"}
-                          positioning="below-center" inline>
-              <Button size="small" appearance="subtle"
-                      icon={visual.face_wf_row_mode ? <Apps24Regular /> : <TextBulletList24Regular />}
-                      onClick={toggleFaceLayout} />
-            </HoverTooltip>
-          }
-        >
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={dragEndHandler(faceOrder, (next) => patchVis({ face_card_order: next }))}
-          >
-            <SortableContext
-              items={faceOrder}
-              strategy={visual.face_wf_row_mode ? horizontalListSortingStrategy : rectSortingStrategy}
-            >
-              <div className={visual.face_wf_row_mode
-                ? "flex flex-row gap-2.5"
-                : "grid grid-cols-1 gap-2.5"}>
-                {faceOrder.map((sub) => (
-                  <SortableCard
-                    key={sub}
-                    id={sub}
-                    className={visual.face_wf_row_mode ? "min-w-0 flex-1" : undefined}
-                    headerHeight={40}
-                    fullCardHandle
-                    showHandle={false}
-                    borderRadius={8}
-                  >
-                    <FaceTouchSub name={sub} badges={faceBadges}
-                                  onClick={() => onCardClick(sub)}
-                                  onContextMenu={(event) => onCardContextMenu(event, sub)} />
-                  </SortableCard>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-        </CollapsibleCard>
-      );
-    }
-    return null;
-  };
-
   /* ── Table panel — wraps TablePane in standard padding. ── */
   const renderTablePanel = () => (
     <div className="h-full w-full min-w-0">
@@ -1009,57 +485,16 @@ export function Isp6sAeVisual({
           onSelectHeatmapImages={onSelectHeatmapImages}
           onCalculatorSourcePathChange={setCalculatorSourcePath}
           onSourceEditorBindingChange={setSourceEditorBinding}
-          chartCardTarget={chartCardTarget}
-          sourceCardTarget={sourceCardTarget}
           scrollSession={session}
         />
       </Suspense>
     </div>
   );
 
-  const upperWorkspacePanels: Record<(typeof UPPER_WORKSPACE_CARD_IDS)[number], ReactNode> = {
-    imageList: renderTablePanel(),
-    imageInfo: renderCardArea(),
-  };
-
-  const handleWorkspaceDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = upperWorkspaceOrder.indexOf(String(active.id));
-    const newIndex = upperWorkspaceOrder.indexOf(String(over.id));
-    if (oldIndex < 0 || newIndex < 0) return;
-    const nextOrder = arrayMove(upperWorkspaceOrder, oldIndex, newIndex);
-    patchVis({
-      workspace_card_order: [...nextOrder, "sourceCode"],
-      workspace_column_ratios: [
-        ...nextOrder.map((id) => workspaceRatioById[id] ?? 33),
-        sourceColumnSize,
-      ],
-    });
-  };
-
   const updateSourceColumnSize = (size: number) => {
     const nextSourceSize = Math.min(70, Math.max(24, size));
-    const upperTotal = Math.max(1, 100 - nextSourceSize);
-    const currentUpperTotal = upperWorkspaceOrder
-      .reduce((sum, id) => sum + (workspaceRatioById[id] ?? 0), 0) || 100;
-    patchVis({
-      workspace_card_order: [...upperWorkspaceOrder, "sourceCode"],
-      workspace_column_ratios: [
-        ...upperWorkspaceOrder.map((id) => ((workspaceRatioById[id] ?? 50) / currentUpperTotal) * upperTotal),
-        nextSourceSize,
-      ],
-    });
-  };
-
-  const updateUpperWorkspaceLayout = (sizes: number[]) => {
-    const upperTotal = Math.max(1, 100 - sourceColumnSize);
-    const nextRatios = upperWorkspaceOrder.map((_, index) => ((sizes[index] ?? 0) / 100) * upperTotal);
-    if (upperWorkspaceOrder.every((id, index) => Math.abs((workspaceRatioById[id] ?? 0) - nextRatios[index]) < 0.05)) return;
-    patchVis({
-      workspace_card_order: [...upperWorkspaceOrder, "sourceCode"],
-      workspace_column_ratios: [...nextRatios, sourceColumnSize],
-    });
+    if (Math.abs(nextSourceSize - sourceColumnSize) < 0.05) return;
+    patchVis({ workspace_column_ratios: [100 - nextSourceSize, nextSourceSize] });
   };
 
   if (toneMode) {
@@ -1126,93 +561,7 @@ export function Isp6sAeVisual({
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
         <PanelGroup direction="vertical" className="h-full w-full min-w-0">
           <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWorkspaceDragEnd}>
-              <SortableContext items={upperWorkspaceOrder} strategy={horizontalListSortingStrategy}>
-                <div className="relative h-full w-full min-w-0">
-                  <PanelGroup
-                    key={upperWorkspaceOrder.join("|")}
-                    direction="horizontal"
-                    className="h-full w-full"
-                    onLayout={updateUpperWorkspaceLayout}
-                  >
-                    {upperWorkspaceOrder.map((id, index) => {
-                      const cardId = id as (typeof UPPER_WORKSPACE_CARD_IDS)[number];
-                      return (
-                        <Fragment key={cardId}>
-                          {index > 0 && (
-                            <ResizeHandle
-                              direction="horizontal"
-                              size={collapsedUpperCards.size > 0 ? 0 : CARD_GAP_PX}
-                              className="overflow-hidden"
-                            />
-                          )}
-                          <Panel
-                            ref={(panel) => { upperPanelRefs.current[cardId] = panel; }}
-                            id={cardId}
-                            order={index}
-                            defaultSize={upperWorkspaceSizes[index]}
-                            minSize={18}
-                            collapsible
-                            collapsedSize={0}
-                            onCollapse={() => markUpperCardCollapsed(cardId)}
-                            onExpand={() => markUpperCardExpanded(cardId)}
-                          >
-                            <SortableCard
-                              id={cardId}
-                              className="h-full min-w-0"
-                              headerHeight={32}
-                              handleLeft={14}
-                              handleIcon={cardId === "imageList"
-                                ? <TableSimple24Regular className="h-4 w-4" />
-                                : <DataHistogram24Regular className="h-4 w-4" />}
-                              handleTitle={cardId === "imageList" ? "拖拽移动图片列表卡片" : "拖拽移动图片信息卡片"}
-                              borderRadius={12}
-                            >
-                              {upperWorkspacePanels[cardId]}
-                            </SortableCard>
-                          </Panel>
-                        </Fragment>
-                      );
-                    })}
-                  </PanelGroup>
-                  {upperWorkspaceOrder.map((cardId, index) => {
-                    if (!collapsedUpperCards.has(cardId)) return null;
-                    const isLeft = index === 0;
-                    return (
-                      <button
-                        key={`restore-${cardId}`}
-                        type="button"
-                        title={`Restore ${cardId === "imageList" ? "image list" : "image info"}`}
-                        aria-label={`Restore ${cardId === "imageList" ? "image list" : "image info"}`}
-                        onClick={() => restoreUpperCard(cardId)}
-                        style={{
-                          position: "absolute",
-                          top: "50%",
-                          left: isLeft ? 4 : undefined,
-                          right: isLeft ? undefined : 4,
-                          zIndex: 20,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: 28,
-                          height: 28,
-                          transform: "translateY(-50%)",
-                          border: "1px solid var(--colorNeutralStroke2)",
-                          borderRadius: 8,
-                          background: "var(--colorNeutralBackground1)",
-                          color: "var(--colorBrandForeground1)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {isLeft
-                          ? <PanelLeftExpand20Filled />
-                          : <PanelRightExpand20Filled />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </SortableContext>
-            </DndContext>
+            {renderTablePanel()}
           </Panel>
           <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
           <Panel
@@ -1261,73 +610,11 @@ export function Isp6sAeVisual({
 
 }
 
-/* ─── Sub-card renderers ─── */
-
 function PaneFallback({ label }: { label: string }) {
   return (
     <div className="flex h-full w-full items-center justify-center text-xs"
          style={{ color: "var(--colorNeutralForeground3)" }}>
       {label}
     </div>
-  );
-}
-
-function NormalSub({
-  name, badges, onClick, onContextMenu,
-}: {
-  name: string;
-  badges: NormalBadges | null;
-  onClick?: () => void;
-  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
-}) {
-  const sub = badges?.perSub[name as "MainT" | "HS" | "ABL" | "NS"];
-  return (
-    <AeParamCard
-      title={name}
-      accent={NORMAL_SUB_ACCENTS[name]}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      badges={[
-        { label: "WT",  value: sub?.wt  ?? "—", hint: sub?.wtKey  || "(未映射)" },
-        { label: "Tar", value: sub?.tar ?? "—", hint: sub?.tarKey || "(未映射)" },
-      ]}
-    />
-  );
-}
-
-function FaceTouchSub({
-  name, badges, onClick, onContextMenu,
-}: {
-  name: string;
-  badges: FaceTouchBadges | null;
-  onClick?: () => void;
-  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
-}) {
-  if (name === "Face") {
-    return (
-      <AeParamCard
-        title="Face"
-        accent={FACE_TOUCH_ACCENTS.Face}
-        onClick={onClick}
-        onContextMenu={onContextMenu}
-        badges={[
-          { label: "WT",  value: badges?.face.wt  ?? "—", hint: badges?.face.wtKey  ?? "(未映射)" },
-          { label: "FBT", value: badges?.face.fbt ?? "—", hint: badges?.face.fbtKey ?? "(未映射)" },
-          { label: "FLT", value: badges?.face.flt ?? "—", hint: badges?.face.fltKey ?? "(未映射)" },
-        ]}
-      />
-    );
-  }
-  return (
-    <AeParamCard
-      title="Touch"
-      accent={FACE_TOUCH_ACCENTS.Touch}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      badges={[
-        { label: "WT",  value: badges?.touch.wt  ?? "—", hint: badges?.touch.wtKey  ?? "(未映射)" },
-        { label: "Tar", value: badges?.touch.tar ?? "—", hint: badges?.touch.tarKey ?? "(未映射)" },
-      ]}
-    />
   );
 }

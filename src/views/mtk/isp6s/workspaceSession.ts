@@ -12,7 +12,6 @@ export interface WorkspaceSession {
   imagePath: string | null;
   selectedToml: { dir: string; path: string; data: Record<string, string> } | null;
   imageScroll: ScrollPosition | null;
-  infoScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
   detailsScroll: Partial<Record<DetailsTab, ScrollPosition>>;
   sourceMode: PreviewMode;
@@ -45,7 +44,6 @@ export function workspaceSession(key: string): WorkspaceSession {
     imagePath: null,
     selectedToml: null,
     imageScroll: null,
-    infoScroll: null,
     detailsTab: "normal",
     detailsScroll: {},
     sourceMode: "param_map",
