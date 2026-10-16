@@ -5,7 +5,6 @@ import {
   type NormalTableBlock,
   type NormalTableSchema,
 } from "@/ipc/normalTable";
-import { HoverTooltip } from "@/components/common/HoverTooltip";
 import {
   calculationCellBackground,
   calculationCellForeground,
@@ -429,9 +428,8 @@ function SheetCell({
   width?: CSSProperties["width"];
 }) {
   const body = title ? (
-    <HoverTooltip content={title} positioning="below-start" wrap maxWidth={520} inline>
-      <span style={sheetCellContentStyle()}>{children}</span>
-    </HoverTooltip>
+    <span title={title} data-tooltip-position="below-start" data-tooltip-wrap="true"
+      data-tooltip-max-width={520} style={sheetCellContentStyle()}>{children}</span>
   ) : children;
 
   return (

@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 
-import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { getFaceTableSchema, type FaceTableSchema } from "@/ipc/faceTable";
 import {
   calculationCellBackground,
@@ -215,7 +214,7 @@ export function FaceTable({ tomlData }: Props) {
     const observer = new ResizeObserver(updateSize);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [schema]);
 
   useEffect(() => {
     saveFaceTableUiState({ fbtExpanded, fltExpanded, detailBelowLayout, tableOrder });
@@ -773,9 +772,8 @@ function FaceCell({
   rowHeight?: number;
 }) {
   const body = title ? (
-    <HoverTooltip content={title} positioning="below-start" wrap maxWidth={520} inline>
-      <span style={faceCellContentStyle()}>{children}</span>
-    </HoverTooltip>
+    <span title={title} data-tooltip-position="below-start" data-tooltip-wrap="true"
+      data-tooltip-max-width={520} style={faceCellContentStyle()}>{children}</span>
   ) : children;
 
   return (

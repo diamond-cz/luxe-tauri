@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { PanelBottomContract20Regular, PanelBottomExpand20Filled } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -16,7 +16,7 @@ import { FaceTable } from "./TablePane/FaceTable";
 import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
-import { workspaceSession, type DetailsTab } from "./workspaceSession";
+import { workspaceSession, type DetailsTab, type WorkspaceSession } from "./workspaceSession";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -42,6 +42,12 @@ const CARD_GAP_PX      = 12;
 const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 const DETAILS_DEFAULT_SIZE = 42;
 const DETAILS_MIN_SIZE = 25;
+const DETAILS_TABS = [
+  { id: "normal", label: "Normal" },
+  { id: "face", label: "Face" },
+  { id: "lce", label: "LCE" },
+  { id: "bcompare", label: "bcompare" },
+] as const;
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
 export function Isp6sAeVisual({
@@ -64,29 +70,6 @@ export function Isp6sAeVisual({
   const exifParsingRef = useRef(false);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
-  const detailsBodyRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const body = detailsBodyRef.current;
-    const saved = session.detailsScroll[detailsTab];
-    if (!body || !saved) return;
-    let frame: number | null = null;
-    const restore = () => {
-      const scroller = body.querySelector<HTMLElement>(".normal-sheet-viewport, [data-isp6s-details-scroll]");
-      if (!scroller) return false;
-      frame = window.requestAnimationFrame(() => {
-        scroller.scrollTop = saved.top;
-        scroller.scrollLeft = saved.left;
-      });
-      return true;
-    };
-    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
-    if (!restore()) observer.observe(body, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
-  }, [detailsTab, schema, session]);
   const reportWorkspaceDivider = useCallback(() => {
     const rect = document.getElementById(WORKSPACE_DIVIDER_ID)?.getBoundingClientRect();
     if (rect) onWorkspaceDividerChange(rect.left + rect.width / 2);
@@ -314,53 +297,26 @@ export function Isp6sAeVisual({
     ? Math.min(70, Math.max(DETAILS_MIN_SIZE, visual.workspace_details_ratio))
     : DETAILS_DEFAULT_SIZE;
   const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
-  const hideDetailsPanel = () => {
+  const hideDetailsPanel = useCallback(() => {
     const panel = detailsPanelRef.current;
     if (!panel) return;
     const size = panel.getSize();
     if (size >= DETAILS_MIN_SIZE) patchVis({ workspace_details_ratio: size });
     panel.collapse();
-  };
+  }, [patchVis]);
   const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
-
-  const renderDetailsPanel = () => (
-    <div className="flex h-full w-full flex-col overflow-hidden"
-         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8 }}>
-      <div className="flex h-8 shrink-0 items-stretch px-2"
-           style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-        {([
-          { id: "normal", label: "Normal" },
-          { id: "face", label: "Face" },
-          { id: "lce", label: "LCE" },
-          { id: "bcompare", label: "bcompare" },
-        ] as const).map((tab) => {
-          const active = detailsTab === tab.id;
-          return <button key={tab.id} type="button" role="tab" aria-selected={active}
-            onClick={() => { session.detailsTab = tab.id; setDetailsTab(tab.id); }}
-            className="px-3 text-xs transition-colors"
-            style={{ color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)", background: active ? "var(--colorNeutralBackground1)" : "transparent", border: 0, borderBottom: active ? "2px solid var(--colorBrandStroke1)" : "2px solid transparent", fontWeight: active ? 600 : 400 }}>
-            {tab.label}
-          </button>;
-        })}
-        <button type="button" title="隐藏图片详情卡片" aria-label="隐藏图片详情卡片"
-          onClick={hideDetailsPanel} className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
-          style={{ color: "var(--colorNeutralForeground2)" }}><PanelBottomContract20Regular /></button>
-      </div>
-      <div ref={detailsBodyRef} className="min-h-0 flex-1 overflow-hidden"
-           onScrollCapture={(event) => {
-             const target = event.target;
-             if (target instanceof HTMLElement && target !== detailsBodyRef.current) {
-               session.detailsScroll[detailsTab] = { top: target.scrollTop, left: target.scrollLeft };
-             }
-           }}>
-        {detailsTab === "normal" && <NormalTable tomlData={imageDir.tomlData} />}
-        {detailsTab === "face" && <FaceTable tomlData={imageDir.tomlData} />}
-        {detailsTab === "lce" && <LceTab schema={schema!} tomlData={imageDir.tomlData} />}
-        {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema!} tomlData={imageDir.tomlData}
-          sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
-      </div>
-    </div>
-  );
+  const handleNormalPreviewMode = useCallback((mode: PreviewMode) => {
+    session.sourceMode = mode;
+    setPreviewMode(mode);
+  }, [session, setPreviewMode]);
+  const handleTonePreviewMode = useCallback((mode: PreviewMode) => {
+    session.sourceMode = mode;
+    setTonePreviewMode(mode);
+  }, [session]);
+  const handleDetailsTabChange = useCallback((tab: DetailsTab) => {
+    session.detailsTab = tab;
+    setDetailsTab(tab);
+  }, [session]);
 
   if (err) {
     return (
@@ -425,7 +381,7 @@ export function Isp6sAeVisual({
           toneParsed={toneParsed}
           importRevision={cppImportRevision}
           mode={toneMode ? tonePreviewMode : visual.preview_mode ?? "param_map"}
-          onMode={toneMode ? (mode) => { session.sourceMode = mode; setTonePreviewMode(mode); } : (mode) => { session.sourceMode = mode; setPreviewMode(mode); }}
+          onMode={toneMode ? handleTonePreviewMode : handleNormalPreviewMode}
           filePath={filePath ?? ""}
           onCppPathChange={onCppPathChange}
           schema={schema}
@@ -518,7 +474,17 @@ export function Isp6sAeVisual({
               collapsible collapsedSize={0} onCollapse={() => patchVis({ table_collapsed: true })}
               onExpand={() => patchVis({ table_collapsed: false })}
               onResize={(size) => { if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) patchVis({ workspace_details_ratio: size }); }}>
-              {renderDetailsPanel()}
+              {!visual.table_collapsed && <DetailsPanel
+                detailsTab={detailsTab}
+                onTabChange={handleDetailsTabChange}
+                onHide={hideDetailsPanel}
+                session={session}
+                schema={schema}
+                tomlData={imageDir.tomlData}
+                filePath={filePath}
+                cppImportRevision={cppImportRevision}
+                sourceEditorBinding={detailsTab === "bcompare" ? sourceEditorBinding : null}
+              />}
             </Panel>
           </PanelGroup>
           {visual.table_collapsed && <button type="button" title="显示图片详情卡片" aria-label="显示图片详情卡片"
@@ -538,6 +504,109 @@ export function Isp6sAeVisual({
   );
 
 }
+
+interface DetailsPanelProps {
+  detailsTab: DetailsTab;
+  onTabChange: (tab: DetailsTab) => void;
+  onHide: () => void;
+  session: WorkspaceSession;
+  schema: Isp6sSchemaRoot;
+  tomlData: Record<string, string>;
+  filePath: string | null;
+  cppImportRevision: number;
+  sourceEditorBinding: SourceEditorBinding | null;
+}
+
+/**
+ * The detail sheet is deliberately isolated from the image list workspace.
+ * Image scanning, progress updates and splitter movement should not cause a
+ * large table subtree to render again when its input data has not changed.
+ */
+const DetailsPanel = memo(function DetailsPanel({
+  detailsTab,
+  onTabChange,
+  onHide,
+  session,
+  schema,
+  tomlData,
+  filePath,
+  cppImportRevision,
+  sourceEditorBinding,
+}: DetailsPanelProps) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // The panel is intentionally mounted only while expanded. Restoring here
+  // makes a collapse/expand cycle restore the saved scroll position as soon as
+  // the selected table has mounted, without keeping an observer alive while
+  // the panel is hidden.
+  useLayoutEffect(() => {
+    const saved = session.detailsScroll[detailsTab];
+    if (!saved || detailsTab === "bcompare") return;
+    const body = bodyRef.current;
+    if (!body) return;
+    let frame: number | null = null;
+    let timeout: number | null = null;
+    let finished = false;
+    const restore = () => {
+      const scroller = body.querySelector<HTMLElement>(".normal-sheet-viewport, [data-isp6s-details-scroll]");
+      if (!scroller) return false;
+      finished = true;
+      frame = window.requestAnimationFrame(() => {
+        scroller.scrollTop = saved.top;
+        scroller.scrollLeft = saved.left;
+      });
+      return true;
+    };
+    const observer = new MutationObserver(() => {
+      if (restore()) observer.disconnect();
+    });
+    if (!restore()) {
+      observer.observe(body, { childList: true, subtree: true });
+      timeout = window.setTimeout(() => {
+        if (!finished) observer.disconnect();
+      }, 3000);
+    }
+    return () => {
+      observer.disconnect();
+      if (timeout !== null) window.clearTimeout(timeout);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [detailsTab, session, schema]);
+
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden"
+         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8 }}>
+      <div className="flex h-8 shrink-0 items-stretch px-2"
+           style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+        {DETAILS_TABS.map((tab) => {
+          const active = detailsTab === tab.id;
+          return <button key={tab.id} type="button" role="tab" aria-selected={active}
+            onClick={() => onTabChange(tab.id)}
+            className="px-3 text-xs transition-colors"
+            style={{ color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)", background: active ? "var(--colorNeutralBackground1)" : "transparent", border: 0, borderBottom: active ? "2px solid var(--colorBrandStroke1)" : "2px solid transparent", fontWeight: active ? 600 : 400 }}>
+            {tab.label}
+          </button>;
+        })}
+        <button type="button" title="隐藏图片详情卡片" aria-label="隐藏图片详情卡片"
+          onClick={onHide} className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
+          style={{ color: "var(--colorNeutralForeground2)" }}><PanelBottomContract20Regular /></button>
+      </div>
+      <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden"
+           onScrollCapture={(event) => {
+             const target = event.target;
+             if (target instanceof HTMLElement && target !== bodyRef.current) {
+               session.detailsScroll[detailsTab] = { top: target.scrollTop, left: target.scrollLeft };
+             }
+           }}>
+        {detailsTab === "normal" && <NormalTable tomlData={tomlData} />}
+        {detailsTab === "face" && <FaceTable tomlData={tomlData} />}
+        {detailsTab === "lce" && <LceTab schema={schema} tomlData={tomlData} />}
+        {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
+          sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
+      </div>
+    </div>
+  );
+});
 
 function PaneFallback({ label }: { label: string }) {
   return (
