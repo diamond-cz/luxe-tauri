@@ -72,11 +72,13 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 | 版本校验 | 校验 tag 为 `vX.Y.Z`，且去掉 `v` 后等于 `tauri.conf.json.version`；运行版本同步后确认没有产生未提交差异。 |
 | 依赖与检查 | 固定 Node/Rust 工具链版本，运行 `npm ci`、`npm run build`、`npm run rust:test`。`cargo test` 编译 `tauri::generate_context!` 时需要前端 `dist/`，因此先构建前端。工具链版本写入 workflow，后续更新需显式修改。 |
 | 构建 | 在 `windows-2022` x64 环境构建 NSIS、MSI 和 updater 签名产物；构建失败即终止。 |
-| 更新清单 | 从本次 NSIS `.exe` 及对应 `.exe.sig` 生成 `latest.json`。`version` 等于 tag，`platforms.windows-x86_64.url` 指向本次 Release 中的 NSIS 安装包，`signature` 使用对应签名文件内容。不得把 MSI 地址写入自动更新字段。 |
+| 更新清单 | 从本次 NSIS `.exe` 及对应 `.exe.sig` 生成 `latest.json`。`version` 等于 tag，`platforms.windows-x86_64.url` 使用 `https://gh-proxy.com/https://github.com/<owner>/<repo>/releases/download/<tag>/<NSIS文件名>` 加速下载，`signature` 使用对应签名文件内容。不得把 MSI 地址写入自动更新字段。 |
 | 发布 | 构建和本地校验全部通过后创建 Draft Release；上传 NSIS、MSI、签名和 `latest.json`，核对 Release 资产与清单引用，再自动发布正式版。 |
 | 重跑保护 | 若该 tag 已有正式 Release，workflow 报错并停止；若只存在未发布的 Draft，则复用 Draft 并覆盖同名资产。 |
 
 发布到当前仓库时，使用 `GITHUB_TOKEN` 即可承担 Release 写入，不需要参考配置中的跨仓库 `RELEASE_REPO_TOKEN`。`latest.json` 是固定 updater endpoint 的关键资产；只有正式 Release 发布后，`/releases/latest/download/latest.json` 才应指向本次版本。
+
+应用仍从 GitHub 直连地址读取 `latest.json`；加速仅用于清单中的 NSIS 安装包。Tauri updater 下载后继续用 `.sig` 验证包内容，验证失败会拒绝安装。该设置依赖第三方代理的可用性；代理下载失败时可在应用内打开 Release 页面手动安装。已发布 Release 的 `latest.json` 不会因脚本更新而自动改变，需在下一个版本按新脚本发布后才会生效。
 
 ### 4. 客户端更新交互
 

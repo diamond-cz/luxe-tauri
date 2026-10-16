@@ -28,13 +28,14 @@ if (signature !== `${installer}.sig`) throw new Error("NSIS installer and signat
 
 const manifest = path.join(bundle, "latest.json");
 const assetName = path.basename(installer);
+const githubAssetUrl = `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
 writeFileSync(manifest, `${JSON.stringify({
   version,
   notes: `LUXE ${tag}`,
   pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {
-      url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(assetName)}`,
+      url: `https://gh-proxy.com/${githubAssetUrl}`,
       signature: readFileSync(signature, "utf8").trim(),
     },
   },

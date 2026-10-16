@@ -35,8 +35,12 @@ test("manifest points to the signed NSIS installer", () => withPackages(({ targe
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(readFileSync(path.join(bundle, "latest.json"), "utf8"));
   assert.equal(manifest.version, version);
+  assert.deepEqual(Object.keys(manifest.platforms), ["windows-x86_64"]);
   assert.equal(manifest.platforms["windows-x86_64"].signature, "signature");
-  assert.ok(manifest.platforms["windows-x86_64"].url.endsWith(`/${nsisName}`));
+  assert.equal(
+    manifest.platforms["windows-x86_64"].url,
+    `https://gh-proxy.com/https://github.com/diamond-cz/luxe-tauri/releases/download/v${version}/${nsisName}`,
+  );
 }));
 
 test("missing signature prevents manifest generation", () => withPackages(({ target, nsis }) => {
