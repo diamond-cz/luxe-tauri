@@ -86,7 +86,6 @@ export function ImagePane({
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
-  const [internalCard] = useState<string | undefined>(undefined);
   const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
   const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
   const sourceDraftRef = useRef<SourceCodeDraft | null>(null);
@@ -95,7 +94,6 @@ export function ImagePane({
   const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
   const [tempDraftPending, setTempDraftPending] = useState(false);
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
-  const [chartMounted, setChartMounted] = useState(mode === "chart_map");
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: Exclude<PreviewMode, "para_check"> =
@@ -115,7 +113,7 @@ export function ImagePane({
     if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
     const frame = window.requestAnimationFrame(restore);
     return () => { window.cancelAnimationFrame(frame); observer.disconnect(); };
-  }, [effectiveMode, filePath, scrollSession, chartMounted]);
+  }, [effectiveMode, filePath, scrollSession]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -157,9 +155,6 @@ export function ImagePane({
     };
   }, [onCppPathChange]);
 
-  useEffect(() => {
-    if (effectiveMode === "chart_map") setChartMounted(true);
-  }, [effectiveMode]);
   const draftDirty = sourceDraftDirty(sourceDraft);
   const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
   const toneImportedPathsMatchDraft = Boolean(toneMode && sourceDraft && toneParsed && sourceDraft.text === sourceDraft.initialText);
@@ -175,7 +170,6 @@ export function ImagePane({
   useEffect(() => {
     onCalculatorSourcePathChange?.(calculatorSourcePath);
   }, [calculatorSourcePath, onCalculatorSourcePathChange]);
-  void internalCard;
   void entry;
 
   useEffect(() => {
@@ -183,7 +177,8 @@ export function ImagePane({
     if (!header) return;
 
     const update = () => {
-      setShowModeLabels(header.getBoundingClientRect().width >= 500);
+      const next = header.getBoundingClientRect().width >= 500;
+      setShowModeLabels((current) => current === next ? current : next);
     };
 
     update();
@@ -400,9 +395,9 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {chartMounted && chartFilePath && (!toneMode || toneParsed) && (
+        {effectiveMode === "chart_map" && chartFilePath && (!toneMode || toneParsed) && (
           <div ref={chartWrapRef}
-               style={{ display: effectiveMode === "chart_map" ? "block" : "none", width: "100%", height: "100%" }}
+               style={{ width: "100%", height: "100%" }}
                onScrollCapture={(event) => {
                  const target = event.target;
                  if (target instanceof HTMLElement && target.matches("[data-isp6s-chart-scroll]") && scrollSession) {

@@ -1,9 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  PanelBottomContract20Regular,
-  PanelBottomExpand20Filled,
-} from "@fluentui/react-icons";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
+import { PanelBottomContract20Regular, PanelBottomExpand20Filled } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -42,9 +39,9 @@ interface Props {
 }
 
 const CARD_GAP_PX      = 12;
+const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 const DETAILS_DEFAULT_SIZE = 42;
 const DETAILS_MIN_SIZE = 25;
-const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
 export function Isp6sAeVisual({
@@ -71,9 +68,8 @@ export function Isp6sAeVisual({
 
   useLayoutEffect(() => {
     const body = detailsBodyRef.current;
-    if (!body) return;
     const saved = session.detailsScroll[detailsTab];
-    if (!saved) return;
+    if (!body || !saved) return;
     let frame: number | null = null;
     const restore = () => {
       const scroller = body.querySelector<HTMLElement>(".normal-sheet-viewport, [data-isp6s-details-scroll]");
@@ -318,7 +314,6 @@ export function Isp6sAeVisual({
     ? Math.min(70, Math.max(DETAILS_MIN_SIZE, visual.workspace_details_ratio))
     : DETAILS_DEFAULT_SIZE;
   const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
-
   const hideDetailsPanel = () => {
     const panel = detailsPanelRef.current;
     if (!panel) return;
@@ -326,8 +321,46 @@ export function Isp6sAeVisual({
     if (size >= DETAILS_MIN_SIZE) patchVis({ workspace_details_ratio: size });
     panel.collapse();
   };
-
   const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
+
+  const renderDetailsPanel = () => (
+    <div className="flex h-full w-full flex-col overflow-hidden"
+         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8 }}>
+      <div className="flex h-8 shrink-0 items-stretch px-2"
+           style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
+        {([
+          { id: "normal", label: "Normal" },
+          { id: "face", label: "Face" },
+          { id: "lce", label: "LCE" },
+          { id: "bcompare", label: "bcompare" },
+        ] as const).map((tab) => {
+          const active = detailsTab === tab.id;
+          return <button key={tab.id} type="button" role="tab" aria-selected={active}
+            onClick={() => { session.detailsTab = tab.id; setDetailsTab(tab.id); }}
+            className="px-3 text-xs transition-colors"
+            style={{ color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)", background: active ? "var(--colorNeutralBackground1)" : "transparent", border: 0, borderBottom: active ? "2px solid var(--colorBrandStroke1)" : "2px solid transparent", fontWeight: active ? 600 : 400 }}>
+            {tab.label}
+          </button>;
+        })}
+        <button type="button" title="隐藏图片详情卡片" aria-label="隐藏图片详情卡片"
+          onClick={hideDetailsPanel} className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
+          style={{ color: "var(--colorNeutralForeground2)" }}><PanelBottomContract20Regular /></button>
+      </div>
+      <div ref={detailsBodyRef} className="min-h-0 flex-1 overflow-hidden"
+           onScrollCapture={(event) => {
+             const target = event.target;
+             if (target instanceof HTMLElement && target !== detailsBodyRef.current) {
+               session.detailsScroll[detailsTab] = { top: target.scrollTop, left: target.scrollLeft };
+             }
+           }}>
+        {detailsTab === "normal" && <NormalTable tomlData={imageDir.tomlData} />}
+        {detailsTab === "face" && <FaceTable tomlData={imageDir.tomlData} />}
+        {detailsTab === "lce" && <LceTab schema={schema!} tomlData={imageDir.tomlData} />}
+        {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema!} tomlData={imageDir.tomlData}
+          sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
+      </div>
+    </div>
+  );
 
   if (err) {
     return (
@@ -348,89 +381,6 @@ export function Isp6sAeVisual({
       </div>
     );
   }
-
-  const renderDetailsPanel = () => {
-    const tabs: Array<{ id: typeof detailsTab; label: string }> = [
-      { id: "normal", label: "Normal" },
-      { id: "face", label: "Face" },
-      { id: "lce", label: "LCE" },
-      { id: "bcompare", label: "bcompare" },
-    ];
-
-    return (
-      <div className="flex h-full w-full flex-col overflow-hidden"
-           style={{
-             background: "var(--colorNeutralBackground1)",
-             border: "1px solid var(--colorNeutralStroke2)",
-             borderRadius: 8,
-           }}>
-        <div className="flex h-8 shrink-0 items-stretch px-2"
-             style={{
-               background: "var(--colorNeutralBackground2)",
-               borderBottom: "1px solid var(--colorNeutralStroke2)",
-             }}>
-          {tabs.map((tab) => {
-            const active = detailsTab === tab.id;
-            const button = (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => { session.detailsTab = tab.id; setDetailsTab(tab.id); }}
-                className="px-3 text-xs transition-colors"
-                style={{
-                  color: active ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)",
-                  background: active ? "var(--colorNeutralBackground1)" : "transparent",
-                  border: 0,
-                  borderBottom: active ? "2px solid var(--colorBrandStroke1)" : "2px solid transparent",
-                  fontWeight: active ? 600 : 400,
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-            return button;
-          })}
-          <button
-            type="button"
-            title="隐藏图片详情卡片"
-            aria-label="隐藏图片详情卡片"
-            onClick={hideDetailsPanel}
-            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
-            style={{ color: "var(--colorNeutralForeground2)" }}
-          >
-            <PanelBottomContract20Regular />
-          </button>
-        </div>
-        <div ref={detailsBodyRef} className="min-h-0 flex-1 overflow-hidden"
-             onScrollCapture={(event) => {
-               const target = event.target;
-               if (target instanceof HTMLElement && target !== detailsBodyRef.current) {
-                 session.detailsScroll[detailsTab] = { top: target.scrollTop, left: target.scrollLeft };
-               }
-             }}>
-          {detailsTab === "normal" && <NormalTable tomlData={imageDir.tomlData} />}
-          {detailsTab === "face" && <FaceTable tomlData={imageDir.tomlData} />}
-          {detailsTab === "lce" && (
-            <LceTab
-              schema={schema}
-              tomlData={imageDir.tomlData}
-            />
-          )}
-          {detailsTab === "bcompare" && (
-            <ParaCheckMode
-              filePath={filePath ?? ""}
-              schema={schema}
-              tomlData={imageDir.tomlData}
-              sourceEditor={sourceEditorBinding?.filePath === filePath
-                && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null}
-            />
-          )}
-        </div>
-      </div>
-    );
-  };
 
   /* ── Table panel — wraps TablePane in standard padding. ── */
   const renderTablePanel = () => (
@@ -559,45 +509,24 @@ export function Isp6sAeVisual({
     <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
       <Panel defaultSize={100 - sourceColumnSize} minSize={30} className="min-w-0 overflow-hidden">
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
-        <PanelGroup direction="vertical" className="h-full w-full min-w-0">
-          <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
-            {renderTablePanel()}
-          </Panel>
-          <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
-          <Panel
-            ref={detailsPanelRef}
-            defaultSize={visual.table_collapsed ? 0 : detailsSize}
-            minSize={DETAILS_MIN_SIZE}
-            collapsible
-            collapsedSize={0}
-            onCollapse={() => patchVis({ table_collapsed: true })}
-            onExpand={() => patchVis({ table_collapsed: false })}
-            onResize={(size) => {
-              if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) {
-                patchVis({ workspace_details_ratio: size });
-              }
-            }}
-          >
-            {renderDetailsPanel()}
-          </Panel>
-        </PanelGroup>
-        {visual.table_collapsed && (
-          <button
-            type="button"
-            title="显示图片详情卡片"
-            aria-label="显示图片详情卡片"
+          <PanelGroup direction="vertical" className="h-full w-full min-w-0">
+            <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
+              {renderTablePanel()}
+            </Panel>
+            <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
+            <Panel ref={detailsPanelRef} defaultSize={visual.table_collapsed ? 0 : detailsSize} minSize={DETAILS_MIN_SIZE}
+              collapsible collapsedSize={0} onCollapse={() => patchVis({ table_collapsed: true })}
+              onExpand={() => patchVis({ table_collapsed: false })}
+              onResize={(size) => { if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) patchVis({ workspace_details_ratio: size }); }}>
+              {renderDetailsPanel()}
+            </Panel>
+          </PanelGroup>
+          {visual.table_collapsed && <button type="button" title="显示图片详情卡片" aria-label="显示图片详情卡片"
             onClick={() => detailsPanelRef.current?.expand(detailsSize)}
             className="absolute bottom-1 left-1/2 z-20 flex h-7 w-7 -translate-x-1/2 items-center justify-center"
-            style={{
-              border: "1px solid var(--colorNeutralStroke2)",
-              borderRadius: 8,
-              background: "var(--colorNeutralBackground1)",
-              color: "var(--colorBrandForeground1)",
-            }}
-          >
+            style={{ border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8, background: "var(--colorNeutralBackground1)", color: "var(--colorBrandForeground1)" }}>
             <PanelBottomExpand20Filled />
-          </button>
-        )}
+          </button>}
         </div>
       </Panel>
       <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />
