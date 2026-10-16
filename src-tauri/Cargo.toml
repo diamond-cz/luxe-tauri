@@ -1,6 +1,6 @@
 [package]
 name = "luxe-tauri"
-version = "0.1.8"
+version = "0.1.9"
 description = "LUXE — Camera Tuning AE Visualization (Rust + Tauri)"
 authors = ["LUXE"]
 edition = "2021"
@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.1", features = ["tray-icon", "image-png", "protocol-asset"] }
+tauri = { version = "=2.12.4", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-dialog = "2.2"
 tauri-plugin-fs = "2.2"
 tauri-plugin-global-shortcut = "2.2"
@@ -32,6 +32,8 @@ parking_lot = "0.12"
 dashmap = "6"
 once_cell = "1"
 rayon = "1"
+mimalloc = "=0.1.52"
+libmimalloc-sys = { version = "=0.1.49", features = ["extended"] }
 
 thiserror = "2"
 anyhow = "1"
@@ -57,6 +59,10 @@ windows = { version = "0.61.3", features = [
     "Win32_UI_Shell",
 ] }
 tauri-plugin-updater = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "=0.39.1"
+windows-webview = { package = "windows", version = "=0.62.2" }
 
 [features]
 default = ["custom-protocol"]

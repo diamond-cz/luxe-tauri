@@ -23,6 +23,7 @@ import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
 import { checkForUpdate } from "@/services/updateCheck";
+import { trimMemory } from "@/ipc/memory";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
 import {
@@ -90,6 +91,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
         if (decision === "tray") {
           event.preventDefault();
           await hideMainWindow();
+          void trimMemory(true).catch((error) => console.debug("memory trim failed", error));
           try {
             await sendNotification({
               title: "LUXE",

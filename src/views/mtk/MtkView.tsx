@@ -31,6 +31,12 @@ export function MtkView() {
   const restoredCppPath = useRef<string | null>(null);
   const restoredParserPath = useRef<string | null>(null);
   const cppRequestId = useRef(0);
+  const imageRequestId = useRef(0);
+
+  useEffect(() => () => {
+    cppRequestId.current += 1;
+    imageRequestId.current += 1;
+  }, []);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -153,12 +159,17 @@ export function MtkView() {
   }, [mtk.debug_parser_path, setDebugParserPath]);
 
   const onImageDirChange = async (dir: string) => {
+    const requestId = ++imageRequestId.current;
     const imageTabIdx = ispId === "ISP6S" && (tabIdx === 0 || tabIdx === 1) ? 0 : tabIdx;
-    const imageDirKey = `${ispId}|${imageTabIdx}`;
-    setImageDir(ispId, imageTabIdx, { dir, tomlData: {}, status: "scanning", message: null });
+    const previousDir = useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`]?.dir;
+    setImageDir(ispId, imageTabIdx, {
+      dir,
+      ...(previousDir !== dir ? { entries: [], current: 0 } : {}),
+      tomlData: {}, status: "scanning", message: null,
+    });
     try {
       const entries = await scanImageDir(dir);
-      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
+      if (requestId !== imageRequestId.current) return;
       if (entries.length === 0) {
         setImageDir(ispId, imageTabIdx, {
           entries: [], current: 0, tomlData: {},
@@ -169,13 +180,13 @@ export function MtkView() {
       }
       setImageDir(ispId, imageTabIdx, { entries, current: 0, tomlData: {}, status: "loading", message: null });
       const tomlData = await loadImageToml(entries[0].toml_path).catch((): Record<string, string> => ({}));
-      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
+      if (requestId !== imageRequestId.current) return;
       setImageDir(ispId, imageTabIdx, {
         tomlData, status: "done",
         message: `已加载 ${entries.length} 张图片 · 当前 ${entries[0].name}`,
       });
     } catch (e) {
-      if (useMtkStore.getState().imageDir[imageDirKey]?.dir !== dir) return;
+      if (requestId !== imageRequestId.current) return;
       setImageDir(ispId, imageTabIdx, {
         status:  "error",
         message: e instanceof Error ? e.message : String(e),

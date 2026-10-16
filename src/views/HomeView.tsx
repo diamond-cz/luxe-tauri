@@ -31,6 +31,7 @@ import {
 } from "@/services/updateCheck";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
+import { installAvailableUpdate } from "@/services/installUpdate";
 
 interface PlatformCard {
   to: string;
@@ -72,15 +73,11 @@ export function HomeView() {
   const updateMessage = useUpdateStore((s) => s.message);
   const releaseUrl = useUpdateStore((s) => s.releaseUrl);
   const updateNotes = useUpdateStore((s) => s.notes);
-  const availableUpdate = useUpdateStore((s) => s.update);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
   const downloadTotal = useUpdateStore((s) => s.totalBytes);
   const setUpdateChecking = useUpdateStore((s) => s.setChecking);
   const setUpdateResult = useUpdateStore((s) => s.setResult);
   const setUpdateError = useUpdateStore((s) => s.setError);
-  const setDownloadStart = useUpdateStore((s) => s.setDownloadStart);
-  const setDownloadProgress = useUpdateStore((s) => s.setDownloadProgress);
-  const setInstalling = useUpdateStore((s) => s.setInstalling);
   const [platformOrder, setPlatformOrder] = useState(
     PLATFORM_CARDS.map((card) => card.to),
   );
@@ -137,24 +134,6 @@ export function HomeView() {
       const result = await checkForUpdate();
       setUpdateResult(result, "manual");
     } catch (err) {
-      setUpdateError(err, "manual");
-    }
-  };
-
-  const installUpdate = async () => {
-    if (!availableUpdate || updateBusy) return;
-    setDownloadStart();
-    try {
-      await availableUpdate.download((event) => {
-        if (event.event === "Started") setDownloadProgress(0, event.data.contentLength);
-        if (event.event === "Progress") setDownloadProgress(event.data.chunkLength);
-      });
-      setInstalling();
-      // On Windows, the updater launches the installer and exits this process.
-      // The NSIS installer restarts the app after it finishes.
-      await availableUpdate.install();
-    } catch (err) {
-      await availableUpdate.close().catch(() => {});
       setUpdateError(err, "manual");
     }
   };
@@ -280,7 +259,7 @@ export function HomeView() {
                 appearance="primary"
                 icon={updateStatus === "available" ? <ArrowDownload24Regular /> : <ArrowSync24Regular />}
                 disabled={updateBusy}
-                onClick={updateStatus === "available" ? installUpdate : checkUpdate}
+                onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
               >
                 {primaryUpdateLabel}
               </Button>

@@ -4,6 +4,7 @@ pub mod cpp_parser;
 pub mod error;
 pub mod events;
 pub mod image_scan;
+mod memory_trim;
 pub mod poetry;
 pub mod shortcuts;
 pub mod state;
@@ -17,6 +18,9 @@ use tauri::{Manager, RunEvent};
 use crate::config::{LocaleCatalog, StateStore};
 use crate::shortcuts::{make_registry, Registry};
 use crate::state::AppState;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -137,6 +141,7 @@ pub fn run() {
             commands::text_cmds::read_text_file,
             commands::text_cmds::write_temp_text_file,
             commands::text_cmds::write_text_file,
+            memory_trim::trim_memory,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

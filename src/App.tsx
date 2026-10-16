@@ -9,6 +9,7 @@ import { CloseBehaviorDialog } from "@/components/shell/CloseBehaviorDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { GlobalTitleTooltip } from "@/components/common/HoverTooltip";
 import { useShellBootstrap } from "@/hooks/useShellBootstrap";
+import { useIdleMemoryTrim } from "@/hooks/useIdleMemoryTrim";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 const HomeView = lazy(() => import("@/views/HomeView").then(({ HomeView }) => ({ default: HomeView })));
@@ -44,6 +45,7 @@ function ShellRoot() {
   const toggleSideNav = useCallback(() => setSideNavVisible((visible) => !visible), []);
 
   useShellBootstrap({ onNavigate, onRequestCloseAsk });
+  useIdleMemoryTrim();
 
   const themeKey = useSettingsStore((s) => s.settings.theme);
   const scale    = useSettingsStore((s) => s.settings.scale);

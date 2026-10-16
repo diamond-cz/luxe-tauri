@@ -7,10 +7,13 @@ import {
   Square16Regular,
   SquareMultiple16Regular,
   Dismiss16Regular,
+  ArrowCircleUp24Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fetchPoetry } from "@/ipc/shell";
 import { usePoetryStore } from "@/stores/poetryStore";
+import { useUpdateStore } from "@/stores/updateStore";
+import { installAvailableUpdate } from "@/services/installUpdate";
 
 /**
  * Frameless title bar — replaces the OS-drawn title bar (`decorations: false`).
@@ -120,6 +123,7 @@ export function TitleBar({ sideNavVisible, onToggleSideNav }: TitleBarProps) {
       </div>
 
       <div className="flex h-full items-stretch">
+        <AvailableUpdateButton />
         <CtrlButton
           title={pinned ? "取消置顶" : "置顶窗口"}
           onClick={togglePin}
@@ -136,6 +140,67 @@ export function TitleBar({ sideNavVisible, onToggleSideNav }: TitleBarProps) {
         <CtrlButton title="关闭" onClick={onClose} variant="danger">
           <Dismiss16Regular />
         </CtrlButton>
+      </div>
+    </div>
+  );
+}
+
+function AvailableUpdateButton() {
+  const navigate = useNavigate();
+  const status = useUpdateStore((state) => state.status);
+  const version = useUpdateStore((state) => state.latestVersion);
+  const notes = useUpdateStore((state) => state.notes);
+  const downloaded = useUpdateStore((state) => state.downloadedBytes);
+  const total = useUpdateStore((state) => state.totalBytes);
+  const update = useUpdateStore((state) => state.update);
+  const visible = Boolean(version && update && ["available", "downloading", "installing"].includes(status));
+  if (!visible) return null;
+
+  const busy = status !== "available";
+  const label = status === "downloading"
+    ? `下载中 ${total ? `${Math.min(100, Math.floor(downloaded / total * 100))}%` : `${(downloaded / 1048576).toFixed(1)} MB`}`
+    : status === "installing" ? "正在安装" : "立即更新";
+
+  return (
+    <div className="group relative flex h-full items-stretch">
+      <button
+        type="button"
+        aria-label={`发现新版本 v${version}`}
+        aria-haspopup="true"
+        onClick={() => navigate("/home")}
+        className="flex h-full w-11 items-center justify-center transition-colors hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+        style={{ color: "var(--colorPaletteGreenForeground1)" }}
+      >
+        <ArrowCircleUp24Regular className="h-5 w-5" />
+      </button>
+      <div
+        className="invisible absolute right-0 top-full z-50 w-[min(22rem,calc(100vw-1rem))] pt-1 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+      >
+        <div
+          className="rounded-md border p-3 shadow-lg"
+          style={{ background: "var(--colorNeutralBackground1)", borderColor: "var(--colorNeutralStroke2)" }}
+        >
+          <div className="text-sm font-semibold" style={{ color: "var(--colorNeutralForeground1)" }}>
+            发现新版本 v{version}
+          </div>
+          {notes && (
+            <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5"
+              style={{ color: "var(--colorNeutralForeground2)" }}>
+              {notes}
+            </div>
+          )}
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void installAvailableUpdate()}
+              className="rounded px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-default disabled:opacity-60"
+              style={{ background: "var(--colorBrandBackground)" }}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

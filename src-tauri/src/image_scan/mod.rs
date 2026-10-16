@@ -332,7 +332,18 @@ static TOML_FIELD_CACHE: Lazy<DashMap<String, Arc<CachedTomlFields>>> = Lazy::ne
 static THUMBNAIL_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
 static PREVIEW_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
 static CACHE_TICK: AtomicU64 = AtomicU64::new(1);
+static CACHE_GENERATION: AtomicU64 = AtomicU64::new(1);
+static CACHE_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static ACTIVE_IMAGE_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
+
+pub fn clear_memory_caches() {
+    let _write = CACHE_WRITE_LOCK.lock();
+    CACHE_GENERATION.fetch_add(1, Ordering::AcqRel);
+    TOML_CACHE.clear();
+    TOML_FIELD_CACHE.clear();
+    THUMBNAIL_CACHE.clear();
+    PREVIEW_CACHE.clear();
+}
 
 /// Scan `dir` for image files (`.jpg`, `.jpeg`, `.png`). A sibling `.toml`
 /// with the same stem is used when present; otherwise its expected path is
@@ -384,10 +395,7 @@ fn clear_runtime_caches_if_dir_changed(dir: &Path) {
         return;
     }
 
-    TOML_CACHE.clear();
-    TOML_FIELD_CACHE.clear();
-    THUMBNAIL_CACHE.clear();
-    PREVIEW_CACHE.clear();
+    clear_memory_caches();
     let _ = fs::remove_dir_all(thumbnail_cache_dir());
     *active = Some(next_dir);
 }
@@ -430,6 +438,7 @@ fn prune_cache<T>(
 /// - Arrays are joined with ", " (so the value is a single string just like
 ///   the Python flattener returns).
 pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
+    let generation = CACHE_GENERATION.load(Ordering::Acquire);
     let cache_key = path.to_string_lossy().into_owned();
     let signature = toml_signature(path)?;
 
@@ -441,6 +450,10 @@ pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
     }
 
     let data = parse_image_toml(path)?;
+    let _write = CACHE_WRITE_LOCK.lock();
+    if generation != CACHE_GENERATION.load(Ordering::Acquire) {
+        return Ok(data);
+    }
     TOML_CACHE.insert(
         cache_key,
         Arc::new(CachedToml {
@@ -526,6 +539,7 @@ fn load_image_toml_fields(
     key_lookup: &HashMap<String, String>,
     key_signature: &str,
 ) -> AppResult<HashMap<String, String>> {
+    let generation = CACHE_GENERATION.load(Ordering::Acquire);
     if key_lookup.is_empty() {
         return Ok(HashMap::new());
     }
@@ -542,6 +556,10 @@ fn load_image_toml_fields(
     }
 
     let data = parse_image_toml_fields(path, key_lookup)?;
+    let _write = CACHE_WRITE_LOCK.lock();
+    if generation != CACHE_GENERATION.load(Ordering::Acquire) {
+        return Ok(data);
+    }
     TOML_FIELD_CACHE.insert(
         cache_key,
         Arc::new(CachedTomlFields {
@@ -584,6 +602,7 @@ pub fn load_image_thumbnail_batch(
 }
 
 pub fn load_image_preview(path: &Path) -> AppResult<String> {
+    let generation = CACHE_GENERATION.load(Ordering::Acquire);
     let signature = toml_signature(path)?;
     let key = path.to_string_lossy().into_owned();
     if let Some(cached) = PREVIEW_CACHE.get(&key) {
@@ -595,6 +614,10 @@ pub fn load_image_preview(path: &Path) -> AppResult<String> {
 
     let encoded = generate_image_thumbnail(path, PREVIEW_SIZE, false)?;
     let preview_path = write_thumbnail_cache_file(path, PREVIEW_SIZE, false, &signature, encoded)?;
+    let _write = CACHE_WRITE_LOCK.lock();
+    if generation != CACHE_GENERATION.load(Ordering::Acquire) {
+        return Ok(preview_path);
+    }
     let replaced = PREVIEW_CACHE.insert(key, Arc::new(CachedThumbnail {
         signature,
         path: preview_path.clone(),
@@ -631,6 +654,7 @@ fn toml_signature(path: &Path) -> AppResult<TomlSignature> {
 }
 
 fn load_image_thumbnail(path: &Path, size: u32, fast_only: bool) -> AppResult<String> {
+    let generation = CACHE_GENERATION.load(Ordering::Acquire);
     let cache_key = format!(
         "{}\0{size}\0{}",
         if fast_only { "fast" } else { "full" },
@@ -661,21 +685,28 @@ fn load_image_thumbnail(path: &Path, size: u32, fast_only: bool) -> AppResult<St
     } else {
         Some(generate_image_thumbnail(path, size, true)?)
     }) else {
-        THUMBNAIL_CACHE.insert(
-            cache_key,
-            Arc::new(CachedThumbnail {
-                signature,
-                path: String::new(),
-                last_used: AtomicU64::new(next_cache_tick()),
-            }),
-        );
-        prune_cache(&THUMBNAIL_CACHE, THUMBNAIL_CACHE_LIMIT, |entry| {
-            entry.last_used.load(Ordering::Relaxed)
-        });
+        let _write = CACHE_WRITE_LOCK.lock();
+        if generation == CACHE_GENERATION.load(Ordering::Acquire) {
+            THUMBNAIL_CACHE.insert(
+                cache_key,
+                Arc::new(CachedThumbnail {
+                    signature,
+                    path: String::new(),
+                    last_used: AtomicU64::new(next_cache_tick()),
+                }),
+            );
+            prune_cache(&THUMBNAIL_CACHE, THUMBNAIL_CACHE_LIMIT, |entry| {
+                entry.last_used.load(Ordering::Relaxed)
+            });
+        }
         return Ok(String::new());
     };
 
     let thumb_path = write_thumbnail_cache_file(path, size, fast_only, &signature, encoded)?;
+    let _write = CACHE_WRITE_LOCK.lock();
+    if generation != CACHE_GENERATION.load(Ordering::Acquire) {
+        return Ok(thumb_path);
+    }
     THUMBNAIL_CACHE.insert(
         cache_key,
         Arc::new(CachedThumbnail {
