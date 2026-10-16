@@ -20,7 +20,7 @@ import {
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
-import { loadImageTomlFieldsBatch, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import type { FieldEntry } from "@/types/cpp_parser";
 
 type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT" | "Touch";
@@ -959,7 +959,7 @@ export function ChartMapMode({
   useEffect(() => {
     if (!heatmapRequested || entries.length === 0) return;
     let cancelled = false;
-    loadImageTomlFieldsBatch(
+    loadImageTomlFieldsBatchShared(
       entries.map((entry) => entry.toml_path),
       [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY,
         HS_BRIGHT_EVD_KEY, HS_MIDDLE_B2M_KEY, "AE_TAG_DRV6_B2D"],

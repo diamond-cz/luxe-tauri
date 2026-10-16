@@ -8,6 +8,11 @@ use parking_lot::Mutex;
 use tauri::ipc::Channel;
 
 static PREVIEW_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(1));
+// TOML parsing and image decoding are CPU-heavy. Keep concurrent IPC requests
+// bounded because the table can issue several overlapping requests while it
+// virtualizes rows or changes the selected image.
+static TOML_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
+static THUMBNAIL_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
 static PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
 
 #[tauri::command]
@@ -55,6 +60,8 @@ pub async fn load_image_toml_fields_batch(
     paths: Vec<String>,
     keys: Vec<String>,
 ) -> AppResult<HashMap<String, HashMap<String, String>>> {
+    let _permit = TOML_TASKS.acquire().await
+        .map_err(|err| AppError::Other(format!("TOML queue closed: {err}")))?;
     tauri::async_runtime::spawn_blocking(move || {
         image_scan::load_image_toml_fields_batch(paths, keys)
     })
@@ -68,6 +75,8 @@ pub async fn load_image_thumbnail_batch(
     size: u32,
     embedded_only: Option<bool>,
 ) -> AppResult<HashMap<String, String>> {
+    let _permit = THUMBNAIL_TASKS.acquire().await
+        .map_err(|err| AppError::Other(format!("thumbnail queue closed: {err}")))?;
     tauri::async_runtime::spawn_blocking(move || {
         image_scan::load_image_thumbnail_batch(paths, size, embedded_only.unwrap_or(false))
     })

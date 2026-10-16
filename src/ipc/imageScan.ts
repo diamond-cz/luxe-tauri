@@ -44,6 +44,25 @@ export const loadImageTomlBatch = (paths: string[]) =>
 export const loadImageTomlFieldsBatch = (paths: string[], keys: string[]) =>
   call<Record<string, Record<string, string>>>("load_image_toml_fields_batch", { paths, keys });
 
+// Several table effects can request the same window while a folder is settling.
+// Share the in-flight IPC promise so one path/key set is parsed only once.
+const tomlFieldInflight = new Map<string, Promise<Record<string, Record<string, string>>>>();
+export const loadImageTomlFieldsBatchShared = (paths: string[], keys: string[]) => {
+  const uniquePaths = [...new Set(paths)];
+  const uniqueKeys = [...new Set(keys.filter(Boolean))];
+  const key = `${uniqueKeys.join("\u001f")}\u001e${uniquePaths.join("\u001f")}`;
+  const existing = tomlFieldInflight.get(key);
+  if (existing) return existing;
+  const pending = loadImageTomlFieldsBatch(uniquePaths, uniqueKeys);
+  tomlFieldInflight.set(key, pending);
+  pending.then(() => {
+    if (tomlFieldInflight.get(key) === pending) tomlFieldInflight.delete(key);
+  }, () => {
+    if (tomlFieldInflight.get(key) === pending) tomlFieldInflight.delete(key);
+  });
+  return pending;
+};
+
 export const loadImageThumbnailBatch = async (paths: string[], size: number, embeddedOnly = false) => {
   const batch = await call<Record<string, string>>("load_image_thumbnail_batch", { paths, size, embeddedOnly });
   const out: Record<string, string> = {};

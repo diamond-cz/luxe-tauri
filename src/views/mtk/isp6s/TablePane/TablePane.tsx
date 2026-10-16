@@ -17,7 +17,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
-import { loadImageThumbnailBatch, loadImageTomlFieldsBatch, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -1074,7 +1074,7 @@ export function ImageTab({
           return;
         }
         for (let start = 0; start < paths.length; start += 128) {
-          const batch = await loadImageTomlFieldsBatch(paths.slice(start, start + 128), imageTomlKeys);
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
           if (cancelled) return;
           rememberGlobalImageTableFields(entries, imageDataRevision, batch, imageTomlKeySignature);
           classifyBatch(batch, byPath);
@@ -1129,7 +1129,7 @@ export function ImageTab({
       const rows: Record<string, Record<string, string>> = {};
       try {
         for (let start = 0; start < paths.length; start += 128) {
-          const batch = await loadImageTomlFieldsBatch(paths.slice(start, start + 128), imageTomlKeys);
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
           if (cancelled) return;
           Object.assign(rows, batch);
           onParseProgress?.({ done: Math.min(start + 128, paths.length), total: paths.length });
@@ -1338,7 +1338,7 @@ export function ImageTab({
     setSortLoading(true);
     const paths = entries.map((entry) => entry.toml_path);
     const sortKey = sortState.key;
-    loadImageTomlFieldsBatch(paths, [sortKey])
+    loadImageTomlFieldsBatchShared(paths, [sortKey])
       .then((batch) => {
         if (sortRequestRef.current !== requestId) return;
         const nextValues: Record<string, string> = {};
@@ -1644,7 +1644,7 @@ export function ImageTab({
     const requestKeySignature = imageTomlKeySignature;
     const timer = window.setTimeout(() => {
       missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
-      loadImageTomlFieldsBatch(missing, imageTomlKeys)
+      loadImageTomlFieldsBatchShared(missing, imageTomlKeys)
         .then((batch) => {
           if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
           rememberTableFieldRows(batch);
@@ -1684,7 +1684,7 @@ export function ImageTab({
     const requestKeySignature = imageTomlKeySignature;
     const timer = window.setTimeout(() => {
       missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
-      loadImageTomlFieldsBatch(missing, imageTomlKeys)
+      loadImageTomlFieldsBatchShared(missing, imageTomlKeys)
         .then((batch) => {
           if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
           rememberTableFieldRows(batch);

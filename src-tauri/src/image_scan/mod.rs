@@ -22,7 +22,6 @@ use dashmap::DashMap;
 use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageEncoder, Limits};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -508,8 +507,11 @@ pub fn load_image_toml_fields_batch(
         }
     }
 
+    // The command layer already bounds concurrent batches. Keep each batch
+    // single threaded so two overlapping UI requests cannot oversubscribe the
+    // worker pool while repeatedly reading the same sidecar files.
     let out = unique_paths
-        .par_iter()
+        .iter()
         .map(|path| {
             (
                 path.clone(),

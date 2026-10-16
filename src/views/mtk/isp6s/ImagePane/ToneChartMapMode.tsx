@@ -3,7 +3,7 @@ import { Code24Regular, DataHistogram24Regular, Save24Regular } from "@fluentui/
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { parseCppFile, type CardSourceSpec } from "@/ipc/cppParser";
-import { loadImageTomlFieldsBatch, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
@@ -327,7 +327,7 @@ export function ToneChartMapMode({
   useEffect(() => {
     if (!heatmapRequested || entries.length === 0) return;
     let cancelled = false;
-    loadImageTomlFieldsBatch(entries.map((entry) => entry.toml_path), TONE_HEATMAP_KEYS)
+    loadImageTomlFieldsBatchShared(entries.map((entry) => entry.toml_path), TONE_HEATMAP_KEYS)
       .then((rows) => {
         if (!cancelled) setHeatmapData({ entries, points: entries.map((entry) => ({
           path: entry.toml_path, position: imagePosition(rows[entry.toml_path] ?? {}),
