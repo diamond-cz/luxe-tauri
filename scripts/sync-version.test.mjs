@@ -28,6 +28,20 @@ test("synchronized metadata passes read-only validation", () => withProject(({ r
   assert.equal(result.status, 0, result.stderr);
 }));
 
+test("Windows checkout line endings pass validation without rewriting files", () => withProject(({ root, files, run }) => {
+  for (const [file, content] of Object.entries(files)) {
+    files[file] = content.replaceAll("\n", "\r\n");
+    writeFileSync(path.join(root, file), files[file]);
+  }
+  for (const args of [["--check"], []]) {
+    const result = run(...args);
+    assert.equal(result.status, 0, result.stderr);
+    for (const [file, content] of Object.entries(files)) {
+      assert.equal(readFileSync(path.join(root, file), "utf8"), content);
+    }
+  }
+}));
+
 test("check reports all stale files without changing any", () => withProject(({ root, files, run }) => {
   for (const [file, content] of Object.entries(files)) {
     if (file.endsWith("tauri.conf.json")) continue;

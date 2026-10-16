@@ -24,6 +24,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Keep repository line endings
+        run: git config --global core.autocrlf false
       - name: Checkout release source
         uses: actions/checkout@v4
         with:

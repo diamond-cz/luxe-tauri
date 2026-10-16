@@ -22,6 +22,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
+      - name: Keep repository line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

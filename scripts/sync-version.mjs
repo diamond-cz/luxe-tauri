@@ -82,7 +82,7 @@ function writeJsonIfChanged(filePath, value) {
 
 function writeTextIfChanged(filePath, output) {
   const input = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
-  if (input === output) return;
+  if (input.replaceAll("\r\n", "\n") === output.replaceAll("\r\n", "\n")) return;
   if (checkOnly) outdated.push(path.relative(root, filePath));
   else writeFileSync(filePath, output, "utf8");
 }
