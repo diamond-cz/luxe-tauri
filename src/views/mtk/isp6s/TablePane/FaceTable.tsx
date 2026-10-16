@@ -204,7 +204,11 @@ export function FaceTable({ tomlData }: Props) {
     if (!el) return;
 
     const updateSize = () => {
-      setViewportSize({ width: el.clientWidth, height: el.clientHeight });
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      setViewportSize((current) =>
+        current.width === width && current.height === height ? current : { width, height },
+      );
     };
 
     updateSize();

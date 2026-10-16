@@ -239,10 +239,13 @@ function BlinkingEyesButton({ onClick, sideNavVisible }: { onClick: () => void; 
         const centerY = window.innerHeight / 2;
         if (centerX <= 0 || centerY <= 0) return;
 
-        setLookOffset({
-          x: clamp(((event.clientX - centerX) / centerX) * 4, -4, 4),
-          y: clamp(((event.clientY - centerY) / centerY) * 3.5, -3.5, 3.5),
-        });
+        const x = clamp(((event.clientX - centerX) / centerX) * 4, -4, 4);
+        const y = clamp(((event.clientY - centerY) / centerY) * 3.5, -3.5, 3.5);
+        setLookOffset((current) =>
+          Math.abs(current.x - x) < 0.2 && Math.abs(current.y - y) < 0.2
+            ? current
+            : { x, y },
+        );
         frame = 0;
       });
     };

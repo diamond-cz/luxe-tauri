@@ -2,9 +2,9 @@
 //!
 //! - Single icon (`icons/tray-icon.png`, embedded at compile time so the
 //!   binary stays self-contained on production builds).
-//! - Menu items: show / refresh_poetry / settings / quit
+//! - Menu items: show / refresh_poetry / settings / restart / quit
 //! - Double-click restores the main window (matches Qt behaviour)
-//! - Every menu action — except quit — first restores the main window so
+//! - Navigation actions first restore the main window so
 //!   the user actually sees the effect when LUXE is hidden to tray.
 
 use tauri::menu::{Menu, MenuItem};
@@ -17,6 +17,7 @@ use crate::events::TRAY_ACTION;
 pub const ID_SHOW:     &str = "show";
 pub const ID_POETRY:   &str = "refresh_poetry";
 pub const ID_SETTINGS: &str = "settings";
+pub const ID_RESTART:  &str = "restart";
 pub const ID_QUIT:     &str = "quit";
 
 /// Embed the tray icon at compile time — same image used in every locale,
@@ -27,11 +28,12 @@ pub fn install(app: &AppHandle) -> AppResult<()> {
     let item_show     = MenuItem::with_id(app, ID_SHOW,     "显示主窗口", true, None::<&str>)?;
     let item_poetry   = MenuItem::with_id(app, ID_POETRY,   "刷新诗词",   true, None::<&str>)?;
     let item_settings = MenuItem::with_id(app, ID_SETTINGS, "设置",       true, None::<&str>)?;
+    let item_restart  = MenuItem::with_id(app, ID_RESTART,  "重启 LUXE",  true, None::<&str>)?;
     let item_quit     = MenuItem::with_id(app, ID_QUIT,     "退出 LUXE",  true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&item_show, &item_poetry, &item_settings, &item_quit],
+        &[&item_show, &item_poetry, &item_settings, &item_restart, &item_quit],
     )?;
 
     let app_handle = app.clone();
@@ -67,6 +69,11 @@ fn restore_main_window(app: &AppHandle) {
 }
 
 fn handle_tray_action(app: &AppHandle, kind: &str) {
+    if kind == ID_RESTART {
+        // This emits ExitRequested, where the state store is flushed.
+        app.request_restart();
+        return;
+    }
     if kind == ID_QUIT {
         // Tell the frontend (best-effort, may not arrive before exit) and quit.
         let _ = app.emit(TRAY_ACTION, serde_json::json!({ "kind": kind }));

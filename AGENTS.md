@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## 内存与 CPU 性能约定
+
+新增图片预览、解析缓存、观察器或后台任务前，先阅读 `MEMORY_RECOVERY.md`。沿用已有的缓存预算、过期请求隔离、卸载清理和 `trimMemory` 入口；尺寸监听仅在测量值变化时更新 React 状态。性能问题按宿主、WebView2 browser、renderer、GPU 进程分别测量，不以任务管理器的应用汇总值推断根因。
+
 ## 项目结构与模块组织
 
 本仓库是一个 Tauri 2 桌面应用，前端使用 React/Vite，后端使用 Rust。

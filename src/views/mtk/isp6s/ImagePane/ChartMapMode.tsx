@@ -8645,11 +8645,15 @@ function HsWeightGrid({
       const naturalHeight = Math.max(1, sheet.offsetHeight, sheet.scrollHeight);
       const availableWidth = Math.max(1, viewport.clientWidth);
       const scale = availableWidth / naturalWidth;
-      setFit({
-        scale,
-        width: naturalWidth * scale,
-        height: naturalHeight * scale,
-      });
+      const width = naturalWidth * scale;
+      const height = naturalHeight * scale;
+      setFit((current) =>
+        Math.abs(current.scale - scale) < 0.0001 &&
+        Math.abs(current.width - width) < 0.5 &&
+        Math.abs(current.height - height) < 0.5
+          ? current
+          : { scale, width, height },
+      );
     };
     const update = () => {
       window.cancelAnimationFrame(frame);

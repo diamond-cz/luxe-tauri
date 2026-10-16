@@ -72,6 +72,7 @@ export function MtkView() {
     if (align && workspaceDividerXRef.current !== null) align(workspaceDividerXRef.current);
   }, []);
   const reportWorkspaceDivider = useCallback((x: number) => {
+    if (workspaceDividerXRef.current !== null && Math.abs(workspaceDividerXRef.current - x) < 0.5) return;
     workspaceDividerXRef.current = x;
     alignWorkspaceDividerRef.current?.(x);
   }, []);
