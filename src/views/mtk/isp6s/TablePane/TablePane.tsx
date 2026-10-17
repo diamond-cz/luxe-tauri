@@ -85,6 +85,7 @@ interface Props {
   onImageSearchQueryChange: (value: string) => void;
   onImageSearch: () => void;
   onParseExif: () => void;
+  onNotice: (toast: { kind: "success" | "error"; title: string; detail?: string }) => void;
   exifParsing: boolean;
   imageDataRevision: number;
   scrollPosition?: ScrollPosition | null;
@@ -101,6 +102,8 @@ const IMAGE_DROPDOWN_THUMBNAIL_FALLBACK_CONCURRENCY = 2;
 const IMAGE_DROPDOWN_THUMBNAIL_CACHE_LIMIT = 160;
 const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 36;
+// Keep the corner cell in sync with faceBvDrCornerCellStyle in ChartMapMode.
+const IMAGE_TABLE_CORNER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))";
 const IMAGE_TABLE_ROW_HEIGHT = 58;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
 const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 10;
@@ -270,6 +273,7 @@ export function TablePane({
   onImageSearchQueryChange,
   onImageSearch,
   onParseExif,
+  onNotice,
   exifParsing,
   imageDataRevision,
   scrollPosition,
@@ -280,13 +284,18 @@ export function TablePane({
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
   const [parseAllVersion, setParseAllVersion] = useState(0);
   const [applyAllVersion, setApplyAllVersion] = useState(0);
+  const nextApplyVersionRef = useRef(0);
   const [appliedCalculatorSourcePath, setAppliedCalculatorSourcePath] = useState<string | null>(null);
   const [parseProgress, setParseProgress] = useState<{ done: number; total: number; error?: string } | null>(null);
+  const [applyPending, setApplyPending] = useState(false);
 
   useEffect(() => {
     setAppliedCalculatorSourcePath(null);
     setApplyAllVersion(0);
-  }, [filePath]);
+    setParseAllVersion(0);
+    setParseProgress(null);
+    setApplyPending(false);
+  }, [filePath, entries]);
 
   const pickImageDir = async () => {
     const picked = await openDialog({ directory: true, multiple: false });
@@ -382,11 +391,13 @@ export function TablePane({
             onClick={onParseExif} aria-label="解析图片 EXIF" />
           {!toneMode && <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<CalculatorArrowClockwise24Regular className="h-4 w-4" />}
             title="Apply all image: 使用当前参数重新计算 CWR 和 ∆CWR"
-            disabled={entries.length === 0 || !calculatorSourcePath || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
+            disabled={entries.length === 0 || !calculatorSourcePath || applyPending || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
             onClick={() => {
+              setApplyPending(true);
               setAppliedCalculatorSourcePath(calculatorSourcePath);
-              setApplyAllVersion((version) => version + 1);
-              setParseAllVersion((version) => version + 1);
+              const nextVersion = ++nextApplyVersionRef.current;
+              setApplyAllVersion(nextVersion);
+              setParseAllVersion(nextVersion);
             }} aria-label="Apply all image" />}
           <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<FolderAdd24Regular className="h-4 w-4" />}
             title="Add image folder" onClick={pickImageDir} aria-label="Add image folder" />
@@ -448,6 +459,10 @@ export function TablePane({
       <div className="min-h-0 flex-1 overflow-hidden">
         <ImageTab schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
+          onApplyResult={(result) => {
+            setApplyPending(false);
+            onNotice(result);
+          }}
           imageDataRevision={imageDataRevision}
           cppImportRevision={cppImportRevision}
           scrollPosition={scrollPosition}
@@ -887,7 +902,7 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 }
 
 export function ImageTab({
-  schema, toneMode = false, filePath, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
+  schema, toneMode = false, filePath, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
   entries, current, selectedHeatmapPaths, onPick, onVisibleHeatmapPathsChange,
   imageDataRevision = 0,
   scrollPosition,
@@ -901,6 +916,7 @@ export function ImageTab({
   parseAllVersion?: number;
   applyAllVersion?: number;
   onParseProgress?: (progress: { done: number; total: number; error?: string } | null) => void;
+  onApplyResult?: (result: { kind: "success" | "error"; title: string; detail?: string }) => void;
   imageDataRevision?: number;
   scrollPosition?: ScrollPosition | null;
   onScrollPositionChange?: (position: ScrollPosition) => void;
@@ -979,17 +995,23 @@ export function ImageTab({
   const [parsedTomls, setParsedTomls] = useState<{
     entries: ImageEntry[];
     keySignature: string;
+    version: number;
     rows: Record<string, Record<string, string>>;
   } | null>(null);
   const [faceLinkTargetState, setFaceLinkTargetState] = useState<{
     filePath: string | null;
+    version: number;
     calculate: FaceLinkTargetCalculator;
   } | null>(null);
+  const [calculatorError, setCalculatorError] = useState<{ version: number; message: string } | null>(null);
+  const [parseAllError, setParseAllError] = useState<{ version: number; message: string } | null>(null);
   const requestedCalculatorPath = applyAllVersion > 0 ? calculatorSourcePath ?? null : filePath;
   const faceLinkTargetCalculator = faceLinkTargetState && faceLinkTargetState.filePath === requestedCalculatorPath
+    && faceLinkTargetState.version === applyAllVersion
     ? faceLinkTargetState.calculate
     : null;
   const allParsedRows = parsedTomls?.entries === entries && parsedTomls.keySignature === imageTomlKeySignature
+    && parsedTomls.version === parseAllVersion
     ? parsedTomls.rows : null;
   const allTargets = useMemo(() => {
     if (!allParsedRows || !faceLinkTargetCalculator) return null;
@@ -998,6 +1020,25 @@ export function ImageTab({
       faceLinkTargetCalculator(allParsedRows[entry.toml_path] ?? {}, faceBvKey),
     ]));
   }, [allParsedRows, entries, faceBvKey, faceLinkTargetCalculator]);
+  const applyResultRef = useRef(onApplyResult);
+  applyResultRef.current = onApplyResult;
+  const reportedApplyVersionRef = useRef(0);
+  useEffect(() => {
+    if (applyAllVersion === 0) {
+      reportedApplyVersionRef.current = 0;
+      return;
+    }
+    if (reportedApplyVersionRef.current === applyAllVersion) return;
+    const failure = calculatorError?.version === applyAllVersion ? calculatorError.message :
+      parseAllError?.version === parseAllVersion ? parseAllError.message : null;
+    if (failure) {
+      reportedApplyVersionRef.current = applyAllVersion;
+      applyResultRef.current?.({ kind: "error", title: "批量图片计算失败", detail: failure });
+    } else if (allTargets && parsedTomls?.version === parseAllVersion && parseAllVersion > 0) {
+      reportedApplyVersionRef.current = applyAllVersion;
+      applyResultRef.current?.({ kind: "success", title: "批量图片计算完成", detail: "已计算并刷新 " + entries.length + " 张图片" });
+    }
+  }, [allTargets, applyAllVersion, calculatorError, entries.length, parseAllError, parseAllVersion, parsedTomls?.version]);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
@@ -1137,10 +1178,13 @@ export function ImageTab({
     const calculatorRevision = `${cppImportRevision}:${applyAllVersion}`;
     getFaceCalculator(requestedCalculatorPath, calculatorRevision)
       .then((calculate) => {
-        if (!cancelled) setFaceLinkTargetState({ filePath: requestedCalculatorPath, calculate });
+        if (!cancelled) setFaceLinkTargetState({ filePath: requestedCalculatorPath, version: applyAllVersion, calculate });
       })
-      .catch(() => {
-        if (!cancelled) setFaceLinkTargetState(null);
+      .catch((error) => {
+        if (!cancelled) {
+          setFaceLinkTargetState(null);
+          setCalculatorError({ version: applyAllVersion, message: error instanceof Error ? error.message : String(error) });
+        }
       });
     return () => { cancelled = true; };
   }, [filePath, requestedCalculatorPath, applyAllVersion, cppImportRevision]);
@@ -1161,12 +1205,13 @@ export function ImageTab({
           Object.assign(rows, batch);
           onParseProgress?.({ done: Math.min(start + 128, paths.length), total: paths.length });
         }
-        if (!cancelled) setParsedTomls({ entries, keySignature, rows });
+        if (!cancelled) setParsedTomls({ entries, keySignature, version: parseAllVersion, rows });
       } catch (error) {
-        if (!cancelled) onParseProgress?.({
-          done: paths.length, total: paths.length,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error);
+          setParseAllError({ version: parseAllVersion, message });
+          onParseProgress?.({ done: paths.length, total: paths.length, error: message });
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -1838,12 +1883,15 @@ export function ImageTab({
         setScrollTop(nextScrollTop);
       }}
     >
-      <table className="w-full border-collapse text-xs"
+      <table className="w-full text-xs"
            style={{
                 fontFamily: '"Segoe UI", Arial, sans-serif',
                 fontSize: 13,
                 color: "var(--colorNeutralForeground1)",
                 background: "var(--colorNeutralBackground1)",
+                borderCollapse: "separate",
+                borderSpacing: 0,
+                borderLeft: "1px solid var(--colorNeutralStroke2)",
                 minWidth: "100%",
                tableLayout: "fixed",
                width: columnWidths.table,
@@ -1856,7 +1904,6 @@ export function ImageTab({
         <thead style={{
            background: "var(--colorNeutralBackground2)",
           color: "var(--colorNeutralForeground2)",
-          position: "sticky", top: 0, zIndex: 3,
           }}>
           <tr>
             {displayedColumns.map((column) => {
@@ -1956,8 +2003,12 @@ export function ImageTab({
                    style={{
                      cursor: "pointer",
                      height: IMAGE_TABLE_ROW_HEIGHT,
-                     background: i === current ? "var(--colorBrandBackground2)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "transparent",
-                     color: i === current ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground1)",
+                     background: i === current
+                       ? "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))"
+                       : heatmapSelected ? "var(--colorPaletteGreenBackground1)"
+                         : i % 2 === 0 ? "var(--colorNeutralBackground1)"
+                           : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))",
+                     color: i === current ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
                    }}>
                  {displayedColumns.map((column) => (
                    <Td
@@ -1965,7 +2016,12 @@ export function ImageTab({
                      align={column.align}
                      compact={column.kind === "thumbnail"}
                      stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
-                     stickyBackground={i === current ? "var(--colorBrandBackground)" : heatmapSelected ? "var(--colorPaletteGreenBackground1)" : "var(--colorNeutralBackground3)"}
+                     stickyBackground={i === current
+                       ? "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))"
+                       : heatmapSelected ? "var(--colorPaletteGreenBackground1)"
+                         : i % 2 === 0 ? "var(--colorNeutralBackground1)"
+                           : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))"}
+                     selected={column.kind === "idx" && i === current}
                    >
                      {column.kind === "idx"
                        ? i + 1
@@ -2514,13 +2570,17 @@ function Th({
         data-image-table-column-id={columnId}
         onPointerDown={onPointerDown}
         style={{
-          border: "1px solid var(--colorNeutralStroke2)",
+          borderRight: "1px solid var(--colorNeutralStroke2)",
+          borderBottom: "2px solid var(--colorNeutralStroke1)",
           height: IMAGE_TABLE_HEADER_HEIGHT,
           boxSizing: "border-box",
-          position: stickyLeft !== undefined ? "sticky" : undefined,
+          position: "sticky",
+          top: 0,
           left: stickyLeft,
-          zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 5 : 4) : undefined,
-          background: dragOver ? "var(--colorBrandBackground2)" : stickyLeft !== undefined ? "var(--colorNeutralBackground3)" : undefined,
+          zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 7 : 6) : 5,
+          background: dragOver ? "var(--colorBrandBackground2)"
+            : columnId === "idx" ? IMAGE_TABLE_CORNER_BACKGROUND : "var(--colorNeutralBackground2)",
+          color: columnId === "idx" ? "var(--colorNeutralForeground1)" : undefined,
           boxShadow: dragOver ? "inset 2px 0 0 var(--colorBrandForeground1)" : undefined,
           cursor: onPointerDown ? "grab" : undefined,
         }}>
@@ -2553,17 +2613,20 @@ function Td({
   compact = false,
   stickyLeft,
   stickyBackground,
+  selected = false,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
   compact?: boolean;
   stickyLeft?: number;
   stickyBackground?: string;
+  selected?: boolean;
 }) {
   return (
     <td className={compact ? "px-1 py-1" : "px-2 py-1"}
         style={{
-          border: "1px solid var(--colorNeutralStroke2)",
+          borderRight: "1px solid var(--colorNeutralStroke2)",
+          borderBottom: "1px solid var(--colorNeutralStroke2)",
           textAlign: align,
           whiteSpace: "nowrap",
           height: IMAGE_TABLE_ROW_HEIGHT,
@@ -2572,7 +2635,8 @@ function Td({
           left: stickyLeft,
           zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 3 : 2) : undefined,
           background: stickyLeft !== undefined ? stickyBackground : undefined,
-          boxShadow: stickyLeft !== undefined ? "inset -2px 0 0 var(--colorNeutralStroke1), 2px 0 4px rgba(0,0,0,0.08)" : undefined,
+          boxShadow: selected ? "inset 3px 0 0 var(--colorBrandStroke1)"
+            : stickyLeft !== undefined && stickyLeft === 0 ? "inset -1px 0 0 var(--colorNeutralStroke2)" : undefined,
         }}>
       <span className="block min-w-0 truncate">{children}</span>
     </td>

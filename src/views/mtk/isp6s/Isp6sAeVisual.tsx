@@ -365,6 +365,7 @@ export function Isp6sAeVisual({
           onScrollPositionChange={(position) => { session.imageScroll = position; }}
           exifParsing={exifParsing}
           onParseExif={() => void handleParseExif()}
+          onNotice={onNotice}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
           imageSearchQuery={imageSearchQuery}
