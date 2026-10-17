@@ -287,7 +287,7 @@ interface TouchTargetSource {
 
 type TouchMeterParamId = "meterWeight" | "yLow" | "yHigh";
 type TouchMeterParamDrafts = Record<TouchMeterParamId, string>;
-type FaceMetricCardId = "fbtTarget" | "normalTarget" | "fbtTh" | "fdThGroup" | "fdMinThGroup" | "oethGroup";
+type FaceMetricCardId = "backSceneTargetFormula" | "faceLinkTargetFormula" | "fbtTarget" | "normalTarget" | "fbtTh" | "fdThGroup" | "fdMinThGroup" | "oethGroup";
 type FaceFbtTableKey = "fdTh" | "nsFdTh" | "fdMinTh" | "nsFdMinTh" | "oeth" | "nsOeth";
 
 function faceSyncPartner(tableKey: FaceFbtTableKey): FaceFbtTableKey | null {
@@ -536,6 +536,8 @@ const FACE_FLT_FDSZ_TABLE_ROWS = [
   { label: "face_sz_ra", path: "[0][4][1][48]" },
 ] as const;
 const FACE_METRIC_CARD_ORDER: FaceMetricCardId[] = [
+  "backSceneTargetFormula",
+  "faceLinkTargetFormula",
   "fbtTarget",
   "normalTarget",
   "fbtTh",
@@ -1066,6 +1068,10 @@ export function ChartMapMode({
   );
   const faceProbValue = useMemo(
     () => readFirstTomlValue(tomlData, FACE_PROB_KEYS),
+    [tomlData],
+  );
+  const faceExifProbValue = useMemo(
+    () => readTomlValue(tomlData, "AE_TAG_FACE_PROB"),
     [tomlData],
   );
   const faceNormalTargetValue = useMemo(
@@ -2264,6 +2270,7 @@ export function ChartMapMode({
               cwvValue={faceCwvValue}
               fdyValue={tab === "Face_FLT" ? faceFltFdyValue : faceFbtFdyValue}
               faceProbValue={faceProbValue}
+              faceProbExifValue={faceExifProbValue}
               fdszValue={faceFltFdszValue}
               fdszRaValue={faceFltFdszRaValue}
               nsProbValue={nsProbValue}
@@ -2941,6 +2948,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       oeSys: value(FACE_FBT_OE_SYS_KEY),
       fddr: value(FACE_FBT_FDDR_KEY),
       fdsz: NaN,
+      exifFdszRa: NaN,
       exifThreshold: value(FACE_FBT_TARGET_KEY),
       fltMode: false,
     });
@@ -2952,6 +2960,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       oeSys: value(FACE_FLT_OE_SYS_KEY),
       fddr: value(FACE_FLT_FDDR_KEY),
       fdsz: value(FACE_FLT_FDSZ_KEY),
+      exifFdszRa: value(FACE_FLT_FDSZ_RA_KEY),
       exifThreshold: value(FACE_FLT_TARGET_KEY),
       fltMode: true,
     });
@@ -5334,6 +5343,7 @@ interface EditableNumberTableCellProps {
   onCommit?: (value: string) => boolean | void;
   onSourceJump?: (value: string) => void;
   commitBeforeSourceJump?: boolean;
+  commitPreviewedValue?: boolean;
 }
 
 function EditableNumberTableCell({
@@ -5348,6 +5358,7 @@ function EditableNumberTableCell({
   onCommit,
   onSourceJump,
   commitBeforeSourceJump = false,
+  commitPreviewedValue = false,
 }: EditableNumberTableCellProps) {
   const [draftValue, setDraftValue] = useState(value);
   const [focused, setFocused] = useState(false);
@@ -5366,7 +5377,7 @@ function EditableNumberTableCell({
   const commitDraft = (): boolean => {
     if (!editable) return false;
     const nextValue = draftValue.trim();
-    if (nextValue === value.trim()) return true;
+    if (nextValue === value.trim() && !commitPreviewedValue) return true;
     if (commitBeforeSourceJump && committedDraftRef.current === nextValue) return true;
     if (!isSourceNumberText(nextValue)) {
       resetDraft();
@@ -6235,6 +6246,7 @@ interface FaceTargetInputs {
   oeSys: number;
   fddr: number;
   fdsz: number;
+  exifFdszRa: number;
   exifThreshold: number;
   fltMode: boolean;
 }
@@ -6245,7 +6257,7 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const faceWeight = fltMode
     ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz / 100).result
     : input.faceProb;
-  const exifWeight = faceWeight;
+  const exifWeight = fltMode ? input.exifFdszRa : input.faceProb;
   const oethInterpolated = source ? interpolateFaceBvDrTableSource(source.oeth, bv, dr) : NaN;
   const nsOethInterpolated = source ? interpolateFaceBvDrTableSource(source.nsOeth, bv, dr) : NaN;
   const fdMinThInterpolated = source ? interpolateFaceBvDrTableSource(source.fdMinTh, bv, dr) : NaN;
@@ -6259,15 +6271,15 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
     ? (computedOeth * computedFdTh) / oeSys
     : NaN;
   const pureTarget = limitNumber(faceOeTar, computedFdMinTh, computedFdTh);
-  const computedFbtTarget = Number.isFinite(pureTarget) && Number.isFinite(fddrRa)
+  const computedFaceTarget = Number.isFinite(pureTarget) && Number.isFinite(fddrRa)
     ? (pureTarget * fddrRa) / 1024
     : NaN;
-  const thresholdValue = computedFbtTarget;
-  const fbtTarget = Number.isFinite(cwv) && Number.isFinite(thresholdValue) && Number.isFinite(fdy) && fdy !== 0
+  const thresholdValue = computedFaceTarget;
+  const faceTarget = Number.isFinite(cwv) && Number.isFinite(thresholdValue) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (thresholdValue / fdy)
     : NaN;
-  const backSceneTarget = Number.isFinite(fbtTarget) && Number.isFinite(faceWeight) && Number.isFinite(normalTarget)
-    ? (fbtTarget * faceWeight + normalTarget * (1024 - faceWeight)) / 1024
+  const backSceneTarget = Number.isFinite(faceTarget) && Number.isFinite(faceWeight) && Number.isFinite(normalTarget)
+    ? (faceTarget * faceWeight + normalTarget * (1024 - faceWeight)) / 1024
     : NaN;
   const exifTarget = Number.isFinite(cwv) && Number.isFinite(exifThreshold) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (exifThreshold / fdy)
@@ -6278,8 +6290,8 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   return {
     fddrRa, faceWeight, exifWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
-    computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFbtTarget,
-    thresholdValue, fbtTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
+    computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFaceTarget,
+    thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
   };
 }
 
@@ -6304,25 +6316,19 @@ function FaceDerivedTargetCard({
 }) {
   return (
     <section style={faceDerivedTargetCardStyle}>
-      <div style={{
-        ...faceCardHeaderBarStyle,
-        minHeight: 34,
-        height: 34,
-        padding: "0 8px",
-        background: "var(--face-target-header-bg)",
-        borderBottom: "1px solid var(--face-target-header-border)",
-      }}>
+      <div style={faceTargetSectionHeaderStyle}>
         <div style={faceMetricGroupTitleStyle}>
           <span style={thresholdTitleStyle}>{title}</span>
           <span style={faceMetricSourceStyle}>EXIF: <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(exifResult)}</strong></span>
         </div>
-        <div style={faceCardHeaderActionsStyle}>
+        <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
           <strong style={faceFormulaResultStyle}>{formatRoundedNumber(parameterResult)}</strong>
           <button
             type="button"
             style={sourceButtonStyle(true)}
             title={expanded ? `Collapse ${title}` : `Expand ${title}`}
             aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            aria-expanded={expanded}
             onClick={() => onExpandedChange(!expanded)}
           >
             {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
@@ -6361,6 +6367,7 @@ function FaceTabContent({
   cwvValue,
   fdyValue,
   faceProbValue,
+  faceProbExifValue,
   fdszValue,
   fdszRaValue,
   nsProbValue,
@@ -6398,6 +6405,7 @@ function FaceTabContent({
   cwvValue: string | null;
   fdyValue: string | null;
   faceProbValue: string | null;
+  faceProbExifValue: string | null;
   fdszValue: string | null;
   fdszRaValue: string | null;
   nsProbValue: string | null;
@@ -6468,15 +6476,16 @@ function FaceTabContent({
   const {
     fddrRa, faceWeight, exifWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
-    computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFbtTarget,
-    thresholdValue, fbtTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
+    computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFaceTarget,
+    thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
   } = calculateFaceTargetMetrics(currentSource, {
     bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys,
     fddr: parseFiniteNumber(fddrValue),
     fdsz: parseFiniteNumber(fdszValue),
+    exifFdszRa: parseFiniteNumber(fdszRaValue),
     exifThreshold, fltMode,
   });
-  const exifFbtTarget = exifTarget;
+  const exifFaceTarget = exifTarget;
   const normalFormula = calculateNormalTargetFormula(normalTargetSource);
   const formatParameterValue = (value: number) => formatInputNumber(Number.isFinite(value) ? value : 0);
   const parameterNormalFormula = calculateNormalTargetFormula({
@@ -6575,7 +6584,10 @@ function FaceTabContent({
     if (!isSourceNumberText(trimmed)) return false;
     const field = getFaceProbTargetField(editableSource[sourceKey], target);
     if (!field) return false;
-    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, trimmed);
+    const sourceFieldValue = sourceFieldToken(sourceDraftTextRef.current, field, editableSource.fields);
+    if (sourceFieldValue === trimmed) return true;
+    const sourceField = sourceFieldValue === null ? field : { ...field, value: sourceFieldValue };
+    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, sourceField, trimmed);
     if (nextText === null) return false;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
@@ -6592,22 +6604,39 @@ function FaceTabContent({
   const thresholdTitle = fltMode ? "FLT_TH" : "FBT_TH";
   const targetKey = fltMode ? FACE_FLT_TARGET_KEY : FACE_FBT_TARGET_KEY;
   const linkTargetTitle = fltMode ? "Face Link Target" : "Back Scene Target";
+  const linkTargetFormulaKey = fltMode ? "faceLinkTargetFormula" : "backSceneTargetFormula";
+  const linkTargetFormulaExpanded = !collapsed.has(linkTargetFormulaKey);
+  const linkTargetFormulaId = `chart-face-${linkTargetFormulaKey}`;
+  const thresholdFormulaId = `chart-face-${thresholdTitle.toLowerCase()}`;
 
   return (
     <div style={faceTabGridStyle}>
-      <section style={thresholdCardStyle}>
+      <section style={faceTargetCardStyle}>
         <div style={faceCardHeaderBarStyle}>
           <div style={faceMetricGroupTitleStyle}>
             <span style={thresholdTitleStyle}>{linkTargetTitle}</span>
             <span style={faceMetricSourceStyle}>EXIF: <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(exifBackSceneTarget)}</strong></span>
           </div>
-          <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(backSceneTarget)}</strong>
+          <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
+            <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(backSceneTarget)}</strong>
+            <button
+              type="button"
+              style={sourceButtonStyle(true)}
+              title={`${linkTargetFormulaExpanded ? "折叠" : "展开"} ${linkTargetTitle} 公式`}
+              aria-label={`${linkTargetFormulaExpanded ? "折叠" : "展开"} ${linkTargetTitle} 公式`}
+              aria-expanded={linkTargetFormulaExpanded}
+              aria-controls={linkTargetFormulaId}
+              onClick={() => setCardExpanded(linkTargetFormulaKey, !linkTargetFormulaExpanded)}
+            >
+              {linkTargetFormulaExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
-          <div style={faceFormulaRowStyle}>
+          {linkTargetFormulaExpanded && <div id={linkTargetFormulaId} style={faceFormulaRowStyle}>
             <div style={faceFormulaTextStackStyle}>
               <span>{fltMode
                 ? "Face Link Target = (FLT Target * FDSZ_RA + Normal Target * (1024-FDSZ_RA)) / 1024"
-                : "Back scene target = (FBT target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
+                : "Back Scene Target = (FBT Target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
               <span style={faceFormulaSubstitutionStyle}>
                 EXIF: (
                 <strong style={faceFormulaEmphasisStyle}>{formatRoundedNumber(exifTarget)}</strong>{" "}
@@ -6619,7 +6648,7 @@ function FaceTabContent({
               </span>
               <span style={faceFormulaSubstitutionStyle}>
                 Calculation: (
-                <strong style={faceFormulaEmphasisStyle}>{formatOneDecimalNumber(fbtTarget)}</strong>{" "}
+                <strong style={faceFormulaEmphasisStyle}>{formatOneDecimalNumber(faceTarget)}</strong>{" "}
                 * {formatComputedNumber(faceWeight)} +{" "}
                 <strong style={faceFormulaEmphasisStyle}>{formatComputedNumber(normalTarget)}</strong>{" "}
                 * (1024 - {formatComputedNumber(faceWeight)})
@@ -6627,11 +6656,11 @@ function FaceTabContent({
                 <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(backSceneTarget)}</strong>
               </span>
             </div>
-          </div>
+          </div>}
           <FaceDerivedTargetCard
-            title={fltMode ? "FLT target" : "FBT target"}
-            exifResult={exifFbtTarget}
-            parameterResult={fbtTarget}
+            title={fltMode ? "FLT Target" : "FBT Target"}
+            exifResult={exifFaceTarget}
+            parameterResult={faceTarget}
             exifFormula={`CWV * (${targetKey} / FDY) = ${formatComputedNumber(cwv)} * (${formatComputedNumber(exifThreshold)} / ${formatComputedNumber(fdy)})`}
             parameterFormula={`CWV * (${thresholdTitle} / FDY) = ${formatComputedNumber(cwv)} * (${formatComputedNumber(thresholdValue)} / ${formatComputedNumber(fdy)})`}
             expanded={fbtTargetExpanded}
@@ -6667,6 +6696,7 @@ function FaceTabContent({
             {!fltMode && (
               <FaceProbTableCard
                 source={currentSource?.faceProb ?? null}
+                exifValue={faceProbExifValue}
                 bv={bv}
                 editable={canEdit}
                 onCellPreview={(target, value) => previewFaceAxisCell("faceProb", target, value)}
@@ -6681,21 +6711,23 @@ function FaceTabContent({
           </div>
       </section>
 
-      <section style={thresholdCardStyle}>
+      <section style={faceThresholdWithFddrCardStyle}>
         <div style={faceCardHeaderBarStyle}>
           <div style={faceMetricGroupTitleStyle}>
             <span style={thresholdTitleStyle}>{thresholdTitle}</span>
             <span style={faceMetricSourceStyle}>{targetKey}: {targetValue ?? "-"}</span>
           </div>
-          <div style={faceCardHeaderActionsStyle}>
+          <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
             <strong style={faceFormulaResultStyle}>
-              {formatOneDecimalNumber(computedFbtTarget)}
+              {formatOneDecimalNumber(computedFaceTarget)}
             </strong>
             <button
               type="button"
               style={sourceButtonStyle(true)}
               title={fbtThExpanded ? `Collapse ${thresholdTitle}` : `Expand ${thresholdTitle}`}
               aria-label={fbtThExpanded ? `Collapse ${thresholdTitle}` : `Expand ${thresholdTitle}`}
+              aria-expanded={fbtThExpanded}
+              aria-controls={thresholdFormulaId}
               onClick={() => setCardExpanded("fbtTh", !fbtThExpanded)}
             >
               {fbtThExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
@@ -6703,7 +6735,7 @@ function FaceTabContent({
           </div>
         </div>
         {fbtThExpanded && (
-          <div style={faceFormulaRowStyle}>
+          <div id={thresholdFormulaId} style={faceFormulaRowStyle}>
             <div style={faceFormulaTextStackStyle}>
               <span>
                 OETH <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(computedOeth)}</strong>
@@ -6722,13 +6754,13 @@ function FaceTabContent({
               <span style={faceFormulaSubstitutionStyle}>
                 {thresholdTitle}({fltMode ? "FLT_TARGET" : "FBT_TARGET"}) = PURE_TARGET × FDDR_RA / 1024 ={" "}
                 {formatComputedNumber(pureTarget)} × {formatOneDecimalNumber(fddrRa)} / 1024 ={" "}
-                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(computedFbtTarget)}</strong>
+                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(computedFaceTarget)}</strong>
               </span>
             </div>
           </div>
         )}
-        <div style={faceFbtGroupStackStyle}>
-            {fbtThExpanded && <FaceFddrTableCard
+          <FaceFddrTableCard
+              embedded
               source={currentSource?.fddrRa ?? null}
               fltMode={fltMode}
               fddrValue={fddrValue}
@@ -6741,7 +6773,10 @@ function FaceTabContent({
               sourceDraftText={currentSourceText}
               sourceSavedText={savedSourceText}
               onSaveSourceDraft={onSaveSourceDraft}
-            />}
+            />
+      </section>
+
+      <div style={faceFbtGroupStackStyle}>
             <FaceFbtTableGroup
               cardId="fdThGroup"
               faceTab={fltMode ? "Face_FLT" : "Face"}
@@ -6845,14 +6880,33 @@ function FaceTabContent({
               sourceSavedText={savedSourceText}
               onSaveSourceDraft={onSaveSourceDraft}
             />
-        </div>
-      </section>
+      </div>
     </div>
   );
 }
 
+function jumpToFaceAxisCellSource(
+  onSourceJump: ((label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void) | undefined,
+  label: string,
+  source: FaceProbSource | null,
+  field: FieldEntry,
+  value: string,
+) {
+  if (!onSourceJump || !source) return;
+  const ordinal = orderedSourceFieldsOnLine(source.fields, field.line)
+    .findIndex((item) => sameFieldEntry(item, field));
+  onSourceJump(label, {
+    paths: [field.path],
+    jump_to: "first",
+    highlight: "ranges",
+  }, {
+    selection: { line: field.line, value, ordinal },
+  });
+}
+
 function FaceProbTableCard({
   source,
+  exifValue,
   bv,
   editable,
   onCellPreview,
@@ -6864,6 +6918,7 @@ function FaceProbTableCard({
   onSaveSourceDraft,
 }: {
   source: FaceProbSource | null;
+  exifValue: string | null;
   bv: number;
   editable: boolean;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
@@ -6894,10 +6949,15 @@ function FaceProbTableCard({
   return (
     <div style={faceProbTableCardStyle}>
       <div style={faceProbTableHeaderStyle}>
-        <span style={faceProbTableTitleStyle}>FaceProb</span>
-        <div style={faceProbTableHeaderActionsStyle}>
+        <div style={faceMetricGroupTitleStyle}>
+          <span style={faceProbTableTitleStyle}>FaceProb</span>
+          <span style={faceMetricSourceStyle}>
+            EXIF: <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(parseFiniteNumber(exifValue))}</strong>
+          </span>
+        </div>
+        <div className="face-target-header-actions" style={faceProbTableHeaderActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong title={resultText} style={faceProbTableHeaderResultStyle}>{resultText}</strong>
-          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
           type="button"
           title="跳转到 FaceProb 源码"
@@ -6937,11 +6997,9 @@ function FaceProbTableCard({
                       onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
                       onCommit={(nextValue) => onCellCommit?.(target, nextValue)}
                       onSourceJump={field && onSourceJump
-                        ? () => onSourceJump(`Face.FaceProb.${row.label}`, {
-                            paths: [field.path],
-                            jump_to: "first",
-                            highlight: "ranges",
-                          })
+                        ? (currentValue) => jumpToFaceAxisCellSource(
+                            onSourceJump, `Face.FaceProb.${row.label}`, source, field, currentValue,
+                          )
                         : undefined}
                     />
                   );
@@ -6986,6 +7044,9 @@ function FaceFdszTableCard({
       <div style={faceProbTableHeaderStyle}>
         <div style={{ ...faceMetricGroupTitleStyle, flexWrap: "nowrap", overflow: "hidden", padding: 0 }}>
           <span style={thresholdTitleStyle}>FDSZ_RA</span>
+          <span style={faceMetricSourceStyle}>
+            EXIF: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(parseFiniteNumber(fdszRaValue))}</strong>
+          </span>
           <span title={`${FACE_FLT_FDSZ_KEY}: ${fdszValue ?? "-"}`} style={{ ...faceMetricSourceStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {FACE_FLT_FDSZ_KEY}: {fdszValue ?? "-"}
           </span>
@@ -6993,9 +7054,9 @@ function FaceFdszTableCard({
             {FACE_FLT_FDSZ_RA_KEY}: {fdszRaValue ?? "-"}
           </span>
         </div>
-        <div style={faceCardHeaderActionsStyle}>
+        <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
-          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -7027,9 +7088,11 @@ function FaceFdszTableCard({
                     ariaLabel={`Face_FLT.FDSZ_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
                     onCommit={(value) => onCellCommit?.(target, value)}
-                    onSourceJump={field && onSourceJump ? () => onSourceJump(`Face_FLT.FDSZ_RA.${row.label}`, {
-                      paths: [field.path], jump_to: "first", highlight: "ranges",
-                    }) : undefined}
+                    onSourceJump={field && onSourceJump
+                      ? (currentValue) => jumpToFaceAxisCellSource(
+                          onSourceJump, `Face_FLT.FDSZ_RA.${row.label}`, source, field, currentValue,
+                        )
+                      : undefined}
                   />;
                 })}
               </Fragment>
@@ -7042,7 +7105,7 @@ function FaceFdszTableCard({
 }
 
 function FaceFddrTableCard({
-  source, fltMode, fddrValue, fddrRaValue, editable,
+  source, fltMode, fddrValue, fddrRaValue, editable, embedded = false,
   onCellPreview, onCellCommit, onSourceJump,
   sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
 }: {
@@ -7051,6 +7114,7 @@ function FaceFddrTableCard({
   fddrValue: string | null;
   fddrRaValue: string | null;
   editable: boolean;
+  embedded?: boolean;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
@@ -7075,7 +7139,7 @@ function FaceFddrTableCard({
   const prefix = fltMode ? "Face_FLT" : "Face";
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
   return (
-    <section style={faceFddrCardStyle}>
+    <section style={embedded ? faceFddrEmbeddedCardStyle : faceFddrCardStyle}>
       <div style={faceFddrHeaderStyle}>
         <div style={faceMetricGroupTitleStyle}>
           <span style={thresholdTitleStyle}>FDDR_RA</span>
@@ -7083,8 +7147,8 @@ function FaceFddrTableCard({
           <span style={faceMetricSourceStyle}>{fltMode ? FACE_FLT_FDDR_RA_KEY : FACE_FBT_FDDR_RA_KEY}: {fddrRaValue ?? "-"}</span>
         </div>
         <div style={faceCardHeaderActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
-          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -7115,9 +7179,11 @@ function FaceFddrTableCard({
                     ariaLabel={`${prefix}.FDDR_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
                     onCommit={(value) => onCellCommit?.(target, value)}
-                    onSourceJump={field && onSourceJump ? () => onSourceJump(`${prefix}.FDDR_RA.${row.label}`, {
-                      paths: [field.path], jump_to: "first", highlight: "ranges",
-                    }) : undefined}
+                    onSourceJump={field && onSourceJump
+                      ? (currentValue) => jumpToFaceAxisCellSource(
+                          onSourceJump, `${prefix}.FDDR_RA.${row.label}`, source, field, currentValue,
+                        )
+                      : undefined}
                   />;
                 })}
               </Fragment>
@@ -7146,7 +7212,7 @@ function FaceProbEditableCell({
   ariaLabel: string;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
-  onSourceJump?: () => void;
+  onSourceJump?: (value: string) => void;
 }) {
   return (
     <EditableNumberTableCell
@@ -7163,6 +7229,8 @@ function FaceProbEditableCell({
       onPreview={onPreview}
       onCommit={onCommit}
       onSourceJump={onSourceJump}
+      commitBeforeSourceJump={Boolean(onSourceJump)}
+      commitPreviewedValue
     />
   );
 }
@@ -11524,13 +11592,15 @@ function faceTableHasUnsavedChanges(
 }
 
 function FaceTableSaveButton({
-  dirty, onSave,
+  dirty, hideWhenClean = false, onSave,
 }: {
   dirty: boolean;
+  hideWhenClean?: boolean;
   onSave?: () => Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  if (hideWhenClean && !dirty) return null;
   return (
     <button
       type="button"
@@ -14744,10 +14814,12 @@ const ablValueBoxStyle: CSSProperties = {
   lineHeight: "26px",
 };
 
+const FACE_CARD_GAP_PX = 8;
+
 const faceTabGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr)",
-  gap: 12,
+  gap: FACE_CARD_GAP_PX,
   minWidth: 0,
 };
 
@@ -14776,10 +14848,26 @@ const faceMetricBlendTermStyle: CSSProperties = {
   overflowWrap: "anywhere",
 };
 
-const faceDerivedTargetCardStyle: CSSProperties = {
+const faceTargetCardStyle: CSSProperties = {
   ...thresholdCardStyle,
+  margin: 0,
+  boxShadow: "none",
+};
+
+const faceMetricCardBackground = "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground1))";
+
+const faceDerivedTargetCardStyle: CSSProperties = {
+  ...faceTargetCardStyle,
+  border: 0,
   borderRadius: 0,
   margin: 0,
+};
+
+const faceTargetSectionHeaderStyle: CSSProperties = {
+  ...thresholdHeaderStyle,
+  minHeight: 36,
+  padding: "0 12px",
+  background: faceMetricCardBackground,
 };
 
 const faceMetricBlendInlineProbeStyle: CSSProperties = {
@@ -14861,7 +14949,7 @@ const faceMetricCardStyle: CSSProperties = {
   padding: 12,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
   borderRadius: 10,
-  background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground1))",
+  background: faceMetricCardBackground,
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 
@@ -14871,12 +14959,12 @@ const faceProbTableTitleStyle: CSSProperties = {
   alignSelf: "stretch",
   color: "var(--colorNeutralForeground1)",
   fontSize: 13,
-  fontWeight: 900,
+  fontWeight: 700,
   lineHeight: "18px",
 };
 
 const faceProbTableCardStyle: CSSProperties = {
-  ...thresholdCardStyle,
+  ...faceDerivedTargetCardStyle,
   display: "flex",
   flexDirection: "column",
   containerType: "inline-size",
@@ -14889,24 +14977,15 @@ const faceProbTableCardStyle: CSSProperties = {
   minHeight: 0,
   margin: 0,
   padding: 0,
-  borderRadius: "0 0 12px 12px",
-  boxShadow: "none",
 };
 
 const faceProbTableHeaderStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
+  ...faceTargetSectionHeaderStyle,
   gap: 8,
   width: "100%",
   minWidth: 0,
-  minHeight: 34,
-  height: 34,
   boxSizing: "border-box",
   margin: 0,
-  padding: "0 8px",
-  background: faceMetricCardStyle.background,
-  borderBottom: thresholdHeaderStyle.borderBottom,
 };
 
 const faceProbTableHeaderActionsStyle: CSSProperties = {
@@ -14946,7 +15025,7 @@ function faceProbTableStyle(columnCount: number): CSSProperties {
   const normalizedColumnCount = Math.max(1, columnCount);
   return {
     display: "grid",
-    gridTemplateColumns: `minmax(52px, 0.9fr) repeat(${normalizedColumnCount}, minmax(0, 1fr))`,
+    gridTemplateColumns: `max-content repeat(${normalizedColumnCount}, minmax(0, 1fr))`,
     width: "100%",
     minWidth: 0,
     border: HS_WEIGHT_FRAME_BORDER,
@@ -14965,6 +15044,7 @@ const faceProbTableLabelStyle: CSSProperties = {
   minHeight: 24,
   padding: "0 5px",
   borderTop: "1px solid var(--colorNeutralStroke3)",
+  background: "rgb(225, 245, 209)",
   color: "var(--colorNeutralForeground2)",
   fontWeight: 800,
   overflow: "hidden",
@@ -15019,29 +15099,41 @@ const faceCardHeaderActionsStyle: CSSProperties = {
 const faceDualTableGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 480px), 1fr))",
-  gap: 12,
+  gap: FACE_CARD_GAP_PX,
   alignItems: "start",
   minWidth: 0,
-  padding: 12,
+  padding: 8,
   background: "var(--colorNeutralBackground1)",
 };
 
 const faceFbtGroupStackStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 12,
+  gap: FACE_CARD_GAP_PX,
   minWidth: 0,
 };
 
 const faceFbtGroupCardStyle: CSSProperties = {
-  ...thresholdCardStyle,
+  ...faceTargetCardStyle,
   margin: 0,
+};
+
+const faceThresholdWithFddrCardStyle: CSSProperties = {
+  ...faceFbtGroupCardStyle,
+  overflow: "hidden",
 };
 
 const faceFddrCardStyle: CSSProperties = {
   ...faceFbtGroupCardStyle,
   containerType: "inline-size",
-  borderRadius: "0 0 12px 12px",
+  borderRadius: 12,
+};
+
+const faceFddrEmbeddedCardStyle: CSSProperties = {
+  ...faceFddrCardStyle,
+  border: 0,
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 0,
   boxShadow: "none",
 };
 

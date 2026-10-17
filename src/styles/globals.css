@@ -3,6 +3,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Flat actions for the Face / Face_FLT target sections. */
+.face-target-header-actions > button {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.face-target-header-actions > button:hover:not(:disabled) {
+  background: var(--colorNeutralBackground3) !important;
+}
+.face-target-header-actions > button:focus-visible {
+  outline: 2px solid var(--colorBrandForeground1);
+  outline-offset: 1px;
+}
+
 /* ────────── Theme palettes ────────── */
 /* Driven by <html class="dark" | "light"> (toggled from App.tsx). Fluent v9
  * tokens cover all in-component surfaces; the variables below only style the

@@ -43,7 +43,7 @@ interface MtkState {
   setOuterSplit:  (sizes: number[]) => void;
   setInnerSplit:  (sizes: number[]) => void;
   setDebugParserPath: (path: string | null) => void;
-  setCppPath: (path: string | null) => void;
+  setCppPath: (path: string | null, isp: IspId, tabIdx: number) => void;
 
   setImport:   (isp: IspId, tabIdx: number, state: Partial<ImportState>) => void;
   setImageDir: (isp: IspId, tabIdx: number, state: Partial<ImageDirState>) => void;
@@ -51,7 +51,7 @@ interface MtkState {
 
 export const useMtkStore = create<MtkState>()(
   immer((set) => ({
-    mtk: { current_isp: 1, current_tab: 0, outer_splitter: [], inner_splitter: [], cpp_path: null, debug_parser_path: null },
+    mtk: { current_isp: 1, current_tab: 0, outer_splitter: [], inner_splitter: [], cpp_path: null, cpp_paths: {}, debug_parser_path: null },
     debugParserPath: null,
     imports:  {},
     imageDir: {},
@@ -61,7 +61,13 @@ export const useMtkStore = create<MtkState>()(
     setOuterSplit:  (sizes) => set((s) => { s.mtk.outer_splitter = sizes; }),
     setInnerSplit:  (sizes) => set((s) => { s.mtk.inner_splitter = sizes; }),
     setDebugParserPath: (path) => set((s) => { s.debugParserPath = path; s.mtk.debug_parser_path = path; }),
-    setCppPath: (path) => set((s) => { s.mtk.cpp_path = path; }),
+    setCppPath: (path, isp, tabIdx) => set((s) => {
+      const key = `${isp}|${tabIdx}`;
+      s.mtk.cpp_paths ??= {};
+      if (path) s.mtk.cpp_paths[key] = path;
+      else delete s.mtk.cpp_paths[key];
+      if (isp === "ISP6S" && tabIdx === 0) s.mtk.cpp_path = path;
+    }),
 
     setImport: (isp, tabIdx, patch) => set((s) => {
       const key = `${isp}|${tabIdx}`;

@@ -28,13 +28,15 @@ export function MtkView() {
   const debugParserPath = useMtkStore((s) => s.debugParserPath);
   const setDebugParserPath = useMtkStore((s) => s.setDebugParserPath);
   const setCppPath = useMtkStore((s) => s.setCppPath);
-  const restoredCppPath = useRef<string | null>(null);
+  const restoredCppPaths = useRef<Record<string, string>>({});
   const restoredParserPath = useRef<string | null>(null);
   const cppRequestId = useRef(0);
+  const parserRequestId = useRef(0);
   const imageRequestId = useRef(0);
 
   useEffect(() => () => {
     cppRequestId.current += 1;
+    parserRequestId.current += 1;
     imageRequestId.current += 1;
   }, []);
 
@@ -94,10 +96,10 @@ export function MtkView() {
         status:  "done",
         message: null,
       });
-      if (ispId === "ISP6S" && tabIdx === 0) {
-        restoredCppPath.current = path;
-        setCppPath(path);
-      }
+      restoredCppPaths.current[`${ispId}|${tabIdx}`] = path;
+      setCppPath(path, ispId, tabIdx);
+      void saveStateSection("mtk", useMtkStore.getState().mtk)
+        .catch((error) => console.warn("save cpp path", error));
       setToast({
         kind:  "success",
         title: "解析完成",
@@ -111,34 +113,60 @@ export function MtkView() {
     }
   }, [ispId, tabIdx, setCppPath, setImport]);
 
+  const onDebugParserPathChange = useCallback(async (path: string) => {
+    const requestId = ++parserRequestId.current;
+    if (path.split(/[\\/]/).pop()?.toLowerCase() !== "debugparser.exe") {
+      setToast({ kind: "error", title: "请选择 DebugParser.exe", detail: path });
+      return;
+    }
+    try {
+      if (!(await isFile(path))) {
+        if (requestId === parserRequestId.current) setToast({ kind: "error", title: "DP 解析工具不存在", detail: path });
+        return;
+      }
+      if (requestId !== parserRequestId.current) return;
+      restoredParserPath.current = path;
+      setDebugParserPath(path);
+      void saveStateSection("mtk", useMtkStore.getState().mtk)
+        .catch((error) => console.warn("save debug parser path", error));
+    } catch (error) {
+      if (requestId === parserRequestId.current) setToast({ kind: "error", title: "检查 DP 解析工具失败", detail: String(error) });
+    }
+  }, [setDebugParserPath]);
+
   useEffect(() => {
-    const path = mtk.cpp_path;
-    if (!path || restoredCppPath.current === path) return;
-    restoredCppPath.current = path;
+    const path = mtk.cpp_paths?.[key] ?? (key === "ISP6S|0" ? mtk.cpp_path : null);
+    if (!path || restoredCppPaths.current[key] === path) return;
+    if (useMtkStore.getState().imports[key]?.filePath === path
+      && useMtkStore.getState().imports[key]?.status === "done") {
+      restoredCppPaths.current[key] = path;
+      return;
+    }
+    restoredCppPaths.current[key] = path;
     const requestId = ++cppRequestId.current;
     let cancelled = false;
     isFile(path).then(async (valid) => {
       if (cancelled || requestId !== cppRequestId.current) return;
       if (!valid) {
-        setCppPath(null);
+        setCppPath(null, ispId, tabIdx);
         setToast({ kind: "error", title: "上次的参数文件已失效", detail: path });
         return;
       }
-      setImport("ISP6S", 0, { filePath: path, parsed: null, status: "parsing", message: null });
+      setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
       try {
         const parsed = await parseCppFile(path);
-        if (!cancelled && requestId === cppRequestId.current) setImport("ISP6S", 0, { parsed, status: "done", message: null });
+        if (!cancelled && requestId === cppRequestId.current) setImport(ispId, tabIdx, { parsed, status: "done", message: null });
       } catch (error) {
         if (cancelled || requestId !== cppRequestId.current) return;
-        setImport("ISP6S", 0, { filePath: null, parsed: null, status: "idle", message: null });
-        setCppPath(null);
+        setImport(ispId, tabIdx, { filePath: null, parsed: null, status: "idle", message: null });
+        setCppPath(null, ispId, tabIdx);
         setToast({ kind: "error", title: "上次的参数文件无法加载", detail: error instanceof Error ? error.message : String(error) });
       }
     }).catch((error) => {
       if (!cancelled && requestId === cppRequestId.current) setToast({ kind: "error", title: "检查参数文件失败", detail: String(error) });
     });
     return () => { cancelled = true; };
-  }, [mtk.cpp_path, setCppPath, setImport]);
+  }, [key, mtk.cpp_path, mtk.cpp_paths, ispId, tabIdx, setCppPath, setImport]);
 
   useEffect(() => {
     const path = mtk.debug_parser_path;
@@ -211,7 +239,7 @@ export function MtkView() {
         onIspChange={(id) => setCurrentIsp(ISP_LIST.findIndex((i) => i.id === id))}
         onTabChange={setCurrentTab}
         onCppPathChange={onCppPathChange}
-        onDebugParserPathChange={setDebugParserPath}
+        onDebugParserPathChange={onDebugParserPathChange}
         onPickerRatiosChange={setInnerSplit}
         onToast={setToast}
       />
@@ -239,7 +267,7 @@ export function MtkView() {
                   onImageDirChange={onImageDirChange}
                   onCppPathChange={onCppPathChange}
                   debugParserPath={debugParserPath}
-                  onDebugParserPathChange={setDebugParserPath}
+                  onDebugParserPathChange={onDebugParserPathChange}
                   onNotice={setToast}
                   onWorkspaceDividerChange={reportWorkspaceDivider}
                 />

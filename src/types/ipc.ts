@@ -35,6 +35,7 @@ export interface Mtk {
   outer_splitter: number[];
   inner_splitter: number[];
   cpp_path?: string | null;
+  cpp_paths?: Record<string, string>;
   debug_parser_path?: string | null;
 }
 
