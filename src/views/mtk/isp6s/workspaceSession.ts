@@ -1,5 +1,3 @@
-import type { PreviewMode } from "./ImagePane/ImagePane";
-
 export interface ScrollPosition {
   top: number;
   left: number;
@@ -14,7 +12,6 @@ export interface WorkspaceSession {
   imageScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
   detailsScroll: Partial<Record<DetailsTab, ScrollPosition>>;
-  sourceMode: PreviewMode;
   sourceScroll: Record<string, ScrollPosition>;
   toneSourceSize: number;
   toneLceSize: number;
@@ -46,7 +43,6 @@ export function workspaceSession(key: string): WorkspaceSession {
     imageScroll: null,
     detailsTab: "normal",
     detailsScroll: {},
-    sourceMode: "param_map",
     sourceScroll: {},
     toneSourceSize: 40,
     toneLceSize: 42,

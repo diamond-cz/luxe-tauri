@@ -24,6 +24,7 @@ interface Props {
   parsed: ParseResult;
   tomlData: Record<string, string>;
   entries: ImageEntry[];
+  visibleHeatmapPaths?: string[] | null;
   sourceDraftText: string | null;
   sourceInitialText: string | null;
   sourceSavedText: string | null;
@@ -302,7 +303,7 @@ function buildToneGroups(result: ParseResult): Record<ToneTab, ToneGroup[]> {
 }
 
 export function ToneChartMapMode({
-  filePath, parsed, tomlData, entries, sourceDraftText, sourceInitialText, sourceSavedText,
+  filePath, parsed, tomlData, entries, visibleHeatmapPaths, sourceDraftText, sourceInitialText, sourceSavedText,
   onSourceDraftTextChange, onSaveSourceDraft, onSelectHeatmapImages, onSourceJump,
 }: Props) {
   const [result, setResult] = useState(parsed);
@@ -337,6 +338,10 @@ export function ToneChartMapMode({
     return () => { cancelled = true; };
   }, [entries, heatmapRequested, heatmapRetry]);
   const currentHeatmap = heatmapData?.entries === entries ? heatmapData : null;
+  const visibleHeatmapPathSet = useMemo(() => visibleHeatmapPaths == null ? null : new Set(visibleHeatmapPaths), [visibleHeatmapPaths]);
+  const visibleHeatmapPoints = useMemo(() => visibleHeatmapPathSet && currentHeatmap
+    ? currentHeatmap.points.filter((point) => visibleHeatmapPathSet.has(point.path)) : currentHeatmap?.points ?? [],
+  [currentHeatmap, visibleHeatmapPathSet]);
   const setHeatmapMode = (tableId: ToneLceTableId, patch: Partial<HeatmapMode>) => {
     const next = { ...heatmapModes[tableId], ...patch };
     patchVisual({ chart_face_heatmap_modes: {
@@ -409,7 +414,7 @@ export function ToneChartMapMode({
   const tableProps = {
     tomlData, lineFields, sourceDraftText, sourceInitialText, sourceSavedText, onSaveSourceDraft, onCommit: commitCell,
     onCellJump: jumpToCell, heatmapModes, setHeatmapMode, requestHeatmap,
-    heatmapPoints: currentHeatmap?.points ?? [], heatmapLoading: heatmapRequested && entries.length > 0 && !currentHeatmap,
+    heatmapPoints: visibleHeatmapPoints, heatmapLoading: heatmapRequested && entries.length > 0 && !currentHeatmap,
     heatmapFailed: currentHeatmap?.failed ?? false, onSelectHeatmapImages, tables: displayedTables,
   };
   const jump = (label: string, firstLine: number, lastLine: number, field?: FieldEntry) => onSourceJump(label, {

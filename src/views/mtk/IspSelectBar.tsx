@@ -160,15 +160,15 @@ export function IspSelectBar({
 
   return (
     <div
-      className="flex h-11 shrink-0 items-stretch gap-3 pl-0 pr-3"
+      className="flex h-11 shrink-0 items-stretch gap-3 pl-3 pr-3"
       style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}
     >
       <div
         ref={selectRef}
-        className="relative flex h-full w-[140px] shrink-0 items-stretch transition-colors"
+        className="relative my-1.5 flex h-8 w-[140px] shrink-0 items-stretch rounded-lg border transition-colors"
         style={{
           background: selectHighlighted ? "var(--colorNeutralBackground3)" : "var(--colorNeutralBackground2)",
-          borderRight: `1px solid ${selectHighlighted ? "var(--colorNeutralStroke1)" : "var(--colorNeutralStroke2)"}`,
+          borderColor: selectHighlighted ? "var(--colorNeutralStroke1)" : "var(--colorNeutralStroke2)",
           color: selectHighlighted ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground2)",
         }}
         onMouseEnter={() => setSelectHover(true)}
@@ -176,7 +176,7 @@ export function IspSelectBar({
       >
         <button
           type="button"
-          className="flex h-full w-full items-center justify-between gap-2 px-3 text-sm transition-colors"
+          className="flex h-full w-full items-center justify-between gap-2 rounded-lg px-3 text-sm transition-colors"
           aria-haspopup="listbox"
           aria-expanded={selectOpen}
           onClick={() => setSelectOpen((value) => !value)}
@@ -199,7 +199,7 @@ export function IspSelectBar({
         {selectOpen && (
           <div
             role="listbox"
-            className="absolute left-0 top-full z-50 w-full overflow-hidden rounded-b-md border text-sm shadow-lg"
+            className="absolute left-0 top-full z-50 mt-1 w-full overflow-hidden rounded-md border text-sm shadow-lg"
             style={{
               background: "var(--colorNeutralBackground1)",
               borderColor: "var(--colorNeutralStroke2)",
@@ -253,7 +253,7 @@ export function IspSelectBar({
               minSize={22}
             >
               <div className="flex h-full min-w-0 items-stretch gap-2 overflow-hidden">
-                <div className="min-w-0" style={{ flex: "3 1 0" }}>
+                <div className="min-w-0" style={{ flex: "1 1 0" }}>
                   <PathPicker
                     innerRef={pickerRef}
                     title={`${cppFileHint}参数路径`}
@@ -273,7 +273,7 @@ export function IspSelectBar({
                     }}
                   />
                 </div>
-                <div className="min-w-0" style={{ flex: "2 1 0" }}>
+                <div className="min-w-0" style={{ flex: "1 1 0" }}>
                   <PathPicker
                     innerRef={debugParserRef}
                     title="DP解析工具路径"

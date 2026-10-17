@@ -192,6 +192,12 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover { background: var(--luxe-scroll-h); }
 *::-webkit-scrollbar-corner { background: transparent; }
+/* WebView2 may show native end buttons despite the shared scrollbar theme. */
+.image-table-viewport::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 .luxe-update-log-backdrop {
   background: rgba(28, 34, 45, 0.62) !important;

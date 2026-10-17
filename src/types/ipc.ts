@@ -47,6 +47,7 @@ export interface Isp6sAeVisual {
   image_splitter_orientation: "V" | "H";
   image_inner_ratios:         number[];
   preview_mode:               "param_map" | "chart_map" | "image_split" | "para_check" | "image";
+  tone_preview_mode?:         "param_map" | "chart_map";
   workspace_column_ratios:    number[];
   workspace_details_ratio:    number;
   table_collapsed:            boolean;

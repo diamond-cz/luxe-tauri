@@ -63,6 +63,7 @@ interface Props {
   sourceBasePath: string;
   schema:   Isp6sSchemaRoot;
   entries: ImageEntry[];
+  visibleHeatmapPaths?: string[] | null;
   tomlData: Record<string, string>;
   active?: boolean;
   onSelectHeatmapImages?: (paths: string[]) => void;
@@ -341,6 +342,14 @@ interface BvHeatmapPoint {
 interface FaceHeatmapPoint extends BvHeatmapPoint {
   dr: number;
   nsProb: number;
+  faceProb: number;
+  faceSz: number;
+  fddr: number;
+}
+
+interface FaceAxisHeatmapPoint {
+  path: string;
+  value: number;
 }
 
 interface HsAreaHeatmapPoint {
@@ -821,6 +830,7 @@ export function ChartMapMode({
   sourceBasePath,
   schema,
   entries,
+  visibleHeatmapPaths,
   tomlData,
   active = true,
   onSelectHeatmapImages,
@@ -945,7 +955,10 @@ export function ChartMapMode({
   useEffect(() => {
     const heatmapKeys = tab === "MainT" ? [MAIN_T_BV_HEATMAP_KEY]
       : tab === "HS" ? Object.values(HS_AREA_HEATMAP_KEYS)
-      : isFaceTab ? Object.keys(FACE_TABLE_GROUP_BY_KEY).map((tableKey) => `${tab}_${tableKey}`)
+      : isFaceTab ? [
+        ...Object.keys(FACE_TABLE_GROUP_BY_KEY).map((tableKey) => `${tab}_${tableKey}`),
+        `${tab}_faceProb`, `${tab}_fdszRa`, `${tab}_fddrRa`,
+      ]
       : [];
     if (heatmapKeys.some((key) => visual.chart_face_heatmap_modes?.[key]?.enabled)) {
       setHeatmapRequested(true);
@@ -964,6 +977,7 @@ export function ChartMapMode({
     loadImageTomlFieldsBatchShared(
       entries.map((entry) => entry.toml_path),
       [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY,
+        ...FACE_PROB_KEYS, FACE_FLT_FDSZ_KEY, FACE_FBT_FDDR_KEY, FACE_FLT_FDDR_KEY,
         HS_BRIGHT_EVD_KEY, HS_MIDDLE_B2M_KEY, "AE_TAG_DRV6_B2D"],
     ).then((rows) => {
       if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, rows, failed: false });
@@ -975,31 +989,42 @@ export function ChartMapMode({
   const currentHeatmapRows = heatmapRows?.entries === entries && heatmapRows.bvKey === heatmapBvKey
     ? heatmapRows
     : null;
+  const visibleHeatmapPathSet = useMemo(() => visibleHeatmapPaths === null || visibleHeatmapPaths === undefined
+    ? null : new Set(visibleHeatmapPaths), [visibleHeatmapPaths]);
+  const visibleHeatmapEntries = useMemo(() => visibleHeatmapPathSet
+    ? entries.filter((entry) => visibleHeatmapPathSet.has(entry.toml_path)) : entries,
+  [entries, visibleHeatmapPathSet]);
   const imageHeatmapPoints = useMemo<FaceHeatmapPoint[]>(() => {
     const rows = currentHeatmapRows?.rows;
     if (!rows) return [];
     const drKey = tab === "Face_FLT" ? FACE_FLT_DR_KEY : FACE_FBT_DR_KEY;
-    return entries.flatMap((entry) => {
+    return visibleHeatmapEntries.flatMap((entry) => {
       const data = rows[entry.toml_path] ?? {};
       const bv = parseFiniteNumber(readTomlValue(data, heatmapBvKey));
       const dr = parseFiniteNumber(readTomlValue(data, drKey));
       const nsProb = parseFiniteNumber(readTomlValue(data, NS_PROB_KEY));
-      return Number.isFinite(bv) && Number.isFinite(dr) ? [{ path: entry.toml_path, bv, dr, nsProb }] : [];
+      const faceProb = parseFiniteNumber(readFirstTomlValue(data, FACE_PROB_KEYS));
+      const faceSzRaw = parseFiniteNumber(readTomlValue(data, FACE_FLT_FDSZ_KEY));
+      const fddrKey = tab === "Face_FLT" ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY;
+      const fddr = parseFiniteNumber(readTomlValue(data, fddrKey));
+      return [bv, faceProb, faceSzRaw, fddr].some(Number.isFinite)
+        ? [{ path: entry.toml_path, bv, dr, nsProb, faceProb, faceSz: faceSzRaw / 100, fddr }]
+        : [];
     });
-  }, [currentHeatmapRows, entries, heatmapBvKey, tab]);
+  }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey, tab]);
   const bvHeatmapPoints = useMemo<BvHeatmapPoint[]>(() => {
     const rows = currentHeatmapRows?.rows;
     if (!rows) return [];
-    return entries.flatMap((entry) => {
+    return visibleHeatmapEntries.flatMap((entry) => {
       const bv = parseFiniteNumber(readTomlValue(rows[entry.toml_path] ?? {}, heatmapBvKey));
       return Number.isFinite(bv) ? [{ path: entry.toml_path, bv }] : [];
     });
-  }, [currentHeatmapRows, entries, heatmapBvKey]);
+  }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey]);
   const hsAreaHeatmapPoints = useMemo(() => {
     const points: Record<HsTargetTermId, HsAreaHeatmapPoint[]> = { BT: [], MT: [], DT: [] };
     const rows = currentHeatmapRows?.rows;
     if (!rows) return points;
-    for (const entry of entries) {
+    for (const entry of visibleHeatmapEntries) {
       const data = rows[entry.toml_path] ?? {};
       const bv = parseFiniteNumber(readTomlValue(data, heatmapBvKey));
       if (!Number.isFinite(bv)) continue;
@@ -1011,7 +1036,7 @@ export function ChartMapMode({
       }
     }
     return points;
-  }, [currentHeatmapRows, entries, heatmapBvKey]);
+  }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey]);
   const requestImageHeatmap = () => {
     if (currentHeatmapRows?.failed) {
       setHeatmapRows(null);
@@ -6496,6 +6521,18 @@ function FaceTabContent({
     nsTarget: formatParameterValue(normalTargetParameterValues.nsTarget),
     nsProb: formatParameterValue(normalTargetParameterValues.nsProb),
   });
+  const faceProbHeatmapPoints = useMemo<FaceAxisHeatmapPoint[]>(
+    () => imageHeatmapPoints.flatMap(({ path, faceProb: value }) => Number.isFinite(value) ? [{ path, value }] : []),
+    [imageHeatmapPoints],
+  );
+  const fdszHeatmapPoints = useMemo<FaceAxisHeatmapPoint[]>(
+    () => imageHeatmapPoints.flatMap(({ path, faceSz: value }) => Number.isFinite(value) ? [{ path, value }] : []),
+    [imageHeatmapPoints],
+  );
+  const fddrHeatmapPoints = useMemo<FaceAxisHeatmapPoint[]>(
+    () => imageHeatmapPoints.flatMap(({ path, fddr: value }) => Number.isFinite(value) ? [{ path, value }] : []),
+    [imageHeatmapPoints],
+  );
   const setCardExpanded = (cardId: FaceMetricCardId, expanded: boolean) => {
     const next = new Set(collapsed);
     if (expanded) {
@@ -6684,6 +6721,11 @@ function FaceTabContent({
                 fdszValue={fdszValue}
                 fdszRaValue={fdszRaValue}
                 editable={canEdit}
+                heatmapPoints={fdszHeatmapPoints}
+                onSelectHeatmapImages={onSelectHeatmapImages}
+                heatmapLoading={heatmapLoading}
+                heatmapFailed={heatmapFailed}
+                onHeatmapRequest={onHeatmapRequest}
                 onCellPreview={(target, value) => previewFaceAxisCell("fdszRa", target, value)}
                 onCellCommit={(target, value) => updateFaceAxisCell("fdszRa", target, value)}
                 onSourceJump={onSourceJump}
@@ -6699,6 +6741,11 @@ function FaceTabContent({
                 exifValue={faceProbExifValue}
                 bv={bv}
                 editable={canEdit}
+                heatmapPoints={faceProbHeatmapPoints}
+                onSelectHeatmapImages={onSelectHeatmapImages}
+                heatmapLoading={heatmapLoading}
+                heatmapFailed={heatmapFailed}
+                onHeatmapRequest={onHeatmapRequest}
                 onCellPreview={(target, value) => previewFaceAxisCell("faceProb", target, value)}
                 onCellCommit={(target, value) => updateFaceAxisCell("faceProb", target, value)}
                 onSourceJump={onSourceJump}
@@ -6766,6 +6813,11 @@ function FaceTabContent({
               fddrValue={fddrValue}
               fddrRaValue={fddrRaValue}
               editable={canEdit}
+              heatmapPoints={fddrHeatmapPoints}
+              onSelectHeatmapImages={onSelectHeatmapImages}
+              heatmapLoading={heatmapLoading}
+              heatmapFailed={heatmapFailed}
+              onHeatmapRequest={onHeatmapRequest}
               onCellPreview={(target, value) => previewFaceAxisCell("fddrRa", target, value)}
               onCellCommit={(target, value) => updateFaceAxisCell("fddrRa", target, value)}
               onSourceJump={onSourceJump}
@@ -6909,6 +6961,11 @@ function FaceProbTableCard({
   exifValue,
   bv,
   editable,
+  heatmapPoints,
+  onSelectHeatmapImages,
+  heatmapLoading,
+  heatmapFailed,
+  onHeatmapRequest,
   onCellPreview,
   onCellCommit,
   onSourceJump,
@@ -6921,6 +6978,11 @@ function FaceProbTableCard({
   exifValue: string | null;
   bv: number;
   editable: boolean;
+  heatmapPoints: FaceAxisHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onHeatmapRequest: () => void;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
@@ -6929,6 +6991,8 @@ function FaceProbTableCard({
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
+  const [tableExpanded, setTableExpanded] = useState(true);
+  const tableId = "face-prob-table";
   const rows = source?.rows ?? FACE_PROB_TABLE_ROWS.map(({ label, path }) => ({
     label,
     path,
@@ -6945,6 +7009,11 @@ function FaceProbTableCard({
   const canJumpToSource = Boolean(onSourceJump);
   const canEdit = editable && Boolean(source);
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
+  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode("Face_faceProb", true);
+  const heatmap = useMemo(
+    () => showHeatmap && tableExpanded ? faceAxisHeatmapData(source, heatmapPoints) : { counts: [], paths: [], maxCount: 0 },
+    [source, heatmapPoints, showHeatmap, tableExpanded],
+  );
 
   return (
     <div style={faceProbTableCardStyle}>
@@ -6956,8 +7025,18 @@ function FaceProbTableCard({
           </span>
         </div>
         <div className="face-target-header-actions" style={faceProbTableHeaderActionsStyle}>
-          <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong title={resultText} style={faceProbTableHeaderResultStyle}>{resultText}</strong>
+          <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
+          <button type="button" style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
+            title={showHeatmap
+              ? `左键关闭热力图，右键切换${showHitCounts ? "参数值" : "命中数"}`
+              : "显示 FaceProb 笛卡尔热力图"}
+            aria-label={showHeatmap ? "关闭 FaceProb 笛卡尔热力图" : "显示 FaceProb 笛卡尔热力图"}
+            aria-pressed={showHeatmap} disabled={!source}
+            onClick={() => { if (!showHeatmap) onHeatmapRequest(); updateHeatmapMode(!showHeatmap, showHitCounts); }}
+            onContextMenu={(event) => { if (!showHeatmap) return; event.preventDefault(); updateHeatmapMode(true, !showHitCounts); }}>
+            <DataHistogram24Regular className="h-4 w-4" />
+          </button>
           <button
           type="button"
           title="跳转到 FaceProb 源码"
@@ -6973,14 +7052,23 @@ function FaceProbTableCard({
         >
           <Code24Regular className="h-4 w-4" />
           </button>
+          <FaceAxisTableCollapseButton title="FaceProb" expanded={tableExpanded} tableId={tableId} onToggle={() => setTableExpanded((current) => !current)} />
         </div>
       </div>
-      <div style={faceProbTableBodyStyle}>
+      {tableExpanded && <div id={tableId} style={faceProbTableBodyStyle}>
         <div style={faceProbTableScrollStyle}>
-          <div style={faceProbTableStyle(columnCount)}>
+          <div style={faceProbTableStyle(columnCount, true)}>
             {rows.map((row, rowIndex) => (
               <Fragment key={row.path}>
-                <div title={row.path} style={faceProbTableLabelStyle}>{row.label}</div>
+                {rowIndex === 0 ? (
+                  <div style={faceProbTableCornerStyle} title="Prob / BV" aria-label="Prob / BV">
+                    <svg aria-hidden="true" focusable="false" viewBox="0 0 100 100" preserveAspectRatio="none" style={faceBvDrCornerDiagonalStyle}>
+                      <line x1="0" y1="0" x2="100" y2="100" stroke="var(--colorNeutralStroke1)" vectorEffect="non-scaling-stroke" />
+                    </svg>
+                    <span style={faceBvDrCornerBvStyle}>Prob</span>
+                    <span style={faceBvDrCornerDrStyle}>BV</span>
+                  </div>
+                ) : <div title={row.path} style={faceProbTableLabelStyle}>{row.label}</div>}
                 {Array.from({ length: columnCount }, (_, columnIndex) => {
                   const field = row.fields[columnIndex] ?? null;
                   const value = row.values[columnIndex] ?? "-";
@@ -6992,6 +7080,14 @@ function FaceProbTableCard({
                       value={value}
                       editable={canEdit && Boolean(field)}
                       active={active}
+                      axisHeader={rowIndex === 0}
+                      heatmapStyle={showHeatmap && rowIndex > 0 ? faceAxisHeatCellStyle(heatmap.counts[columnIndex] ?? 0, heatmap.maxCount, active) : undefined}
+                      heatmapCount={showHeatmap ? heatmap.counts[columnIndex] : undefined}
+                      showHeatmapCount={showHeatmap && showHitCounts && rowIndex > 0}
+                      heatmapLoading={heatmapLoading}
+                      heatmapFailed={heatmapFailed}
+                      onSelectHeatmapImages={showHeatmap && !heatmapLoading && !heatmapFailed
+                        ? () => onSelectHeatmapImages?.(heatmap.paths[columnIndex] ?? []) : undefined}
                       historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], value)}
                       ariaLabel={`FaceProb.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                       onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
@@ -7008,13 +7104,14 @@ function FaceProbTableCard({
             ))}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
 function FaceFdszTableCard({
   source, fdszValue, fdszRaValue, editable,
+  heatmapPoints, onSelectHeatmapImages, heatmapLoading, heatmapFailed, onHeatmapRequest,
   onCellPreview, onCellCommit, onSourceJump,
   sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
 }: {
@@ -7022,6 +7119,11 @@ function FaceFdszTableCard({
   fdszValue: string | null;
   fdszRaValue: string | null;
   editable: boolean;
+  heatmapPoints: FaceAxisHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onHeatmapRequest: () => void;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
@@ -7030,6 +7132,8 @@ function FaceFdszTableCard({
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
+  const [tableExpanded, setTableExpanded] = useState(true);
+  const tableId = "face-flt-fdsz-ra-table";
   const rows = source?.rows ?? FACE_FLT_FDSZ_TABLE_ROWS.map(({ label, path }) => ({
     label, path, values: [], fields: [],
   }));
@@ -7038,6 +7142,11 @@ function FaceFdszTableCard({
   const { axis, points, result } = selectFaceFddrRa(source, faceSz);
   const activeColumns = selectFaceProbActiveColumns(faceSz, axis, points);
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
+  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode("Face_FLT_fdszRa", true);
+  const heatmap = useMemo(
+    () => showHeatmap && tableExpanded ? faceAxisHeatmapData(source, heatmapPoints) : { counts: [], paths: [], maxCount: 0 },
+    [source, heatmapPoints, showHeatmap, tableExpanded],
+  );
 
   return (
     <div style={faceProbTableCardStyle}>
@@ -7057,6 +7166,16 @@ function FaceFdszTableCard({
         <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
+          <button type="button" style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
+            title={showHeatmap
+              ? `左键关闭热力图，右键切换${showHitCounts ? "参数值" : "命中数"}`
+              : "显示 FDSZ_RA 笛卡尔热力图"}
+            aria-label={showHeatmap ? "关闭 FDSZ_RA 笛卡尔热力图" : "显示 FDSZ_RA 笛卡尔热力图"}
+            aria-pressed={showHeatmap} disabled={!source}
+            onClick={() => { if (!showHeatmap) onHeatmapRequest(); updateHeatmapMode(!showHeatmap, showHitCounts); }}
+            onContextMenu={(event) => { if (!showHeatmap) return; event.preventDefault(); updateHeatmapMode(true, !showHitCounts); }}>
+            <DataHistogram24Regular className="h-4 w-4" />
+          </button>
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -7068,14 +7187,15 @@ function FaceFdszTableCard({
               context: 4, jump_to: "first", highlight: "ranges",
             })}
           ><Code24Regular className="h-4 w-4" /></button>
+          <FaceAxisTableCollapseButton title="FDSZ_RA" expanded={tableExpanded} tableId={tableId} onToggle={() => setTableExpanded((current) => !current)} />
         </div>
       </div>
-      <div style={faceProbTableBodyStyle}>
+      {tableExpanded && <div id={tableId} style={faceProbTableBodyStyle}>
         <div style={faceProbTableScrollStyle}>
           <div style={faceProbTableStyle(columnCount)}>
             {rows.map((row, rowIndex) => (
               <Fragment key={row.path}>
-                <div title={row.path} style={faceProbTableLabelStyle}>{row.label}</div>
+                <div title={row.path} style={rowIndex === 0 ? faceProbTableAxisLabelStyle : faceProbTableLabelStyle}>{row.label}</div>
                 {Array.from({ length: columnCount }, (_, columnIndex) => {
                   const field = row.fields[columnIndex] ?? null;
                   const target: FaceProbCellTarget = { rowIndex, columnIndex };
@@ -7084,6 +7204,14 @@ function FaceFdszTableCard({
                     value={row.values[columnIndex] ?? "-"}
                     editable={editable && Boolean(field)}
                     active={activeColumns.has(columnIndex)}
+                    axisHeader={rowIndex === 0}
+                    heatmapStyle={showHeatmap && rowIndex > 0 ? faceAxisHeatCellStyle(heatmap.counts[columnIndex] ?? 0, heatmap.maxCount, activeColumns.has(columnIndex)) : undefined}
+                    heatmapCount={showHeatmap ? heatmap.counts[columnIndex] : undefined}
+                    showHeatmapCount={showHeatmap && showHitCounts && rowIndex > 0}
+                    heatmapLoading={heatmapLoading}
+                    heatmapFailed={heatmapFailed}
+                    onSelectHeatmapImages={showHeatmap && !heatmapLoading && !heatmapFailed
+                      ? () => onSelectHeatmapImages?.(heatmap.paths[columnIndex] ?? []) : undefined}
                     historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], row.values[columnIndex] ?? "-")}
                     ariaLabel={`Face_FLT.FDSZ_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
@@ -7099,13 +7227,14 @@ function FaceFdszTableCard({
             ))}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
 function FaceFddrTableCard({
   source, fltMode, fddrValue, fddrRaValue, editable, embedded = false,
+  heatmapPoints, onSelectHeatmapImages, heatmapLoading, heatmapFailed, onHeatmapRequest,
   onCellPreview, onCellCommit, onSourceJump,
   sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
 }: {
@@ -7115,6 +7244,11 @@ function FaceFddrTableCard({
   fddrRaValue: string | null;
   editable: boolean;
   embedded?: boolean;
+  heatmapPoints: FaceAxisHeatmapPoint[];
+  onSelectHeatmapImages?: (paths: string[]) => void;
+  heatmapLoading: boolean;
+  heatmapFailed: boolean;
+  onHeatmapRequest: () => void;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
   onSourceJump?: (label: string, spec: CardSourceSpec) => void;
@@ -7123,6 +7257,8 @@ function FaceFddrTableCard({
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
+  const [tableExpanded, setTableExpanded] = useState(true);
+  const tableId = fltMode ? "face-flt-fddr-ra-table" : "face-fddr-ra-table";
   const rows = source?.rows ?? (fltMode ? FACE_FLT_FDDR_TABLE_ROWS : FACE_FDDR_TABLE_ROWS).map(({ label, path }) => ({
     label, path, values: [], fields: [],
   }));
@@ -7138,6 +7274,12 @@ function FaceFddrTableCard({
     : FACE_FDDR_TABLE_ROWS.map(({ path }) => path);
   const prefix = fltMode ? "Face_FLT" : "Face";
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
+  const heatmapKey = `${fltMode ? "Face_FLT" : "Face"}_fddrRa`;
+  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode(heatmapKey, true);
+  const heatmap = useMemo(
+    () => showHeatmap && tableExpanded ? faceAxisHeatmapData(source, heatmapPoints) : { counts: [], paths: [], maxCount: 0 },
+    [source, heatmapPoints, showHeatmap, tableExpanded],
+  );
   return (
     <section style={embedded ? faceFddrEmbeddedCardStyle : faceFddrCardStyle}>
       <div style={faceFddrHeaderStyle}>
@@ -7149,6 +7291,16 @@ function FaceFddrTableCard({
         <div style={faceCardHeaderActionsStyle}>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <strong style={faceFormulaResultStyle}>{formatOneDecimalNumber(result)}</strong>
+          <button type="button" style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
+            title={showHeatmap
+              ? `左键关闭热力图，右键切换${showHitCounts ? "参数值" : "命中数"}`
+              : "显示 FDDR_RA 笛卡尔热力图"}
+            aria-label={showHeatmap ? "关闭 FDDR_RA 笛卡尔热力图" : "显示 FDDR_RA 笛卡尔热力图"}
+            aria-pressed={showHeatmap} disabled={!source}
+            onClick={() => { if (!showHeatmap) onHeatmapRequest(); updateHeatmapMode(!showHeatmap, showHitCounts); }}
+            onContextMenu={(event) => { if (!showHeatmap) return; event.preventDefault(); updateHeatmapMode(true, !showHitCounts); }}>
+            <DataHistogram24Regular className="h-4 w-4" />
+          </button>
           <button
             type="button"
             style={groupSourceButtonStyle(Boolean(onSourceJump))}
@@ -7159,14 +7311,15 @@ function FaceFddrTableCard({
               paths: sourcePaths, context: 4, jump_to: "first", highlight: "ranges",
             })}
           ><Code24Regular className="h-4 w-4" /></button>
+          <FaceAxisTableCollapseButton title="FDDR_RA" expanded={tableExpanded} tableId={tableId} onToggle={() => setTableExpanded((current) => !current)} />
         </div>
       </div>
-      <div style={faceProbTableBodyStyle}>
+      {tableExpanded && <div id={tableId} style={faceProbTableBodyStyle}>
         <div style={faceProbTableScrollStyle}>
           <div style={faceProbTableStyle(columnCount)}>
             {rows.map((row, rowIndex) => (
               <Fragment key={row.path}>
-                <div style={faceProbTableLabelStyle}>{row.label}</div>
+                <div style={rowIndex === 0 ? faceProbTableAxisLabelStyle : faceProbTableLabelStyle}>{row.label}</div>
                 {Array.from({ length: columnCount }, (_, columnIndex) => {
                   const field = row.fields[columnIndex] ?? null;
                   const target: FaceProbCellTarget = { rowIndex, columnIndex };
@@ -7175,6 +7328,14 @@ function FaceFddrTableCard({
                     value={row.values[columnIndex] ?? "-"}
                     editable={editable && Boolean(source) && Boolean(field)}
                     active={activeColumns.has(columnIndex)}
+                    axisHeader={rowIndex === 0}
+                    heatmapStyle={showHeatmap && rowIndex > 0 ? faceAxisHeatCellStyle(heatmap.counts[columnIndex] ?? 0, heatmap.maxCount, activeColumns.has(columnIndex)) : undefined}
+                    heatmapCount={showHeatmap ? heatmap.counts[columnIndex] : undefined}
+                    showHeatmapCount={showHeatmap && showHitCounts && rowIndex > 0}
+                    heatmapLoading={heatmapLoading}
+                    heatmapFailed={heatmapFailed}
+                    onSelectHeatmapImages={showHeatmap && !heatmapLoading && !heatmapFailed
+                      ? () => onSelectHeatmapImages?.(heatmap.paths[columnIndex] ?? []) : undefined}
                     historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], row.values[columnIndex] ?? "-")}
                     ariaLabel={`${prefix}.FDDR_RA.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
                     onPreview={(value) => onCellPreview?.(target, value)}
@@ -7190,8 +7351,29 @@ function FaceFddrTableCard({
             ))}
           </div>
         </div>
-      </div>
+      </div>}
     </section>
+  );
+}
+
+function FaceAxisTableCollapseButton({ title, expanded, tableId, onToggle }: {
+  title: string;
+  expanded: boolean;
+  tableId: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      style={sourceButtonStyle(true)}
+      title={`${expanded ? "折叠" : "展开"} ${title} 表格`}
+      aria-label={`${expanded ? "折叠" : "展开"} ${title} 表格`}
+      aria-expanded={expanded}
+      aria-controls={tableId}
+      onClick={onToggle}
+    >
+      {expanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+    </button>
   );
 }
 
@@ -7199,6 +7381,13 @@ function FaceProbEditableCell({
   value,
   editable,
   active,
+  axisHeader = false,
+  heatmapStyle,
+  heatmapCount,
+  showHeatmapCount = false,
+  heatmapLoading = false,
+  heatmapFailed = false,
+  onSelectHeatmapImages,
   historyDelta,
   ariaLabel,
   onPreview,
@@ -7208,22 +7397,47 @@ function FaceProbEditableCell({
   value: string;
   editable: boolean;
   active: boolean;
+  axisHeader?: boolean;
+  heatmapStyle?: CSSProperties;
+  heatmapCount?: number;
+  showHeatmapCount?: boolean;
+  heatmapLoading?: boolean;
+  heatmapFailed?: boolean;
+  onSelectHeatmapImages?: () => void;
   historyDelta?: number;
   ariaLabel: string;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
   onSourceJump?: (value: string) => void;
 }) {
+  if (showHeatmapCount) {
+    const hitStatus = heatmapLoading ? "统计中" : heatmapFailed ? "读取失败" : `${heatmapCount ?? 0} 张图片命中`;
+    return (
+      <div
+        style={heatmapStyle}
+        title={hitStatus}
+        aria-label={hitStatus}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+        }}
+      >
+        {heatmapLoading ? "…" : heatmapFailed ? "-" : heatmapCount ?? 0}
+      </div>
+    );
+  }
   return (
     <EditableNumberTableCell
       value={value}
       editable={editable}
       active={active}
       ariaLabel={ariaLabel}
-      frameStyle={({ focused }) => editableCellFrameStyle(faceProbTableValueStyle(active), focused)}
+      frameStyle={({ focused }) => editableCellFrameStyle(
+        heatmapStyle ?? (axisHeader ? faceProbTableAxisHeaderStyle(active) : faceProbTableValueStyle(active)), focused,
+      )}
       inputStyle={({ editable: cellEditable }) => ({
         ...faceProbTableInputStyle(cellEditable),
-        ...(historyDelta === undefined || historyDelta === 0 ? {}
+        ...((axisHeader && active) || historyDelta === undefined || historyDelta === 0 ? {}
           : { color: historyDelta > 0 ? "var(--colorPaletteRedForeground1)" : "var(--colorPaletteBlueForeground2)" }),
       })}
       onPreview={onPreview}
@@ -7450,6 +7664,37 @@ function faceBvDrHitPaths(
   ).map(({ path }) => path))];
 }
 
+function faceAxisHeatmapData(
+  source: FaceProbSource | null,
+  points: FaceAxisHeatmapPoint[],
+): { counts: number[]; paths: string[][]; maxCount: number } {
+  const axis = source?.rows[0]?.values.map((value) => parseFiniteNumber(value)) ?? [];
+  const paths = axis.map(() => new Set<string>());
+  for (const point of points) {
+    if (!Number.isFinite(point.value)) continue;
+    for (const hit of boundsForTableAxis(point.value, axis).points) paths[hit.index]?.add(point.path);
+  }
+  const pathLists = paths.map((items) => [...items]);
+  const counts = pathLists.map((items) => items.length);
+  return { counts, paths: pathLists, maxCount: Math.max(0, ...counts) };
+}
+
+function faceAxisHeatCellStyle(count: number, maxCount: number, active: boolean): CSSProperties {
+  const strength = maxCount > 0 ? Math.log1p(count) / Math.log1p(maxCount) : 0;
+  const heatBackground = count > 0
+    ? `color-mix(in srgb, var(--face-heat-high) ${Math.round(20 + strength * 60)}%, var(--face-heat-low))`
+    : "var(--colorNeutralBackground2)";
+  return {
+    ...faceProbTableValueStyle(false),
+    minHeight: 24,
+    background: active
+      ? `color-mix(in srgb, var(--colorBrandBackground2) 24%, ${heatBackground})`
+      : heatBackground,
+    color: active ? "var(--colorBrandForeground1)" : "var(--face-heat-fg)",
+    fontWeight: 700,
+  };
+}
+
 function FaceBvDrTableCard({
   tableKey,
   faceTab,
@@ -7500,9 +7745,9 @@ function FaceBvDrTableCard({
   const syncKey = faceSyncModeKey(faceTab, tableKey);
   const syncEnabled = syncKey ? syncModes?.[syncKey] ?? false : false;
   const eligibleHeatmapPoints = useMemo(
-    () => title.startsWith("ns_")
-      ? imageHeatmapPoints.filter(({ nsProb }) => Number.isFinite(nsProb) && nsProb !== 0)
-      : imageHeatmapPoints,
+    () => imageHeatmapPoints.filter(({ bv, dr, nsProb }) =>
+      Number.isFinite(bv) && Number.isFinite(dr)
+      && (!title.startsWith("ns_") || (Number.isFinite(nsProb) && nsProb !== 0))),
     [imageHeatmapPoints, title],
   );
   const heatmapCounts = useMemo(
@@ -15021,11 +15266,12 @@ const faceProbTableBodyStyle: CSSProperties = {
   padding: 0,
 };
 
-function faceProbTableStyle(columnCount: number): CSSProperties {
+function faceProbTableStyle(columnCount: number, hasAxisHeader = false): CSSProperties {
   const normalizedColumnCount = Math.max(1, columnCount);
   return {
     display: "grid",
     gridTemplateColumns: `max-content repeat(${normalizedColumnCount}, minmax(0, 1fr))`,
+    gridTemplateRows: hasAxisHeader ? "34px" : undefined,
     width: "100%",
     minWidth: 0,
     border: HS_WEIGHT_FRAME_BORDER,
@@ -15037,20 +15283,39 @@ function faceProbTableStyle(columnCount: number): CSSProperties {
   };
 }
 
+const FACE_AXIS_HEADER_BACKGROUND = "rgb(225, 245, 209)";
+
 const faceProbTableLabelStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   minWidth: 0,
   minHeight: 24,
   padding: "0 5px",
-  borderTop: "1px solid var(--colorNeutralStroke3)",
-  background: "rgb(225, 245, 209)",
-  color: "var(--colorNeutralForeground2)",
+  borderRight: HS_WEIGHT_MAJOR_BORDER,
+  borderBottom: HS_WEIGHT_GRID_BORDER,
+  background: FACE_AXIS_HEADER_BACKGROUND,
+  color: "#202020",
   fontWeight: 800,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
+
+const faceProbTableAxisLabelStyle: CSSProperties = {
+  ...faceProbTableLabelStyle,
+  borderBottom: HS_WEIGHT_MAJOR_BORDER,
+};
+
+function faceProbTableAxisHeaderStyle(active: boolean): CSSProperties {
+  return {
+    ...faceProbTableValueStyle(false),
+    borderRight: HS_WEIGHT_GRID_BORDER,
+    borderBottom: HS_WEIGHT_MAJOR_BORDER,
+    background: FACE_AXIS_HEADER_BACKGROUND,
+    color: active ? "var(--colorBrandForeground1)" : "#202020",
+    fontWeight: 900,
+  };
+}
 
 function faceProbTableValueStyle(active: boolean): CSSProperties {
   return {
@@ -15060,18 +15325,15 @@ function faceProbTableValueStyle(active: boolean): CSSProperties {
     minWidth: 0,
     minHeight: 24,
     padding: "0 2px",
-    borderTop: "1px solid var(--colorNeutralStroke3)",
-    color: "var(--colorNeutralForeground1)",
+    borderRight: HS_WEIGHT_GRID_BORDER,
+    borderBottom: HS_WEIGHT_GRID_BORDER,
+    color: active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
     fontVariantNumeric: "tabular-nums",
     overflow: "hidden",
     whiteSpace: "nowrap",
     background: active
-      ? "color-mix(in srgb, var(--colorBrandBackground2) 72%, var(--colorNeutralBackground1))"
+      ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, var(--colorNeutralBackground1))"
       : undefined,
-    boxShadow: active
-      ? "inset 0 0 0 1px var(--colorBrandForeground1)"
-      : undefined,
-    fontWeight: active ? 900 : undefined,
   };
 }
 
@@ -15281,6 +15543,11 @@ const faceBvDrCornerCellStyle: CSSProperties = {
   color: "var(--colorNeutralForeground1)",
   fontWeight: 900,
   overflow: "hidden",
+};
+
+const faceProbTableCornerStyle: CSSProperties = {
+  ...faceBvDrCornerCellStyle,
+  minHeight: 34,
 };
 
 const faceBvDrCornerDiagonalStyle: CSSProperties = {

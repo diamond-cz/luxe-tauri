@@ -4,7 +4,9 @@ import { Button } from "@fluentui/react-components";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
+  Target24Regular,
   Image24Regular,
+  ImageMultiple24Regular,
   Person24Regular,
   TableSimple24Regular,
   ChartMultiple24Regular,
@@ -27,6 +29,19 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import type { ScrollPosition } from "../workspaceSession";
+
+/** 空景筛选图标：线条树叶和右下角保护标记。 */
+function SceneLeafProtectIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 15.5C3.5 9 8.3 4.4 19.5 3.5c0 8.9-3.7 14-10.2 14C7 17.5 5.2 16.9 4 15.5Z" />
+      <path d="M3.5 20.5c2.8-5.3 6.7-9.2 12.2-12.7M8 14.6l-.7-4.1m3.5 1.5 4.1.1" />
+      <circle cx="18" cy="18" r="4" fill="var(--colorNeutralBackground1)" />
+      <path d="m16.3 18 1.2 1.2 2.3-2.4" />
+    </svg>
+  );
+}
 
 type ImageSortDirection = "asc" | "desc";
 type ImageSortState = {
@@ -61,6 +76,7 @@ interface Props {
   entries:   ImageEntry[];
   current:   number;
   selectedHeatmapPaths: string[];
+  onVisibleHeatmapPathsChange?: (entries: ImageEntry[], paths: string[] | null) => void;
   imageDir:  string | null;
   onPickImage: (idx: number) => void;
   onImageDirChange: (dir: string) => void;
@@ -88,7 +104,6 @@ const IMAGE_TABLE_HEADER_HEIGHT = 36;
 const IMAGE_TABLE_ROW_HEIGHT = 58;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
 const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 10;
-const IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH = 62;
 const IMAGE_TABLE_OVERSCAN = 12;
 const IMAGE_TABLE_LOAD_DEBOUNCE_MS = 8;
 const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
@@ -246,6 +261,7 @@ export function TablePane({
   entries,
   current,
   selectedHeatmapPaths,
+  onVisibleHeatmapPathsChange,
   imageDir,
   onPickImage,
   onImageDirChange,
@@ -345,12 +361,14 @@ export function TablePane({
            borderRadius: 12,
            overflow: "hidden",
          }}>
-      <div className="flex h-8 shrink-0 items-center justify-between gap-2 pl-10 pr-2"
+      <div className="flex h-8 shrink-0 items-center justify-between gap-3 px-4"
            style={{
              background: "var(--colorNeutralBackground2)",
+             borderBottom: "1px solid var(--colorNeutralStroke2)",
            }}>
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          <span className="truncate" style={{ color: "var(--colorNeutralForeground2)" }}>图片列表卡片</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+          <ImageMultiple24Regular className="h-4 w-4 shrink-0" aria-hidden="true" style={{ color: "var(--colorBrandForeground1)" }} />
+          <span className="truncate">图片列表卡片</span>
           {selectedHeatmapPaths.length > 0 && (
             <span style={{ color: "var(--colorPaletteGreenForeground1)", whiteSpace: "nowrap" }}>
               已选中 {selectedHeatmapPaths.length} 张
@@ -358,39 +376,20 @@ export function TablePane({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <HoverTooltip content={exifParsing ? "正在解析图片 EXIF" : "解析图片 EXIF"} positioning="below-center" inline>
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<DocumentData24Regular />}
-              disabled={entries.length === 0 || exifParsing}
-              onClick={onParseExif}
-              aria-label="解析图片 EXIF"
-            />
-          </HoverTooltip>
-          {!toneMode && <HoverTooltip content="Apply all image: 使用当前参数重新计算 CWR 和 ∆CWR" positioning="below-center" inline>
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<CalculatorArrowClockwise24Regular />}
-              disabled={entries.length === 0 || !calculatorSourcePath || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
-              onClick={() => {
-                setAppliedCalculatorSourcePath(calculatorSourcePath);
-                setApplyAllVersion((version) => version + 1);
-                setParseAllVersion((version) => version + 1);
-              }}
-              aria-label="Apply all image"
-            />
-          </HoverTooltip>}
-          <HoverTooltip content="Add image folder" positioning="below-center" inline>
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<FolderAdd24Regular />}
-              onClick={pickImageDir}
-              aria-label="Add image folder"
-            />
-          </HoverTooltip>
+          <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
+            title={exifParsing ? "正在解析图片 EXIF" : "解析图片 EXIF"}
+            disabled={entries.length === 0 || exifParsing}
+            onClick={onParseExif} aria-label="解析图片 EXIF" />
+          {!toneMode && <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<CalculatorArrowClockwise24Regular className="h-4 w-4" />}
+            title="Apply all image: 使用当前参数重新计算 CWR 和 ∆CWR"
+            disabled={entries.length === 0 || !calculatorSourcePath || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
+            onClick={() => {
+              setAppliedCalculatorSourcePath(calculatorSourcePath);
+              setApplyAllVersion((version) => version + 1);
+              setParseAllVersion((version) => version + 1);
+            }} aria-label="Apply all image" />}
+          <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<FolderAdd24Regular className="h-4 w-4" />}
+            title="Add image folder" onClick={pickImageDir} aria-label="Add image folder" />
         </div>
       </div>
       <div className="hidden"
@@ -453,7 +452,8 @@ export function TablePane({
           cppImportRevision={cppImportRevision}
           scrollPosition={scrollPosition}
           onScrollPositionChange={onScrollPositionChange}
-          entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage} />
+          entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage}
+          onVisibleHeatmapPathsChange={onVisibleHeatmapPathsChange} />
       </div>
     </div>
   );
@@ -888,7 +888,7 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
 
 export function ImageTab({
   schema, toneMode = false, filePath, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress,
-  entries, current, selectedHeatmapPaths, onPick,
+  entries, current, selectedHeatmapPaths, onPick, onVisibleHeatmapPathsChange,
   imageDataRevision = 0,
   scrollPosition,
   onScrollPositionChange,
@@ -907,6 +907,7 @@ export function ImageTab({
   entries:  ImageEntry[];
   current:  number;
   selectedHeatmapPaths: string[];
+  onVisibleHeatmapPathsChange?: (entries: ImageEntry[], paths: string[] | null) => void;
   onPick:   (idx: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1092,14 +1093,40 @@ export function ImageTab({
     && imageKinds.revision === imageDataRevision
     && imageKinds.calculator === faceLinkTargetCalculator
     ? imageKinds.byPath : null;
-  const hasScene = entries.some((entry) => classifiedKinds?.[entry.toml_path] === "scene");
-  const hasPortrait = entries.some((entry) => classifiedKinds?.[entry.toml_path] === "portrait");
+  const { hasScene, hasPortrait, hasNa } = useMemo(() => {
+    let hasScene = false;
+    let hasPortrait = false;
+    let hasNa = false;
+    if (classifiedKinds) {
+      for (const entry of entries) {
+        const kind = classifiedKinds[entry.toml_path] ?? "na";
+        if (kind === "scene") hasScene = true;
+        else if (kind === "portrait") hasPortrait = true;
+        else if (kind === "na") hasNa = true;
+        if (hasScene && hasPortrait && hasNa) break;
+      }
+    }
+    return { hasScene, hasPortrait, hasNa };
+  }, [classifiedKinds, entries]);
   const bothKinds = hasScene && hasPortrait;
   const classificationReady = Boolean(classifiedKinds);
-  const showSceneIcon = classificationReady ? hasScene : true;
-  const showPortraitIcon = classificationReady && hasPortrait;
+  const canFilterKinds = classificationReady && (bothKinds || (hasNa && (hasScene || hasPortrait)));
+  const requestedKindFilter = showScene && !showPortrait ? "scene"
+    : showPortrait && !showScene ? "portrait" : "all";
+  const activeKindFilter = (requestedKindFilter === "scene" && hasScene)
+    || (requestedKindFilter === "portrait" && hasPortrait) ? requestedKindFilter : "all";
+  const thumbnailHeaderKind = canFilterKinds && activeKindFilter !== "all"
+    ? activeKindFilter : !classificationReady || hasNa || bothKinds ? "mixed"
+      : hasPortrait ? "portrait" : hasScene ? "scene" : "mixed";
+  useEffect(() => {
+    if (!onVisibleHeatmapPathsChange) return;
+    const paths = canFilterKinds && activeKindFilter !== "all" && classifiedKinds
+      ? entries.filter((entry) => classifiedKinds[entry.toml_path] === activeKindFilter).map((entry) => entry.toml_path)
+      : null;
+    onVisibleHeatmapPathsChange(entries, paths);
+  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, onVisibleHeatmapPathsChange]);
   const sceneOnly = (Boolean(classifiedKinds) && hasScene && !hasPortrait)
-    || (bothKinds && showScene && !showPortrait);
+    || (canFilterKinds && activeKindFilter === "scene");
   const displayedColumns = useMemo(() => orderedColumns.filter((column) => !sceneOnly || (
     column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr"
     && column.label !== "FaceSt" && column.label !== "1sSt"
@@ -1147,8 +1174,8 @@ export function ImageTab({
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }))
-      .filter(({ e }) => !bothKinds || !classifiedKinds
-        || shouldShowImageTableRow(classifiedKinds[e.toml_path] ?? "na", showScene, showPortrait));
+      .filter(({ e }) => !canFilterKinds || !classifiedKinds || activeKindFilter === "all"
+        || shouldShowImageTableRow(classifiedKinds[e.toml_path] ?? "na", activeKindFilter === "scene", activeKindFilter === "portrait"));
     if (!sortControlsEnabled || !sortState) return rows;
 
     return rows.slice().sort((a, b) => {
@@ -1161,12 +1188,15 @@ export function ImageTab({
       if (av === bv) return a.i - b.i;
       return av < bv ? -direction : direction;
     });
-  }, [bothKinds, classifiedKinds, entries, showPortrait, showScene, sortControlsEnabled, sortState, sortValues]);
+  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, sortControlsEnabled, sortState, sortValues]);
 
   const currentDisplayIndex = useMemo(
     () => sortedRows.findIndex((row) => row.i === current),
     [current, sortedRows],
   );
+  const selectedRowVisible = currentDisplayIndex >= 0 && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT
+    && IMAGE_TABLE_HEADER_HEIGHT + (currentDisplayIndex + 1) * IMAGE_TABLE_ROW_HEIGHT > scrollTop + IMAGE_TABLE_HEADER_HEIGHT
+    && IMAGE_TABLE_HEADER_HEIGHT + currentDisplayIndex * IMAGE_TABLE_ROW_HEIGHT < scrollTop + viewportHeight;
   const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
 
   useEffect(() => {
@@ -1445,8 +1475,8 @@ export function ImageTab({
     const rowBottom = rowTop + IMAGE_TABLE_ROW_HEIGHT;
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
-    if (rowTop < viewTop) {
-      setImageTableScrollTop(Math.max(0, rowTop - IMAGE_TABLE_ROW_HEIGHT));
+    if (rowTop < viewTop + IMAGE_TABLE_HEADER_HEIGHT) {
+      setImageTableScrollTop(Math.max(0, rowTop - IMAGE_TABLE_HEADER_HEIGHT - IMAGE_TABLE_ROW_HEIGHT));
     } else if (rowBottom > viewBottom) {
       setImageTableScrollTop(rowBottom - el.clientHeight + IMAGE_TABLE_ROW_HEIGHT);
     }
@@ -1723,7 +1753,7 @@ export function ImageTab({
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       if (column.kind === "thumbnail") {
-        byId[column.id] = bothKinds ? IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH : IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH;
+        byId[column.id] = IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH;
         continue;
       }
       if (column.kind === "name") {
@@ -1751,21 +1781,20 @@ export function ImageTab({
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, bothKinds, entries.length, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, entries.length, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       const fallback = baseColumnWidths.byId[column.id] ?? 72;
       const width = columnWidthOverrides[column.id] ?? fallback;
-      byId[column.id] = column.kind === "thumbnail" && bothKinds
-        ? Math.max(IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH, width) : width;
+      byId[column.id] = width;
     }
     return {
       byId,
       table: displayedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
     };
-  }, [baseColumnWidths, bothKinds, columnWidthOverrides, displayedColumns, tableColumns]);
+  }, [baseColumnWidths, columnWidthOverrides, displayedColumns, tableColumns]);
 
   const startColumnResize = (column: string, initialWidth: number, minWidth: number) =>
     (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -1787,9 +1816,10 @@ export function ImageTab({
     };
 
   return (
+    <div className="relative h-full w-full min-h-0">
     <div
       ref={scrollRef}
-      className="h-full w-full overflow-auto outline-none"
+      className="image-table-viewport h-full w-full overflow-auto outline-none"
       tabIndex={0}
       aria-label="Image table"
       onKeyDown={handleImageTableKeyDown}
@@ -1834,7 +1864,7 @@ export function ImageTab({
               const minWidth = column.kind === "idx"
                 ? 34
                 : column.kind === "thumbnail"
-                  ? bothKinds ? IMAGE_TABLE_DUAL_ICON_COLUMN_WIDTH : IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH
+                  ? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH
                   : column.kind === "name"
                     ? 120
                     : 52;
@@ -1854,29 +1884,32 @@ export function ImageTab({
                     </HoverTooltip>
                   ) : column.kind === "thumbnail" ? (
                     <span className="inline-flex items-center justify-center gap-1">
-                      {classificationReady && !hasScene && !hasPortrait && (
-                        <span aria-label="图片无法解析" className="text-[10px]">NA</span>
-                      )}
-                      {(["scene", "portrait"] as const).filter((kind) => kind === "scene" ? showSceneIcon : showPortraitIcon).map((kind) => {
-                        const enabled = kind === "scene" ? showScene : showPortrait;
-                        const label = kind === "scene" ? "空景" : "人像";
-                        return <HoverTooltip key={kind} content={bothKinds ? `${label}（左键筛选）` : label} positioning="below-center" inline>
-                          <button
-                            type="button"
-                            className="inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 text-inherit"
-                            style={{ opacity: bothKinds && !enabled ? 0.35 : 1, cursor: bothKinds ? "pointer" : "default" }}
-                            aria-label={label}
-                            aria-pressed={bothKinds ? enabled : undefined}
-                            disabled={!bothKinds}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={() => kind === "scene" ? setShowScene((value) => !value) : setShowPortrait((value) => !value)}
-                            onContextMenu={(event) => event.preventDefault()}
-                          >
-                            {kind === "scene" ? <Image24Regular className="h-4 w-4" aria-hidden="true" />
-                              : <Person24Regular className="h-4 w-4" aria-hidden="true" />}
-                          </button>
-                        </HoverTooltip>;
-                      })}
+                      <button
+                        type="button"
+                        className="inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 text-inherit"
+                        style={{ cursor: canFilterKinds ? "pointer" : "default" }}
+                        title={thumbnailHeaderKind === "mixed"
+                          ? `图片类型：${classificationReady && !hasScene && !hasPortrait ? "无法解析" : "全部"}${canFilterKinds ? "；右键筛选类型，左键显示全部" : ""}`
+                          : `${activeKindFilter !== "all" ? "仅显示" : "只有"}${thumbnailHeaderKind === "scene" ? "空景" : "人像"}图片${canFilterKinds ? "；右键切换类型，左键显示全部" : ""}`}
+                        aria-label={thumbnailHeaderKind === "mixed"
+                          ? `图片类型：${classificationReady && !hasScene && !hasPortrait ? "无法解析" : "全部"}`
+                          : `${activeKindFilter !== "all" ? "仅显示" : "只有"}${thumbnailHeaderKind === "scene" ? "空景" : "人像"}图片`}
+                        aria-pressed={canFilterKinds ? activeKindFilter !== "all" : undefined}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => { if (canFilterKinds) { setShowScene(true); setShowPortrait(true); } }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          if (!canFilterKinds) return;
+                          const next = bothKinds ? (activeKindFilter === "scene" ? "portrait" : "scene")
+                            : activeKindFilter === "all" ? (hasScene ? "scene" : "portrait") : "all";
+                          setShowScene(next !== "portrait");
+                          setShowPortrait(next !== "scene");
+                        }}
+                      >
+                        {thumbnailHeaderKind === "scene" ? <SceneLeafProtectIcon />
+                          : thumbnailHeaderKind === "portrait" ? <Person24Regular className="h-4 w-4" aria-hidden="true" />
+                            : <Image24Regular className="h-4 w-4" aria-hidden="true" />}
+                      </button>
                     </span>
                   ) : column.kind === "name" ? (
                     <ImageSortToggleHeader
@@ -1976,6 +2009,28 @@ export function ImageTab({
           )}
         </tbody>
       </table>
+    </div>
+    {currentDisplayIndex >= 0 && (
+      <button
+        type="button"
+        className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border shadow-md transition-transform hover:scale-105"
+        style={{
+          background: selectedRowVisible ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground1)",
+          color: selectedRowVisible ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorBrandForeground1)",
+          borderColor: selectedRowVisible ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke1)",
+        }}
+        aria-label={selectedRowVisible ? "返回第一行" : "定位到选中项"}
+        title={selectedRowVisible ? "返回第一行" : "定位到选中项"}
+        onClick={() => {
+          if (selectedRowVisible) setImageTableScrollTop(0);
+          else ensureImageTableRowVisible(currentDisplayIndex);
+          scrollRef.current?.focus({ preventScroll: true });
+        }}
+      >
+        {selectedRowVisible ? <ChevronUp24Regular className="h-5 w-5" aria-hidden="true" />
+          : <Target24Regular className="h-5 w-5" aria-hidden="true" />}
+      </button>
+    )}
     </div>
   );
 }

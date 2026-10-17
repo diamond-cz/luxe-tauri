@@ -47,6 +47,7 @@ interface Props {
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
   entries:     ImageEntry[];
+  visibleHeatmapPaths?: string[] | null;
   tomlData:    Record<string, string>;
   onSelectHeatmapImages?: (paths: string[]) => void;
   onCalculatorSourcePathChange?: (path: string | null) => void;
@@ -55,8 +56,8 @@ interface Props {
 }
 
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
-  { id: "param_map",   label: "源码映射", Icon: Code24Regular },
   { id: "chart_map",   label: "图表映射", Icon: ChartMultiple24Regular },
+  { id: "param_map",   label: "源码映射", Icon: Code24Regular },
 ];
 
 const sourceHistorySnapshots = new Map<string, { revision: number; text: string }>();
@@ -80,7 +81,7 @@ function rememberSourceHistory(path: string, snapshot: { revision: number; text:
 }
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
+  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
@@ -409,6 +410,7 @@ export function ImagePane({
               parsed={toneParsed}
               tomlData={tomlData}
               entries={entries}
+              visibleHeatmapPaths={visibleHeatmapPaths}
               sourceDraftText={sourceDraft?.text ?? null}
               sourceInitialText={sourceDraft?.initialText ?? null}
               sourceSavedText={sourceDraft?.savedText ?? null}
@@ -421,6 +423,7 @@ export function ImagePane({
               sourceBasePath={filePath}
               schema={schema}
               entries={entries}
+              visibleHeatmapPaths={visibleHeatmapPaths}
               tomlData={tomlData}
               active={effectiveMode === "chart_map"}
               onSelectHeatmapImages={onSelectHeatmapImages}

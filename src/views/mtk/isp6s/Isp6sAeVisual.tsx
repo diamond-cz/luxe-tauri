@@ -59,9 +59,9 @@ export function Isp6sAeVisual({
   const [err,    setErr]    = useState<string | null>(null);
   const [detailsTab, setDetailsTab] = useState<DetailsTab>(() => session.detailsTab);
   const [sourceEditorBinding, setSourceEditorBinding] = useState<SourceEditorBinding | null>(null);
-  const [tonePreviewMode, setTonePreviewMode] = useState<PreviewMode>(() => session.sourceMode);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
+  const [visibleHeatmapPaths, setVisibleHeatmapPaths] = useState<{ entries: ImageEntry[]; paths: string[] | null } | null>(null);
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
   const [calculatorSourcePath, setCalculatorSourcePath] = useState<string | null>(filePath);
   const [exifProgress, setExifProgress] = useState<ExifParseProgress | null>(null);
@@ -248,6 +248,15 @@ export function Isp6sAeVisual({
     setHeatmapSelection({ entries: imageDir.entries, paths: selected.map((entry) => entry.toml_path) });
   };
   const selectedHeatmapPaths = heatmapSelection?.entries === imageDir.entries ? heatmapSelection.paths : [];
+  const filteredHeatmapPaths = visibleHeatmapPaths?.entries === imageDir.entries ? visibleHeatmapPaths.paths : null;
+  const handleVisibleHeatmapPathsChange = useCallback((entries: ImageEntry[], paths: string[] | null) => {
+    setVisibleHeatmapPaths((current) => {
+      if (current?.entries === entries && current.paths === paths) return current;
+      if (current?.entries === entries && current.paths && paths && current.paths.length === paths.length
+        && current.paths.every((path, index) => path === paths[index])) return current;
+      return { entries, paths };
+    });
+  }, []);
 
   const handleImageSearch = async () => {
     const query = imageSearchQuery.trim();
@@ -306,13 +315,11 @@ export function Isp6sAeVisual({
   }, [patchVis]);
   const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
   const handleNormalPreviewMode = useCallback((mode: PreviewMode) => {
-    session.sourceMode = mode;
     setPreviewMode(mode);
-  }, [session, setPreviewMode]);
+  }, [setPreviewMode]);
   const handleTonePreviewMode = useCallback((mode: PreviewMode) => {
-    session.sourceMode = mode;
-    setTonePreviewMode(mode);
-  }, [session]);
+    patchVis({ tone_preview_mode: mode === "param_map" ? "param_map" : "chart_map" });
+  }, [patchVis]);
   const handleDetailsTabChange = useCallback((tab: DetailsTab) => {
     session.detailsTab = tab;
     setDetailsTab(tab);
@@ -351,6 +358,7 @@ export function Isp6sAeVisual({
           entries={imageDir.entries}
           current={imageDir.current}
           selectedHeatmapPaths={selectedHeatmapPaths}
+          onVisibleHeatmapPathsChange={handleVisibleHeatmapPathsChange}
           imageDir={imageDir.dir}
           imageDataRevision={imageDataRevision}
           scrollPosition={session.imageDir === imageDir.dir ? session.imageScroll : null}
@@ -380,13 +388,15 @@ export function Isp6sAeVisual({
           toneMode={toneMode}
           toneParsed={toneParsed}
           importRevision={cppImportRevision}
-          mode={toneMode ? tonePreviewMode : visual.preview_mode ?? "param_map"}
+          mode={toneMode ? visual.tone_preview_mode ?? "chart_map"
+            : visual.preview_mode === "param_map" ? "param_map" : "chart_map"}
           onMode={toneMode ? handleTonePreviewMode : handleNormalPreviewMode}
           filePath={filePath ?? ""}
           onCppPathChange={onCppPathChange}
           schema={schema}
           entry={currentEntry}
           entries={imageDir.entries}
+          visibleHeatmapPaths={filteredHeatmapPaths}
           tomlData={imageDir.tomlData}
           onSelectHeatmapImages={onSelectHeatmapImages}
           onCalculatorSourcePathChange={setCalculatorSourcePath}
