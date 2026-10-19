@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.2.5",
+    "date": "2026-10-19",
+    "sections": [
+      {
+        "title": "优化",
+        "items": [
+          {
+            "title": "GitHub Star 编译验证",
+            "desc": "仓库收到 Star 时自动运行 Windows CI，编译应用并执行前端与 Rust 检查。"
+          }
+        ]
+      }
+    ]
+  },
+  {
     "version": "0.2.4",
     "date": "2026-10-19",
     "sections": [
