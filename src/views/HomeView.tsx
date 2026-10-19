@@ -213,7 +213,7 @@ export function HomeView() {
           </h2>
 
           <div
-            className="flex min-h-28 flex-col justify-between gap-5 rounded-lg border p-5 md:flex-row md:items-center"
+            className="relative flex min-h-28 flex-col justify-between gap-5 overflow-hidden rounded-lg border p-5 md:flex-row md:items-center"
             style={{
               background: "var(--colorNeutralBackground2)",
               borderColor: "var(--colorNeutralStroke2)",
@@ -238,9 +238,6 @@ export function HomeView() {
                   <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{updateNotes}</p>
                 </details>
               )}
-              {updateStatus === "downloading" && downloadTotal && (
-                <progress className="mt-2 block w-full" value={downloadBytes} max={downloadTotal} aria-label="更新下载进度" />
-              )}
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -264,6 +261,16 @@ export function HomeView() {
                 {primaryUpdateLabel}
               </Button>
             </div>
+
+            {updateStatus === "downloading" && (
+              <progress
+                className="absolute inset-x-0 bottom-0 block h-1 w-full"
+                value={downloadTotal ? Math.min(downloadBytes, downloadTotal) : undefined}
+                max={downloadTotal ?? undefined}
+                aria-label="更新下载进度"
+                style={{ accentColor: "var(--colorBrandBackground)" }}
+              />
+            )}
           </div>
         </section>
       </div>
