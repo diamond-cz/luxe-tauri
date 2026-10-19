@@ -38,6 +38,14 @@ export const parseImageExif = (
 export const loadImageToml = (path: string) =>
   call<Record<string, string>>("load_image_toml", { path });
 
+export interface ImageTomlSection {
+  name: string;
+  fields: { key: string; value: string }[];
+}
+
+export const loadImageTomlSections = (path: string) =>
+  call<ImageTomlSection[]>("load_image_toml_sections", { path });
+
 export const loadImageTomlBatch = (paths: string[]) =>
   call<Record<string, Record<string, string>>>("load_image_toml_batch", { paths });
 

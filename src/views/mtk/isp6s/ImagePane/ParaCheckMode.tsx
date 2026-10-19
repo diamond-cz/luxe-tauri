@@ -109,7 +109,7 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 overflow-hidden p-2">
+    <div className="flex h-full min-h-0 min-w-0 overflow-hidden py-2">
       <section style={cardStyle} aria-label="AE.CPP 参数对比表">
         <div style={headerStyle}>
           <strong style={{ fontSize: 12, fontWeight: 900 }}>AE.CPP</strong>
@@ -235,13 +235,13 @@ const cardStyle: CSSProperties = {
   borderRadius: "10px 10px 0 0", overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 const headerStyle: CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36, flexShrink: 0, padding: "0 10px",
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36, flexShrink: 0, padding: "0 7px 0 10px",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
   background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))",
   color: "var(--colorNeutralForeground1)",
 };
 const saveButtonStyle: CSSProperties = {
-  position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, flexShrink: 0,
+  position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0,
   padding: 0, border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8,
   background: "var(--colorNeutralBackground1)", color: "var(--colorBrandForeground1)",
 };

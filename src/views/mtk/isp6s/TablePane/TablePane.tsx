@@ -449,6 +449,7 @@ export function TablePane({
           }}
           placeholder="搜索图片名称"
           aria-label="搜索图片名称"
+          maxLength={200}
           aria-invalid={Boolean(imageSearchError)}
           title={imageSearchError ?? "输入图片名称后按 Enter 搜索"}
           className="min-w-0 flex-1 bg-transparent text-[11px] outline-none"

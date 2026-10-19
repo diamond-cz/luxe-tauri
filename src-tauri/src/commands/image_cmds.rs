@@ -49,6 +49,15 @@ pub async fn load_image_toml(path: String) -> AppResult<HashMap<String, String>>
 }
 
 #[tauri::command]
+pub async fn load_image_toml_sections(path: String) -> AppResult<Vec<image_scan::ImageTomlSection>> {
+    let _permit = TOML_TASKS.acquire().await
+        .map_err(|err| AppError::Other(format!("TOML queue closed: {err}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_toml_sections(&PathBuf::from(path)))
+        .await
+        .map_err(|err| AppError::Other(format!("TOML sections task failed: {err}")))?
+}
+
+#[tauri::command]
 pub async fn load_image_toml_batch(
     paths: Vec<String>,
 ) -> AppResult<HashMap<String, HashMap<String, String>>> {

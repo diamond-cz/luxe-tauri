@@ -13,6 +13,7 @@ import type { IspId } from "../ispTabs";
 import { LceTab, TablePane } from "./TablePane/TablePane";
 import { NormalTable } from "./TablePane/NormalTable";
 import { FaceTable } from "./TablePane/FaceTable";
+import { ExifTable } from "./TablePane/ExifTable";
 import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
@@ -46,6 +47,7 @@ const DETAILS_TABS = [
   { id: "normal", label: "Normal" },
   { id: "face", label: "Face" },
   { id: "lce", label: "LCE" },
+  { id: "exif", label: "EXIF" },
   { id: "bcompare", label: "bcompare" },
 ] as const;
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
@@ -265,24 +267,16 @@ export function Isp6sAeVisual({
       return;
     }
 
-    const normalise = (value: string) => value.toLocaleLowerCase().replace(/[\s_.-]+/g, "");
-    const fuzzyMatches = (candidate: string, search: string) => {
-      const text = normalise(candidate);
-      const needle = normalise(search);
-      if (!needle) return false;
-      if (text.includes(needle)) return true;
-      let offset = 0;
-      for (const character of needle) {
-        offset = text.indexOf(character, offset);
-        if (offset < 0) return false;
-        offset += 1;
-      }
-      return true;
-    };
-
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(query, "i");
+    } catch {
+      setImageSearchError("正则表达式无效");
+      return;
+    }
     const matchIndex = imageDir.entries.findIndex((entry) => {
       const fileName = entry.jpg_path.split(/[\\/]/).filter(Boolean).pop() ?? entry.name;
-      return fuzzyMatches(entry.name, query) || fuzzyMatches(fileName, query);
+      return pattern.test(entry.name) || pattern.test(fileName);
     });
     if (matchIndex < 0) {
       setImageSearchError("未找到匹配图片");
@@ -492,6 +486,7 @@ export function Isp6sAeVisual({
                 session={session}
                 schema={schema}
                 tomlData={imageDir.tomlData}
+                tomlPath={currentEntry?.toml_path ?? null}
                 filePath={filePath}
                 cppImportRevision={cppImportRevision}
                 sourceEditorBinding={detailsTab === "bcompare" ? sourceEditorBinding : null}
@@ -523,6 +518,7 @@ interface DetailsPanelProps {
   session: WorkspaceSession;
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
+  tomlPath: string | null;
   filePath: string | null;
   cppImportRevision: number;
   sourceEditorBinding: SourceEditorBinding | null;
@@ -540,6 +536,7 @@ const DetailsPanel = memo(function DetailsPanel({
   session,
   schema,
   tomlData,
+  tomlPath,
   filePath,
   cppImportRevision,
   sourceEditorBinding,
@@ -612,6 +609,7 @@ const DetailsPanel = memo(function DetailsPanel({
         {detailsTab === "normal" && <NormalTable tomlData={tomlData} />}
         {detailsTab === "face" && <FaceTable tomlData={tomlData} />}
         {detailsTab === "lce" && <LceTab schema={schema} tomlData={tomlData} />}
+        {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} />}
         {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
           sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
       </div>

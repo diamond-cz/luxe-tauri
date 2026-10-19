@@ -48,6 +48,18 @@ pub struct ImageEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ImageTomlField {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageTomlSection {
+    pub name: String,
+    pub fields: Vec<ImageTomlField>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ExifParseProgress {
     pub stage: &'static str,
     pub completed: usize,
@@ -1219,6 +1231,59 @@ fn parse_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
     let mut out: HashMap<String, String> = HashMap::new();
     walk(&root, "", &mut out);
     Ok(out)
+}
+
+pub fn load_image_toml_sections(path: &Path) -> AppResult<Vec<ImageTomlSection>> {
+    let text = fs::read_to_string(path)?;
+    let root: toml::Value = toml::from_str(&text)?;
+    let mut sections = Vec::new();
+    if let toml::Value::Table(table) = root {
+        collect_toml_sections("", &table, &mut sections);
+    }
+    Ok(sections)
+}
+
+fn collect_toml_sections(
+    prefix: &str,
+    table: &toml::map::Map<String, toml::Value>,
+    sections: &mut Vec<ImageTomlSection>,
+) {
+    let mut fields = Vec::new();
+    for (key, value) in table {
+        if matches!(value, toml::Value::Table(_))
+            || matches!(value, toml::Value::Array(items) if !items.is_empty() && items.iter().all(|item| item.is_table()))
+        {
+            continue;
+        }
+        fields.push(ImageTomlField { key: key.clone(), value: format_toml_field(value) });
+    }
+    if !fields.is_empty() || !prefix.is_empty() {
+        sections.push(ImageTomlSection {
+            name: if prefix.is_empty() { "根级".into() } else { prefix.into() },
+            fields,
+        });
+    }
+    for (key, value) in table {
+        let name = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
+        match value {
+            toml::Value::Table(child) => collect_toml_sections(&name, child, sections),
+            toml::Value::Array(items) if !items.is_empty() && items.iter().all(|item| item.is_table()) => {
+                for (index, item) in items.iter().enumerate() {
+                    if let toml::Value::Table(child) = item {
+                        collect_toml_sections(&format!("{name}[{}]", index + 1), child, sections);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn format_toml_field(value: &toml::Value) -> String {
+    match value {
+        toml::Value::Array(items) => items.iter().map(format_toml_field).collect::<Vec<_>>().join(", "),
+        _ => stringify(value),
+    }
 }
 
 fn selected_key_lookup(keys: &[String]) -> HashMap<String, String> {
