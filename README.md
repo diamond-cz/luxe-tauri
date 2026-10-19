@@ -22,29 +22,31 @@ npm run tauri:dev
 
 使用 npm 和已提交的锁文件；Tauri CLI 已包含在开发依赖中。
 
-| 命令 | 用途 |
-| --- | --- |
-| `npm run dev` | 仅启动 Vite，完整桌面功能需 Tauri |
-| `npm run tauri:dev` | 启动桌面开发模式 |
-| `npm run typecheck` | TypeScript 类型检查 |
-| `npm run build` | 类型检查并生成前端 `dist/` |
-| `npm run rust:test` | Rust 测试 |
-| `npm run release:test` | 版本同步与发布清单脚本测试 |
-| `npm run tauri:build` | 本地构建 NSIS + MSI |
-| `npm run tauri:msi` | 仅构建 MSI |
-| `npm run tauri:debug` | 构建调试安装包 |
+
+| 命令                   | 用途                              |
+| ---------------------- | --------------------------------- |
+| `npm run dev`          | 仅启动 Vite，完整桌面功能需 Tauri |
+| `npm run tauri:dev`    | 启动桌面开发模式                  |
+| `npm run typecheck`    | TypeScript 类型检查               |
+| `npm run build`        | 类型检查并生成前端`dist/`         |
+| `npm run rust:test`    | Rust 测试                         |
+| `npm run release:test` | 版本同步与发布清单脚本测试        |
+| `npm run tauri:build`  | 本地构建 NSIS + MSI               |
+| `npm run tauri:msi`    | 仅构建 MSI                        |
+| `npm run tauri:debug`  | 构建调试安装包                    |
 
 Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁定可执行文件，先停止 `tauri:dev`。解析器外部 AE.cpp 样例通过 `LUXE_AE_CPP_FIXTURE` 指定；缺少外部样例时会跳过对应断言。
 
 ### 代码导航
 
-| 路径 | 内容 |
-| --- | --- |
-| `src/views/`、`src/components/` | React 页面和通用组件 |
-| `src/stores/`、`src/ipc/`、`src/services/` | Zustand 状态、IPC 和服务 |
-| `src-tauri/src/` | Rust 命令、解析器、窗口与配置 |
-| `src-tauri/resources/` | 随应用打包的表格、映射和翻译 |
-| `src-tauri/tests/`、`scripts/` | 集成测试与构建/发布脚本 |
+
+| 路径                                       | 内容                          |
+| ------------------------------------------ | ----------------------------- |
+| `src/views/`、`src/components/`            | React 页面和通用组件          |
+| `src/stores/`、`src/ipc/`、`src/services/` | Zustand 状态、IPC 和服务      |
+| `src-tauri/src/`                           | Rust 命令、解析器、窗口与配置 |
+| `src-tauri/resources/`                     | 随应用打包的表格、映射和翻译  |
+| `src-tauri/tests/`、`scripts/`             | 集成测试与构建/发布脚本       |
 
 技术栈为 React 18、TypeScript、Vite 6、Fluent UI 9、Tauri 2 和 Rust。用户设置写入 Tauri 应用配置目录下的 `state.toml`，可从应用设置中打开。
 
@@ -60,10 +62,11 @@ Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁�
 
 在仓库 **Settings → Secrets and variables → Actions** 配置：
 
-| Secret | 值 |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | `.tauri-updater.key` 的完整 Base64 内容 |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `.tauri-updater.password` 的单行内容 |
+
+| Secret                               | 值                                      |
+| ------------------------------------ | --------------------------------------- |
+| `TAURI_SIGNING_PRIVATE_KEY`          | `.tauri-updater.key` 的完整 Base64 内容 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `.tauri-updater.password` 的单行内容    |
 
 私钥和密码须备份，不要提交或输出到日志。Secret 应填文件内容，不能填路径、公钥或额外引号。工作流会先试签临时文件，确认密钥可用后再构建。客户端公钥位于 `src-tauri/tauri.conf.json`；不要通过重新生成密钥来修复 Secret，否则已安装客户端将无法验证新更新。
 
@@ -95,10 +98,11 @@ git push origin vX.Y.Z
 
 ### 自动化流程
 
-| 工作流 | 触发与行为 |
-| --- | --- |
-| [Validate changes](.github/workflows/ci.yml) | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。仅 Markdown 变更跳过 |
-| [Publish Windows release](.github/workflows/release.yml) | 推送 `v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布 |
+
+| 工作流                                                   | 触发与行为                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。仅 Markdown 变更跳过 |
+| [Publish Windows release](.github/workflows/release.yml) | 推送`v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布        |
 
 发布任务固定 Node.js 22、Rust 1.95.0，复用 npm/Rust 依赖缓存，并按以下顺序执行：
 
@@ -115,12 +119,13 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 
 `auto_update` 只控制启动检查，默认关闭；`update_notify` 控制更新提示。用户点击“下载并安装”后才执行升级。首次接入 updater 的旧版本需手动安装；真实升级须从上一版已安装的 NSIS 客户端验证。
 
-| 情况 | 处理 |
-| --- | --- |
-| 构建或上传临时失败 | 在 Actions 重跑任务，或手动输入原 tag；Draft 可复用 |
-| Draft 有多余的旧资产 | 删除 Draft 中多余资产后重试；工作流会覆盖同名文件 |
-| 已公开 Release | 工作流拒绝覆盖；源码或工作流修复使用新版本、新 tag |
-| 更新下载失败 | 重试或打开 Release 页面手动安装；清单直连 GitHub，安装包代理可能独立失效 |
+
+| 情况                 | 处理                                                                     |
+| -------------------- | ------------------------------------------------------------------------ |
+| 构建或上传临时失败   | 在 Actions 重跑任务，或手动输入原 tag；Draft 可复用                      |
+| Draft 有多余的旧资产 | 删除 Draft 中多余资产后重试；工作流会覆盖同名文件                        |
+| 已公开 Release       | 工作流拒绝覆盖；源码或工作流修复使用新版本、新 tag                       |
+| 更新下载失败         | 重试或打开 Release 页面手动安装；清单直连 GitHub，安装包代理可能独立失效 |
 
 并发组避免同时发布；正式公开前失败会中止发布。云端产物校验不能替代安装/升级验收。
 

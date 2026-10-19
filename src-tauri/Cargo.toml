@@ -47,6 +47,8 @@ tree-sitter-c = "0.21"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 regex = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+rayon = "=1.10.0"
+turbojpeg = { version = "1.5.1", default-features = false, features = ["cmake", "require-simd"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 windows = { version = "0.61.3", features = [
     "Win32_Foundation",

@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
-  Target24Regular,
+  TableCellCenterSearch24Regular,
   Image24Regular,
   ImageMultiple24Regular,
   Person24Regular,
@@ -19,7 +19,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
-import { loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -104,9 +104,10 @@ const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 36;
 // Keep the corner cell in sync with faceBvDrCornerCellStyle in ChartMapMode.
 const IMAGE_TABLE_CORNER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))";
-const IMAGE_TABLE_ROW_HEIGHT = 58;
+const IMAGE_TABLE_ROW_HEIGHT = 54;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
-const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 10;
+const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 6;
+const IMAGE_TABLE_HOVER_PREVIEW_DELAY_MS = 220;
 const IMAGE_TABLE_OVERSCAN = 12;
 const IMAGE_TABLE_LOAD_DEBOUNCE_MS = 8;
 const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
@@ -867,7 +868,7 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
 
 function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; columnWidth: number }) {
   const [url, setUrl] = useState<string | null>(() => imageTableThumbnailCache.get(entry) ?? null);
-  const thumbnailSize = Math.max(1, Math.min(IMAGE_TABLE_THUMBNAIL_SIZE, columnWidth - 10));
+  const thumbnailSize = Math.max(1, Math.min(IMAGE_TABLE_THUMBNAIL_SIZE, columnWidth - 6));
 
   useEffect(() => {
     const cached = imageTableThumbnailCache.get(entry);
@@ -893,7 +894,7 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
   }, [entry]);
 
   return (
-    <span style={{
+    <span data-image-thumbnail-path={entry.jpg_path} data-image-thumbnail-name={entry.name} style={{
       display: "inline-flex",
       width: thumbnailSize,
       height: thumbnailSize,
@@ -903,8 +904,83 @@ function ImageTableThumbnail({ entry, columnWidth }: { entry: ImageEntry; column
       background: "var(--colorNeutralBackground3)",
       border: "1px solid var(--colorNeutralStroke2)",
     }}>
-      {url ? <img src={url} alt={entry.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} draggable={false} /> : <Image24Regular />}
+      {url ? <img src={url} alt={entry.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} draggable={false} /> : <Image24Regular />}
     </span>
+  );
+}
+
+function ImageTableHoverPreview({ scrollRef }: { scrollRef: RefObject<HTMLDivElement> }) {
+  const [hovered, setHovered] = useState<{ path: string; name: string; rect: DOMRect } | null>(null);
+  const [preview, setPreview] = useState<{ path: string; url: string | null } | null>(null);
+  const activeAnchorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    const close = () => {
+      activeAnchorRef.current = null;
+      setHovered(null);
+      setPreview(null);
+    };
+    const onPointerOver = (event: PointerEvent) => {
+      const anchor = event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-image-thumbnail-path]") : null;
+      if (!anchor || anchor === activeAnchorRef.current) return;
+      activeAnchorRef.current = anchor;
+      setPreview(null);
+      setHovered({
+        path: anchor.dataset.imageThumbnailPath ?? "",
+        name: anchor.dataset.imageThumbnailName ?? "",
+        rect: anchor.getBoundingClientRect(),
+      });
+    };
+    const onPointerOut = (event: PointerEvent) => {
+      const anchor = activeAnchorRef.current;
+      if (!anchor) return;
+      if (event.relatedTarget instanceof Node && anchor.contains(event.relatedTarget)) return;
+      close();
+    };
+    viewport.addEventListener("pointerover", onPointerOver);
+    viewport.addEventListener("pointerout", onPointerOut);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      viewport.removeEventListener("pointerover", onPointerOver);
+      viewport.removeEventListener("pointerout", onPointerOut);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [scrollRef]);
+
+  useEffect(() => {
+    if (!hovered?.path) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void loadImageHoverPreview(hovered.path)
+        .then((url) => {
+          if (!cancelled && url) setPreview({ path: hovered.path, url });
+        })
+        .catch(() => {});
+    }, IMAGE_TABLE_HOVER_PREVIEW_DELAY_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [hovered]);
+
+  if (!hovered || !preview?.url || preview.path !== hovered.path) return null;
+  const size = Math.min(208, window.innerWidth - 16, window.innerHeight - 16);
+  const left = hovered.rect.right + size + 12 <= window.innerWidth
+    ? hovered.rect.right + 8 : Math.max(8, hovered.rect.left - size - 8);
+  const top = Math.max(8, Math.min(hovered.rect.top + hovered.rect.height / 2 - size / 2, window.innerHeight - size - 8));
+  return createPortal(
+    <div className="fixed z-[9999] flex items-center justify-center rounded-md border p-2 shadow-lg"
+      role="img" aria-label={`放大预览：${hovered.name}`}
+      style={{ left, top, width: size, height: size, boxSizing: "border-box", pointerEvents: "none",
+        background: "var(--colorNeutralBackground1)", borderColor: "var(--colorNeutralStroke2)" }}>
+      <img src={preview.url} alt="" className="h-full w-full object-contain" draggable={false} />
+    </div>,
+    document.body,
   );
 }
 
@@ -1326,6 +1402,8 @@ export function ImageTab({
   const selectedRowVisible = currentDisplayIndex >= 0 && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT
     && IMAGE_TABLE_HEADER_HEIGHT + (currentDisplayIndex + 1) * IMAGE_TABLE_ROW_HEIGHT > scrollTop + IMAGE_TABLE_HEADER_HEIGHT
     && IMAGE_TABLE_HEADER_HEIGHT + currentDisplayIndex * IMAGE_TABLE_ROW_HEIGHT < scrollTop + viewportHeight;
+  const firstRowVisible = sortedRows.length > 0 && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT
+    && scrollTop < IMAGE_TABLE_ROW_HEIGHT;
   const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
 
   useEffect(() => {
@@ -2077,6 +2155,10 @@ export function ImageTab({
             const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
             const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
             const target = visibleFaceValues[e.toml_path];
+            const baseBackground = i % 2 === 0 ? "var(--colorNeutralBackground1)"
+              : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))";
+            const rowBackground = heatmapSelected ? "var(--colorPaletteGreenBackground1)" : baseBackground;
+            const selectedBackground = "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))";
             return (
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
@@ -2088,25 +2170,22 @@ export function ImageTab({
                    style={{
                      cursor: "pointer",
                      height: IMAGE_TABLE_ROW_HEIGHT,
-                     background: i === current
-                       ? "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))"
-                       : heatmapSelected ? "var(--colorPaletteGreenBackground1)"
-                         : i % 2 === 0 ? "var(--colorNeutralBackground1)"
-                           : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))",
+                     background: rowBackground,
                      color: i === current ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
                    }}>
-                 {displayedColumns.map((column) => (
+                 {displayedColumns.map((column, columnIndex) => (
                    <Td
                      key={column.id}
                      align={column.align}
                      compact={column.kind === "thumbnail"}
                      stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
-                     stickyBackground={i === current
-                       ? "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))"
-                       : heatmapSelected ? "var(--colorPaletteGreenBackground1)"
-                         : i % 2 === 0 ? "var(--colorNeutralBackground1)"
-                           : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))"}
+                     stickyBackground={column.kind === "idx" && i === current ? baseBackground
+                       : i === current ? selectedBackground : rowBackground}
                      selected={column.kind === "idx" && i === current}
+                     selectedBody={column.kind !== "idx" && i === current}
+                     selectedOutlineStart={column.kind === "thumbnail"}
+                     selectedOutlineEnd={columnIndex === displayedColumns.length - 1}
+                     title={column.kind === "name" ? e.name : undefined}
                    >
                      {column.kind === "idx"
                        ? i + 1
@@ -2151,14 +2230,15 @@ export function ImageTab({
         </tbody>
       </table>
     </div>
-    {currentDisplayIndex >= 0 && (
+    <ImageTableHoverPreview scrollRef={scrollRef} />
+    {currentDisplayIndex >= 0 && (!selectedRowVisible || !firstRowVisible) && (
       <button
         type="button"
         className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border shadow-md transition-transform hover:scale-105"
         style={{
-          background: selectedRowVisible ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground1)",
-          color: selectedRowVisible ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorBrandForeground1)",
-          borderColor: selectedRowVisible ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke1)",
+          background: "var(--colorBrandBackground)",
+          color: "var(--colorNeutralForegroundOnBrand)",
+          borderColor: "var(--colorBrandStroke1)",
         }}
         aria-label={selectedRowVisible ? "返回第一行" : "定位到选中项"}
         title={selectedRowVisible ? "返回第一行" : "定位到选中项"}
@@ -2169,7 +2249,7 @@ export function ImageTab({
         }}
       >
         {selectedRowVisible ? <ChevronUp24Regular className="h-5 w-5" aria-hidden="true" />
-          : <Target24Regular className="h-5 w-5" aria-hidden="true" />}
+          : <TableCellCenterSearch24Regular className="h-5 w-5" aria-hidden="true" />}
       </button>
     )}
     </div>
@@ -2750,6 +2830,10 @@ function Td({
   stickyLeft,
   stickyBackground,
   selected = false,
+  selectedBody = false,
+  selectedOutlineStart = false,
+  selectedOutlineEnd = false,
+  title,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
@@ -2757,12 +2841,18 @@ function Td({
   stickyLeft?: number;
   stickyBackground?: string;
   selected?: boolean;
+  selectedBody?: boolean;
+  selectedOutlineStart?: boolean;
+  selectedOutlineEnd?: boolean;
+  title?: string;
 }) {
   return (
-    <td className={compact ? "px-1 py-1" : "px-2 py-1"}
+    <td className={`${compact ? "px-px" : "px-2"} ${selectedBody ? "py-px" : "py-0.5"}`}
         style={{
-          borderRight: "1px solid var(--colorNeutralStroke2)",
-          borderBottom: "1px solid var(--colorNeutralStroke2)",
+          borderTop: selectedBody ? "2px dashed var(--colorBrandStroke1)" : undefined,
+          borderRight: selectedBody && selectedOutlineEnd ? "2px dashed var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
+          borderBottom: selectedBody ? "2px dashed var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
+          borderLeft: selectedBody && selectedOutlineStart ? "2px dashed var(--colorBrandStroke1)" : undefined,
           textAlign: align,
           whiteSpace: "nowrap",
           height: IMAGE_TABLE_ROW_HEIGHT,
@@ -2770,11 +2860,12 @@ function Td({
           position: stickyLeft !== undefined ? "sticky" : undefined,
           left: stickyLeft,
           zIndex: stickyLeft !== undefined ? (stickyLeft === 0 ? 3 : 2) : undefined,
-          background: stickyLeft !== undefined ? stickyBackground : undefined,
+          background: selectedBody || stickyLeft !== undefined ? stickyBackground : undefined,
           boxShadow: selected ? "inset 3px 0 0 var(--colorBrandStroke1)"
             : stickyLeft !== undefined && stickyLeft === 0 ? "inset -1px 0 0 var(--colorNeutralStroke2)" : undefined,
         }}>
-      <span className="block min-w-0 truncate">{children}</span>
+      <span className={compact ? "flex min-w-0 items-center justify-center overflow-hidden" : "block min-w-0 truncate"}
+        title={title} data-tooltip-truncated={title ? "true" : undefined}>{children}</span>
     </td>
   );
 }

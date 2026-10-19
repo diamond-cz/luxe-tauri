@@ -222,6 +222,7 @@ export function GlobalTitleTooltip() {
       if (!content) {
         return;
       }
+      if (anchor.dataset.tooltipTruncated === "true" && anchor.scrollWidth <= anchor.clientWidth + 1) return;
 
       clearCloseTimer();
       activeAnchorRef.current = anchor;

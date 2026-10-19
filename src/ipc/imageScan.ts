@@ -80,3 +80,7 @@ export const loadImageThumbnailBatch = async (paths: string[], size: number, emb
 
 export const loadImagePreview = async (path: string): Promise<string> =>
   convertFileSrc(await call<string>("load_image_preview", { path }));
+
+/** High resolution preview for the image table hover card. */
+export const loadImageHoverPreview = async (path: string): Promise<string> =>
+  convertFileSrc(await call<string>("load_image_hover_preview", { path }));

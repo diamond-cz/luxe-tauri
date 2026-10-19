@@ -8,12 +8,14 @@ use parking_lot::Mutex;
 use tauri::ipc::Channel;
 
 static PREVIEW_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(1));
+static HOVER_PREVIEW_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(1));
 // TOML parsing and image decoding are CPU-heavy. Keep concurrent IPC requests
 // bounded because the table can issue several overlapping requests while it
 // virtualizes rows or changes the selected image.
 static TOML_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
 static THUMBNAIL_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
 static PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
+static HOVER_PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
 
 #[tauri::command]
 pub async fn parse_image_exif(
@@ -102,4 +104,24 @@ pub async fn load_image_preview(path: String) -> AppResult<String> {
     tauri::async_runtime::spawn_blocking(move || image_scan::load_image_preview(&PathBuf::from(path)))
         .await
         .map_err(|err| AppError::Other(format!("image preview task failed: {err}")))?
+}
+
+#[tauri::command]
+pub async fn load_image_hover_preview(path: String) -> AppResult<String> {
+    let generation = {
+        let mut selection = HOVER_PREVIEW_SELECTION.lock();
+        if selection.0 != path {
+            selection.0 = path.clone();
+            selection.1 = selection.1.wrapping_add(1);
+        }
+        selection.1
+    };
+    let _permit = HOVER_PREVIEW_TASKS.acquire().await
+        .map_err(|err| AppError::Other(format!("hover preview queue closed: {err}")))?;
+    if HOVER_PREVIEW_SELECTION.lock().1 != generation {
+        return Err(AppError::Other("image hover preview superseded".into()));
+    }
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_hover_preview(&PathBuf::from(path)))
+        .await
+        .map_err(|err| AppError::Other(format!("image hover preview task failed: {err}")))?
 }

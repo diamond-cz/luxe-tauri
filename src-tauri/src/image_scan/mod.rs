@@ -5,6 +5,9 @@
 //! When present, it carries flat or shallowly-nested `AE_TAG_*` keys that feed
 //! per-image badge and table values in `Isp6sAeVisual`.
 
+#[cfg(test)]
+mod bench;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -22,6 +25,7 @@ use dashmap::DashMap;
 use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageEncoder, Limits};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -31,6 +35,8 @@ const TOML_FIELD_CACHE_LIMIT: usize = 512;
 const THUMBNAIL_CACHE_LIMIT: usize = 256;
 const PREVIEW_CACHE_LIMIT: usize = 16;
 const PREVIEW_SIZE: u32 = 1600;
+const HOVER_PREVIEW_CACHE_LIMIT: usize = 8;
+const HOVER_PREVIEW_SIZE: u32 = 448;
 const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -330,10 +336,18 @@ static TOML_CACHE: Lazy<DashMap<String, Arc<CachedToml>>> = Lazy::new(DashMap::n
 static TOML_FIELD_CACHE: Lazy<DashMap<String, Arc<CachedTomlFields>>> = Lazy::new(DashMap::new);
 static THUMBNAIL_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
 static PREVIEW_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
+static HOVER_PREVIEW_CACHE: Lazy<DashMap<String, Arc<CachedThumbnail>>> = Lazy::new(DashMap::new);
 static CACHE_TICK: AtomicU64 = AtomicU64::new(1);
 static CACHE_GENERATION: AtomicU64 = AtomicU64::new(1);
 static CACHE_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static ACTIVE_IMAGE_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
+static THUMBNAIL_POOL: Lazy<rayon::ThreadPool> = Lazy::new(|| {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .thread_name(|index| format!("luxe-thumbnail-{index}"))
+        .build()
+        .expect("thumbnail rayon pool must initialize")
+});
 
 pub fn clear_memory_caches() {
     let _write = CACHE_WRITE_LOCK.lock();
@@ -342,6 +356,7 @@ pub fn clear_memory_caches() {
     TOML_FIELD_CACHE.clear();
     THUMBNAIL_CACHE.clear();
     PREVIEW_CACHE.clear();
+    HOVER_PREVIEW_CACHE.clear();
 }
 
 /// Scan `dir` for image files (`.jpg`, `.jpeg`, `.png`). A sibling `.toml`
@@ -582,45 +597,54 @@ pub fn load_image_thumbnail_batch(
     fast_only: bool,
 ) -> AppResult<HashMap<String, String>> {
     let size = size.clamp(16, 128);
-    let mut out = HashMap::with_capacity(paths.len());
-
-    for path in paths {
-        if out.contains_key(&path) {
-            continue;
-        }
-
-        match load_image_thumbnail(Path::new(&path), size, fast_only) {
-            Ok(data_url) => {
-                out.insert(path, data_url);
-            }
-            Err(err) => {
-                tracing::warn!(%path, %err, "image thumbnail batch item failed");
-                out.insert(path, String::new());
-            }
-        }
-    }
-
-    Ok(out)
+    let unique_paths: Vec<String> = paths.into_iter().collect::<HashSet<_>>().into_iter().collect();
+    let process = || {
+        unique_paths.par_iter().map(|path| {
+            let value = match load_image_thumbnail(Path::new(path), size, fast_only) {
+                Ok(data_url) => data_url,
+                Err(err) => {
+                    tracing::warn!(%path, %err, "image thumbnail batch item failed");
+                    String::new()
+                }
+            };
+            (path.clone(), value)
+        }).collect::<HashMap<_, _>>()
+    };
+    Ok(if unique_paths.len() > 1 { THUMBNAIL_POOL.install(process) } else { process() })
 }
 
 pub fn load_image_preview(path: &Path) -> AppResult<String> {
+    load_cached_preview(path, PREVIEW_SIZE, &PREVIEW_CACHE, PREVIEW_CACHE_LIMIT, true)
+}
+
+pub fn load_image_hover_preview(path: &Path) -> AppResult<String> {
+    load_cached_preview(path, HOVER_PREVIEW_SIZE, &HOVER_PREVIEW_CACHE, HOVER_PREVIEW_CACHE_LIMIT, false)
+}
+
+fn load_cached_preview(
+    path: &Path,
+    size: u32,
+    cache: &DashMap<String, Arc<CachedThumbnail>>,
+    limit: usize,
+    allow_platform_thumbnail: bool,
+) -> AppResult<String> {
     let generation = CACHE_GENERATION.load(Ordering::Acquire);
     let signature = toml_signature(path)?;
     let key = path.to_string_lossy().into_owned();
-    if let Some(cached) = PREVIEW_CACHE.get(&key) {
+    if let Some(cached) = cache.get(&key) {
         if cached.signature == signature && Path::new(&cached.path).exists() {
             cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
             return Ok(cached.path.clone());
         }
     }
 
-    let encoded = generate_image_thumbnail(path, PREVIEW_SIZE, false)?;
-    let preview_path = write_thumbnail_cache_file(path, PREVIEW_SIZE, false, &signature, encoded)?;
+    let encoded = generate_image_thumbnail(path, size, false, allow_platform_thumbnail)?;
+    let preview_path = write_thumbnail_cache_file(path, size, false, &signature, encoded)?;
     let _write = CACHE_WRITE_LOCK.lock();
     if generation != CACHE_GENERATION.load(Ordering::Acquire) {
         return Ok(preview_path);
     }
-    let replaced = PREVIEW_CACHE.insert(key, Arc::new(CachedThumbnail {
+    let replaced = cache.insert(key, Arc::new(CachedThumbnail {
         signature,
         path: preview_path.clone(),
         last_used: AtomicU64::new(next_cache_tick()),
@@ -630,18 +654,18 @@ pub fn load_image_preview(path: &Path) -> AppResult<String> {
             let _ = fs::remove_file(&old.path);
         }
     }
-    prune_preview_cache();
+    prune_preview_cache(cache, limit);
     Ok(preview_path)
 }
 
-fn prune_preview_cache() {
-    if PREVIEW_CACHE.len() <= PREVIEW_CACHE_LIMIT { return; }
-    let mut entries: Vec<_> = PREVIEW_CACHE.iter()
+fn prune_preview_cache(cache: &DashMap<String, Arc<CachedThumbnail>>, limit: usize) {
+    if cache.len() <= limit { return; }
+    let mut entries: Vec<_> = cache.iter()
         .map(|entry| (entry.key().clone(), entry.last_used.load(Ordering::Relaxed)))
         .collect();
     entries.sort_by_key(|(_, used)| *used);
-    for (key, _) in entries.into_iter().take(PREVIEW_CACHE.len().saturating_sub(PREVIEW_CACHE_LIMIT)) {
-        if let Some((_, cached)) = PREVIEW_CACHE.remove(&key) {
+    for (key, _) in entries.into_iter().take(cache.len().saturating_sub(limit)) {
+        if let Some((_, cached)) = cache.remove(&key) {
             let _ = fs::remove_file(&cached.path);
         }
     }
@@ -685,7 +709,7 @@ fn load_image_thumbnail(path: &Path, size: u32, fast_only: bool) -> AppResult<St
         embedded_thumbnail_data_url_from_jpeg_file(path, size)
             .or_else(|| platform_thumbnail_data_url(path, size))
     } else {
-        Some(generate_image_thumbnail(path, size, true)?)
+        Some(generate_image_thumbnail(path, size, true, true)?)
     }) else {
         let _write = CACHE_WRITE_LOCK.lock();
         if generation == CACHE_GENERATION.load(Ordering::Acquire) {
@@ -760,14 +784,28 @@ fn signature_modified_key(signature: &TomlSignature) -> u128 {
         .unwrap_or(0)
 }
 
-fn generate_image_thumbnail(path: &Path, size: u32, allow_embedded: bool) -> AppResult<EncodedThumbnail> {
+fn generate_image_thumbnail(
+    path: &Path,
+    size: u32,
+    allow_embedded: bool,
+    allow_platform_thumbnail: bool,
+) -> AppResult<EncodedThumbnail> {
     if allow_embedded {
         if let Some(thumbnail) = embedded_thumbnail_data_url_from_jpeg_file(path, size) {
             return Ok(thumbnail);
         }
     }
-    if let Some(data_url) = platform_thumbnail_data_url(path, size) {
-        return Ok(data_url);
+    if allow_platform_thumbnail {
+        if let Some(data_url) = platform_thumbnail_data_url(path, size) {
+            return Ok(data_url);
+        }
+    }
+
+    if is_jpeg_path(path) {
+        let orientation = read_image_orientation(path).unwrap_or(Orientation::NoTransforms);
+        if let Ok(encoded) = generate_turbojpeg_thumbnail(path, size, orientation) {
+            return Ok(encoded);
+        }
     }
 
     let reader = image::ImageReader::open(path)?;
@@ -800,6 +838,52 @@ fn generate_image_thumbnail(path: &Path, size: u32, allow_embedded: bool) -> App
         .map_err(|err| AppError::Other(format!("thumbnail decode error: {err}")))?;
     img.apply_orientation(orientation);
     encode_png_thumbnail_data_url(img, size)
+}
+
+fn is_jpeg_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()).as_deref(),
+        Some("jpg" | "jpeg"),
+    )
+}
+
+fn read_image_orientation(path: &Path) -> AppResult<Orientation> {
+    let mut decoder = image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()
+        .map_err(|err| AppError::Other(format!("JPEG metadata decoder error: {err}")))?;
+    decoder.orientation().map_err(|err| AppError::Other(format!("JPEG orientation error: {err}")))
+}
+
+fn generate_turbojpeg_thumbnail(path: &Path, size: u32, orientation: Orientation) -> AppResult<EncodedThumbnail> {
+    let jpeg_data = fs::read(path)?;
+    let mut decompressor = turbojpeg::Decompressor::new()
+        .map_err(|err| AppError::Other(format!("TurboJPEG initialization error: {err}")))?;
+    let header = decompressor.read_header(&jpeg_data)
+        .map_err(|err| AppError::Other(format!("TurboJPEG header error: {err}")))?;
+    let max_dimension = header.width.max(header.height);
+    let scale = turbojpeg::Decompressor::supported_scaling_factors()
+        .into_iter()
+        .filter(|factor| factor.scale(max_dimension) >= size as usize)
+        .min_by_key(|factor| factor.scale(max_dimension))
+        .unwrap_or(turbojpeg::ScalingFactor::ONE_EIGHTH);
+    decompressor.set_scaling_factor(scale)
+        .map_err(|err| AppError::Other(format!("TurboJPEG scaling error: {err}")))?;
+    let scaled = header.scaled(scale);
+    let pixel_size = turbojpeg::PixelFormat::RGBA.size();
+    let mut decoded = turbojpeg::Image {
+        pixels: vec![0; scaled.width * scaled.height * pixel_size],
+        width: scaled.width,
+        pitch: scaled.width * pixel_size,
+        height: scaled.height,
+        format: turbojpeg::PixelFormat::RGBA,
+    };
+    decompressor.decompress(&jpeg_data, decoded.as_deref_mut())
+        .map_err(|err| AppError::Other(format!("TurboJPEG decode error: {err}")))?;
+    let mut image = DynamicImage::ImageRgba8(
+        image::RgbaImage::from_raw(scaled.width as u32, scaled.height as u32, decoded.pixels)
+            .ok_or_else(|| AppError::Other("TurboJPEG returned invalid image dimensions".into()))?,
+    );
+    image.apply_orientation(orientation);
+    encode_png_thumbnail_data_url(image, size)
 }
 
 fn embedded_thumbnail_data_url_from_jpeg_file(path: &Path, size: u32) -> Option<EncodedThumbnail> {
@@ -1562,5 +1646,31 @@ fn stringify(v: &toml::Value) -> String {
         toml::Value::Boolean(b)  => b.to_string(),
         toml::Value::Datetime(d) => d.to_string(),
         toml::Value::Array(_) | toml::Value::Table(_) => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod hover_preview_tests {
+    use super::load_image_hover_preview;
+    use image::{Rgb, RgbImage};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn hover_preview_uses_bounded_source_resolution_and_refreshes() {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("luxe-hover-test-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("capture.png");
+        RgbImage::from_pixel(2000, 1200, Rgb([90, 120, 150])).save(&source).unwrap();
+
+        let preview = load_image_hover_preview(&source).unwrap();
+        assert_eq!(preview, load_image_hover_preview(&source).unwrap());
+        let (width, height) = image::image_dimensions(&preview).unwrap();
+        assert_eq!((width, height), (448, 269));
+
+        RgbImage::from_pixel(2100, 1200, Rgb([100, 130, 160])).save(&source).unwrap();
+        assert_ne!(preview, load_image_hover_preview(&source).unwrap());
+        fs::remove_dir_all(dir).unwrap();
     }
 }
