@@ -68,6 +68,10 @@ jobs:
           toolchain: "1.95.0"
           targets: x86_64-pc-windows-msvc
 
+      # turbojpeg is built with SIMD enabled and requires NASM on Windows.
+      - name: Set up NASM for libjpeg-turbo
+        uses: ilammy/setup-nasm@v1
+
       - name: Validate release input and signing secrets
         shell: pwsh
         env:

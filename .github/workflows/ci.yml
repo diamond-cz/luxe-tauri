@@ -35,6 +35,8 @@ jobs:
         with:
           toolchain: "1.95.0"
           targets: x86_64-pc-windows-msvc
+      # turbojpeg is built with SIMD enabled and requires NASM on Windows.
+      - uses: ilammy/setup-nasm@v1
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
