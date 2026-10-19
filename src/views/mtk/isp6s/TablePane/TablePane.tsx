@@ -115,6 +115,7 @@ const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
 const IMAGE_TABLE_PREFETCH_PAGES = 3;
 const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
 const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
+const TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:tone-image-table-column-order";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
 const IMAGE_TABLE_GLOBAL_CACHE_LIMIT = 4096;
@@ -131,6 +132,12 @@ const globalImageKinds = new WeakMap<ImageEntry[], {
   revision: number;
   calculator: FaceLinkTargetCalculator;
   byPath: Record<string, ImageTableKind>;
+  widths: Record<string, number>;
+}>();
+const globalToneImageWidths = new WeakMap<ImageEntry[], {
+  keySignature: string;
+  revision: number;
+  widths: Record<string, number>;
 }>();
 const imageTableThumbnailCache = new WeakMap<ImageEntry, string>();
 
@@ -367,7 +374,7 @@ export function TablePane({
          style={{
            background,
            border: `1px solid ${borderColor}`,
-           borderRadius: 12,
+           borderRadius: "12px 12px 0 0",
            overflow: "hidden",
          }}>
       <div className="flex h-8 shrink-0 items-center justify-between gap-3 px-4"
@@ -943,7 +950,27 @@ export function ImageTab({
   const pendingViewportReloadRef = useRef(false);
   const sortRequestRef = useRef(0);
   const extraCols = useMemo(
-    () => toneMode ? [] : Object.entries(schema.Image ?? {}),
+    () => {
+      if (!toneMode) return Object.entries(schema.Image ?? {});
+      const items = schema.preview_info?.items ?? [];
+      const key = (label: string, index: number, fallback: string) => {
+        const item = items.find((candidate) => candidate.label === label);
+        const directKey = item?.toml_key?.trim();
+        return directKey || item?.toml_keys?.[index]?.trim() || fallback;
+      };
+      const keys = (label: string, fallback: string[]) => {
+        const item = items.find((candidate) => candidate.label === label);
+        return item?.toml_keys?.filter(Boolean) ?? fallback;
+      };
+      return [
+        ["AEGain", key("AEGain", 0, "SW_LCE_AEGain")],
+        ["LV", keys("LV", ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"]).join("")],
+        ["DR", keys("DR", ["SW_LCE_CurrDR", "SW_LCE_DRIdx_L", "SW_LCE_DRIdx_H"]).join("")],
+        ["Target", key("Target", 0, "SW_LCE_FinalTarget")],
+        ["D_S_Level", key("Level_D,B_Strenth", 0, "SW_LCE_DStrengthLevel")],
+        ["B_S_Level", key("Level_D,B_Strenth", 1, "SW_LCE_BStrengthLevel")],
+      ];
+    },
     [schema, toneMode],
   );
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
@@ -965,12 +992,13 @@ export function ImageTab({
         kind: "extra" as const,
         label,
         key,
-        align: index < 2 ? "center" as const : "left" as const,
+        align: toneMode || index < 2 ? "center" as const : "left" as const,
       })),
     ],
     [extraCols, toneMode],
   );
-  const [columnOrder, setColumnOrder] = useState<string[]>(readImageTableColumnOrder);
+  const columnOrderStorageKey = toneMode ? TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY : IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY;
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => readImageTableColumnOrder(columnOrderStorageKey));
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const columnDragRef = useRef<ImageTableColumnDragState | null>(null);
   const suppressColumnClickRef = useRef(false);
@@ -983,7 +1011,7 @@ export function ImageTab({
     [columnOrder, tableColumns],
   );
   const imageTomlKeys = useMemo(
-    () => toneMode ? [] : [...new Set([...extraCols.map(([, key]) => key), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
+    () => toneMode ? expandImageColumnKeys(extraCols) : [...new Set([...expandImageColumnKeys(extraCols), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
       .filter((key) => key.length > 0),
     [extraCols, faceBvKey, toneMode],
   );
@@ -1055,6 +1083,13 @@ export function ImageTab({
     calculator: FaceLinkTargetCalculator;
     byPath: Record<string, ImageTableKind>;
   } | null>(null);
+  const [measuredColumnWidths, setMeasuredColumnWidths] = useState<{
+    entries: ImageEntry[];
+    keySignature: string;
+    revision: number;
+    calculator: FaceLinkTargetCalculator | null;
+    widths: Record<string, number>;
+  } | null>(null);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
 
   useLayoutEffect(() => {
@@ -1081,20 +1116,30 @@ export function ImageTab({
       && savedKinds.calculator === faceLinkTargetCalculator
       && !allParsedRows) {
       setImageKinds({ entries, ...savedKinds });
+      setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
+        revision: imageDataRevision, calculator: faceLinkTargetCalculator, widths: savedKinds.widths });
       return;
     }
     let cancelled = false;
+    const widths: Record<string, number> = {};
     const publishKinds = (byPath: Record<string, ImageTableKind>) => {
-      const result = { keySignature: imageTomlKeySignature, revision: imageDataRevision, calculator: faceLinkTargetCalculator, byPath };
+      const result = { keySignature: imageTomlKeySignature, revision: imageDataRevision, calculator: faceLinkTargetCalculator, byPath, widths };
       globalImageKinds.set(entries, result);
       setImageKinds({ entries, ...result });
+      setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
+        revision: imageDataRevision, calculator: faceLinkTargetCalculator, widths });
     };
-    const extraKeys = extraCols.map(([, key]) => key);
+    const extraKeys = expandImageColumnKeys(extraCols);
     const classifyBatch = (rows: Record<string, Record<string, string>>, byPath: Record<string, ImageTableKind>) => {
       for (const [path, data] of Object.entries(rows)) {
         if (path in byPath) continue;
         const face = imageFaceTargetValues(faceLinkTargetCalculator(data, faceBvKey));
         byPath[path] = classifyImageTableRow(data, face, faceFdyKey, extraKeys);
+        for (const column of tableColumns) {
+          if (column.kind === "idx" || column.kind === "thumbnail" || column.kind === "name") continue;
+          widths[column.id] = Math.max(widths[column.id] ?? 0,
+            estimateImageColumnTextWidth(imageTableColumnText(column, data, face, false)));
+        }
       }
     };
     void (async () => {
@@ -1127,7 +1172,45 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [allParsedRows, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, toneMode]);
+  }, [allParsedRows, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
+
+  useEffect(() => {
+    if (!toneMode || entries.length === 0) return;
+    const saved = globalToneImageWidths.get(entries);
+    if (saved?.revision === imageDataRevision && saved.keySignature === imageTomlKeySignature) {
+      setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
+        revision: imageDataRevision, calculator: null, widths: saved.widths });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const widths: Record<string, number> = {};
+      try {
+        const paths = entries.map((entry) => entry.toml_path);
+        for (let start = 0; start < paths.length; start += 128) {
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
+          if (cancelled) return;
+          rememberGlobalImageTableFields(entries, imageDataRevision, batch, imageTomlKeySignature);
+          for (const data of Object.values(batch)) {
+            for (const column of tableColumns) {
+              if (column.kind !== "extra") continue;
+              widths[column.id] = Math.max(widths[column.id] ?? 0,
+                estimateImageColumnTextWidth(imageTableColumnText(column, data, null, false)));
+            }
+          }
+        }
+        if (!cancelled) {
+          globalToneImageWidths.set(entries, { keySignature: imageTomlKeySignature,
+            revision: imageDataRevision, widths });
+          setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
+            revision: imageDataRevision, calculator: null, widths });
+        }
+      } catch (error) {
+        if (!cancelled) console.warn("Tone image table width measurement failed", error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entries, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
 
   const classifiedKinds = imageKinds?.entries === entries
     && imageKinds.keySignature === imageTomlKeySignature
@@ -1174,6 +1257,7 @@ export function ImageTab({
   )), [orderedColumns, sceneOnly]);
 
   useEffect(() => {
+    if (toneMode) return;
     let cancelled = false;
     const calculatorRevision = `${cppImportRevision}:${applyAllVersion}`;
     getFaceCalculator(requestedCalculatorPath, calculatorRevision)
@@ -1187,7 +1271,7 @@ export function ImageTab({
         }
       });
     return () => { cancelled = true; };
-  }, [filePath, requestedCalculatorPath, applyAllVersion, cppImportRevision]);
+  }, [filePath, requestedCalculatorPath, applyAllVersion, cppImportRevision, toneMode]);
 
   useEffect(() => {
     if (parseAllVersion === 0) return;
@@ -1300,8 +1384,8 @@ export function ImageTab({
   }, [columnOrder, tableColumns]);
 
   useEffect(() => {
-    writeImageTableColumnOrder(columnOrder);
-  }, [columnOrder]);
+    writeImageTableColumnOrder(columnOrderStorageKey, columnOrder);
+  }, [columnOrder, columnOrderStorageKey]);
 
   useEffect(() => () => {
     cancelImageTableColumnDrag();
@@ -1794,6 +1878,11 @@ export function ImageTab({
     (width, entry) => Math.max(width, estimateImageColumnTextWidth(entry.name)),
     estimateImageColumnTextWidth("FileName") + (sortControlsEnabled ? 16 : 0),
   ), [entries, sortControlsEnabled]);
+  const fullColumnWidths = measuredColumnWidths?.entries === entries
+    && measuredColumnWidths.keySignature === imageTomlKeySignature
+    && measuredColumnWidths.revision === imageDataRevision
+    && measuredColumnWidths.calculator === (toneMode ? null : faceLinkTargetCalculator)
+    ? measuredColumnWidths.widths : null;
   const baseColumnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
@@ -1808,25 +1897,21 @@ export function ImageTab({
       const minWidth = column.kind === "idx" ? 34 : 52;
       const headerWidth = estimateImageColumnTextWidth(column.label)
         + (column.kind === "extra" && sortControlsEnabled ? 16 : 0);
-      let width = Math.max(minWidth, headerWidth);
+      let width = Math.max(minWidth, headerWidth, fullColumnWidths?.[column.id] ?? 0);
       if (column.kind === "idx") {
         byId[column.id] = Math.max(width, estimateImageColumnTextWidth(String(entries.length)));
         continue;
       }
       for (const { e: entry } of visible.rows) {
         const target = visibleFaceValues[entry.toml_path];
-        const text = column.kind === "extra" ? allParsedRows?.[entry.toml_path]?.[column.key ?? ""] ?? tomls[entry.toml_path]?.[column.key ?? ""] ?? "-"
-          : column.kind === "aeGain" ? target?.aeGain ?? "-"
-          : column.kind === "normalCwr" ? target?.normalCwr ?? "-"
-          : column.kind === "backCwr" ? target?.backCwr ?? "-"
-          : column.kind === "cwr" ? target?.cwr ?? "-"
-          : sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
+        const data = allParsedRows?.[entry.toml_path] ?? tomls[entry.toml_path] ?? {};
+        const text = imageTableColumnText(column, data, target, sceneOnly);
         width = Math.max(width, estimateImageColumnTextWidth(text));
       }
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, entries.length, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -2045,7 +2130,7 @@ export function ImageTab({
                                    <span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
                                    <span>|</span>
                                    <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
-                               : data[column.key ?? ""] ?? "-"}
+                               : imageTableColumnText(column, data, target, sceneOnly)}
                    </Td>
                  ))}
               </tr>
@@ -2337,7 +2422,11 @@ function formatLcePreviewInfoValue(
 function tomlLookup(tomlData: Record<string, string>, key: string | undefined): string {
   if (!key) return "-";
   const value = tomlData[key] ?? tomlData[key.toLowerCase()];
-  return value === undefined || value === "" ? "-" : value;
+  if (value !== undefined && value !== "") return value;
+  const lowerKey = key.toLowerCase();
+  const matched = Object.entries(tomlData).find(([candidate]) =>
+    candidate.toLowerCase() === lowerKey || candidate.split(".").pop()?.toLowerCase() === lowerKey);
+  return matched?.[1] === undefined || matched[1] === "" ? "-" : matched[1];
 }
 
 function getOverlayChrome(): React.CSSProperties {
@@ -2364,18 +2453,65 @@ function getCurrentImagePickerButtonChrome(open: boolean) {
   };
 }
 
-function estimateImageColumnTextWidth(value: string): number {
-  const text = value || "-";
-  let width = 0;
-  for (const ch of text) {
-    width += ch.charCodeAt(0) > 255 ? 12 : 7;
+function imageTableColumnText(
+  column: ImageTableColumn,
+  data: Record<string, string>,
+  target: ReturnType<typeof imageFaceTargetValues> | null | undefined,
+  sceneOnly: boolean,
+): string {
+  if (column.kind === "extra") {
+    const keys = (column.key ?? "").split("").filter(Boolean);
+    const fallbackKeys: Record<string, string[]> = {
+      LV: ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"],
+      DR: ["SW_LCE_CurrDR", "SW_LCE_DRIdx_L", "SW_LCE_DRIdx_H"],
+      D_S_Level: ["SW_LCE_DStrengthLevel"],
+      B_S_Level: ["SW_LCE_BStrengthLevel"],
+      Target: ["SW_LCE_FinalTarget"],
+      AEGain: ["SW_LCE_AEGain"],
+    };
+    const resolvedKeys = keys.length > 0 ? keys : (fallbackKeys[column.label] ?? []);
+    const fallback = fallbackKeys[column.label] ?? [];
+    if (resolvedKeys.length === 1 && tomlLookup(data, resolvedKeys[0]) === "-" && fallback.length > 0) {
+      return tomlLookup(data, fallback[0]);
+    }
+    if (resolvedKeys.length > 1) {
+      return formatLcePreviewInfoValue({ label: column.label, toml_keys: resolvedKeys }, data);
+    }
+    if (resolvedKeys.length === 1 && column.label === "AEGain") {
+      return formatLcePreviewInfoValue({ label: "AEGain", toml_key: resolvedKeys[0] }, data);
+    }
+    if (resolvedKeys.length === 1) return tomlLookup(data, resolvedKeys[0]);
+    return "-";
   }
-  return Math.ceil(width + 18);
+  if (column.kind === "aeGain") return target?.aeGain ?? "-";
+  if (column.kind === "normalCwr") return target?.normalCwr ?? "-";
+  if (column.kind === "backCwr") return target?.backCwr ?? "-";
+  if (column.kind === "cwr") return target?.cwr ?? "-";
+  if (column.kind === "delta") {
+    return sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
+  }
+  return "-";
 }
 
-function readImageTableColumnOrder(): string[] {
+function expandImageColumnKeys(columns: ReadonlyArray<ReadonlyArray<string>>): string[] {
+  return [...new Set(columns.flatMap(([, key]) => key.split("").filter(Boolean)))];
+}
+
+let imageColumnMeasureContext: CanvasRenderingContext2D | null = null;
+function estimateImageColumnTextWidth(value: string): number {
+  if (!imageColumnMeasureContext) {
+    imageColumnMeasureContext = document.createElement("canvas").getContext("2d");
+    if (imageColumnMeasureContext) imageColumnMeasureContext.font = '13px "Segoe UI", Arial, sans-serif';
+  }
+  if (imageColumnMeasureContext) {
+    return Math.ceil(imageColumnMeasureContext.measureText(value || "-").width + 20);
+  }
+  return Math.ceil((value || "-").length * 8 + 20);
+}
+
+function readImageTableColumnOrder(storageKey: string): string[] {
   try {
-    const stored = window.localStorage.getItem(IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY);
+    const stored = window.localStorage.getItem(storageKey);
     if (!stored) return [];
     const parsed: unknown = JSON.parse(stored);
     return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
@@ -2386,9 +2522,9 @@ function readImageTableColumnOrder(): string[] {
   }
 }
 
-function writeImageTableColumnOrder(order: string[]) {
+function writeImageTableColumnOrder(storageKey: string, order: string[]) {
   try {
-    window.localStorage.setItem(IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY, JSON.stringify(order));
+    window.localStorage.setItem(storageKey, JSON.stringify(order));
   } catch {
     // Ignore storage failures; the in-memory order still works for this mount.
   }

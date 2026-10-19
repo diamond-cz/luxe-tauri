@@ -414,7 +414,7 @@ export function SourceCodeView({
     <div className="relative h-full w-full overflow-hidden">
       <div
         ref={scrollerRef}
-        className="h-full w-full overflow-auto"
+        className="source-code-scroller h-full w-full overflow-x-auto overflow-y-scroll"
         style={sourceScrollerStyle}
         onScroll={(event) => {
           const target = event.currentTarget;

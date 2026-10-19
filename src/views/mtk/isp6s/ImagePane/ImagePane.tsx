@@ -357,7 +357,7 @@ export function ImagePane({
          style={{
            background: dropState === "ok" ? "var(--colorPaletteGreenBackground1)" : "var(--colorNeutralBackground2)",
            border: `1px solid ${dropState === "ok" ? "var(--colorPaletteGreenBorder2)" : dropState === "bad" ? "var(--colorPaletteRedBorder2)" : "var(--colorNeutralStroke2)"}`,
-           borderRadius: 12,
+           borderRadius: "12px 12px 0 0",
            overflow: "hidden",
          }}>
       <div ref={headerRef}

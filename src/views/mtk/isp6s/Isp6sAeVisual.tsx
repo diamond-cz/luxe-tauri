@@ -436,7 +436,7 @@ export function Isp6sAeVisual({
                 <Panel defaultSize={session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden" onResize={(size) => {
                   if (Number.isFinite(size) && size >= 25 && size <= 75) session.toneLceSize = size;
                 }}>
-                  <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-lg border"
+                  <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-t-lg border"
                        style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
                     <div className="flex h-8 shrink-0 items-end border-b px-2"
                          style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
@@ -586,7 +586,7 @@ const DetailsPanel = memo(function DetailsPanel({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden"
-         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8 }}>
+         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: "8px 8px 0 0" }}>
       <div className="flex h-8 shrink-0 items-stretch px-2"
            style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
         {DETAILS_TABS.map((tab) => {

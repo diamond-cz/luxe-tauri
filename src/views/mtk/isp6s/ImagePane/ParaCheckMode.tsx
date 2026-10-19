@@ -232,7 +232,7 @@ function comparisonTextStyle(highlight: boolean): CSSProperties {
 const cardStyle: CSSProperties = {
   display: "flex", flexDirection: "column", width: "100%", height: "100%", minWidth: 0, minHeight: 0,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: 10, overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  borderRadius: "10px 10px 0 0", overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 const headerStyle: CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36, flexShrink: 0, padding: "0 10px",

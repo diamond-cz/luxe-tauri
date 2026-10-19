@@ -458,7 +458,7 @@ export function ToneChartMapMode({
         )}
         {tab !== "LCE" && <div className="flex flex-col gap-3">
           {currentGroups.map((group) => (
-            <section key={`${tab}:${group.path}:${group.line}`} className="min-w-0 overflow-hidden rounded-md border"
+            <section key={`${tab}:${group.path}:${group.line}`} className="min-w-0 overflow-hidden rounded-t-md border"
                      style={{ borderColor: "var(--colorNeutralStroke2)" }}>
               <div className="flex min-h-8 items-center gap-2 border-b px-3 py-1"
                    style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>

@@ -1948,7 +1948,7 @@ export function ChartMapMode({
           axisLabel="EVD"
           thdLabel="BT_THD"
           thdValue={brightInput?.thd ?? null}
-          cornerLabel="BV/EVD"
+          cornerLabel="BV\\EVD"
           sourceJumpLabel="HS.Bright Area"
           sourcePaths={[...HS_BRIGHT_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -1982,7 +1982,7 @@ export function ChartMapMode({
           axisLabel="B2M"
           thdLabel="MT_THD"
           thdValue={middleInput?.thd ?? null}
-          cornerLabel="BV/B2M"
+          cornerLabel="BV\\B2M"
           sourceJumpLabel="HS.Middle Area"
           sourcePaths={[...HS_MIDDLE_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -2016,7 +2016,7 @@ export function ChartMapMode({
           axisLabel="B2D"
           thdLabel="DT_THD"
           thdValue={darkInput?.thd ?? null}
-          cornerLabel="BV/B2D"
+          cornerLabel="BV\\B2D"
           sourceJumpLabel="HS.Dark Area"
           sourcePaths={[...HS_DARK_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -2136,24 +2136,23 @@ export function ChartMapMode({
     <div className="flex h-full w-full flex-col" style={canvasStyle}>
       <style>
         {`
-          .chart-map-scrollbar-hidden::-webkit-scrollbar { display: none; }
           .chart-map-tab-strip::-webkit-scrollbar { display: none; }
-          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]),
-          .chart-map-scrollbar-hidden button[aria-label^="Collapse"],
-          .chart-map-scrollbar-hidden button[aria-label^="Expand"] {
+          .chart-map-content button[aria-label^="Jump to"]:not([data-abl-row="true"]),
+          .chart-map-content button[aria-label^="Collapse"],
+          .chart-map-content button[aria-label^="Expand"] {
             transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
           }
-          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]):hover:not(:disabled),
-          .chart-map-scrollbar-hidden button[aria-label^="Collapse"]:hover:not(:disabled),
-          .chart-map-scrollbar-hidden button[aria-label^="Expand"]:hover:not(:disabled) {
+          .chart-map-content button[aria-label^="Jump to"]:not([data-abl-row="true"]):hover:not(:disabled),
+          .chart-map-content button[aria-label^="Collapse"]:hover:not(:disabled),
+          .chart-map-content button[aria-label^="Expand"]:hover:not(:disabled) {
             transform: translateY(-1px) scale(1.06);
             border-color: var(--colorBrandStroke1);
             background: color-mix(in srgb, var(--colorBrandBackground2) 66%, var(--colorNeutralBackground1));
             box-shadow: 0 4px 10px color-mix(in srgb, var(--colorBrandForeground1) 24%, transparent);
           }
-          .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]):active:not(:disabled),
-          .chart-map-scrollbar-hidden button[aria-label^="Collapse"]:active:not(:disabled),
-          .chart-map-scrollbar-hidden button[aria-label^="Expand"]:active:not(:disabled) {
+          .chart-map-content button[aria-label^="Jump to"]:not([data-abl-row="true"]):active:not(:disabled),
+          .chart-map-content button[aria-label^="Collapse"]:active:not(:disabled),
+          .chart-map-content button[aria-label^="Expand"]:active:not(:disabled) {
             transform: translateY(0) scale(0.97);
           }
           .chart-map-abl-row:hover:not(:disabled) {
@@ -2168,9 +2167,9 @@ export function ChartMapMode({
             filter: drop-shadow(0 8px 12px color-mix(in srgb, var(--colorNeutralForeground1) 18%, transparent));
           }
           @media (prefers-reduced-motion: reduce) {
-            .chart-map-scrollbar-hidden button[aria-label^="Jump to"]:not([data-abl-row="true"]),
-            .chart-map-scrollbar-hidden button[aria-label^="Collapse"],
-            .chart-map-scrollbar-hidden button[aria-label^="Expand"],
+            .chart-map-content button[aria-label^="Jump to"]:not([data-abl-row="true"]),
+            .chart-map-content button[aria-label^="Collapse"],
+            .chart-map-content button[aria-label^="Expand"],
             .chart-map-target-term-card { transition: none; }
           }
         `}
@@ -2190,7 +2189,7 @@ export function ChartMapMode({
         </div>
       </div>
 
-      <div className="chart-map-scrollbar-hidden min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2" style={hiddenScrollbarStyle} data-isp6s-chart-scroll="true">
+      <div className="chart-map-content min-h-0 flex-1 overflow-x-auto overflow-y-scroll px-3 pb-3 pt-2" data-isp6s-chart-scroll="true">
         <div style={innerCanvasStyle}>
           {loading && (!isFaceTab || !currentFaceFbtSource) && (
             <div className="mb-2 text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
@@ -2365,7 +2364,7 @@ export function ChartMapMode({
           ))}
 
           {!loading && message && tab !== "NS" && (
-            <div className="rounded-md border px-3 py-2 text-xs"
+            <div className="rounded-t-md border px-3 py-2 text-xs"
                  style={{
                    borderColor: "var(--colorNeutralStroke2)",
                    color: "var(--colorNeutralForeground3)",
@@ -8119,7 +8118,7 @@ function TouchTargetCard({
     minWidth: 0,
     minHeight: 0,
     border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-    borderRadius: 8,
+    borderRadius: "8px 8px 0 0",
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
     overflow: "hidden",
     background: "var(--colorNeutralBackground1)",
@@ -9415,7 +9414,13 @@ function HsAreaGrid({
           ...hsDarkAreaCornerStyle,
           background: faceBvDrCornerCellStyle.background,
           color: faceBvDrCornerCellStyle.color,
-        }}>{cornerLabel}</div>
+        }} title={cornerLabel} aria-label={cornerLabel}>
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 100 100" preserveAspectRatio="none" style={faceBvDrCornerDiagonalStyle}>
+            <line x1="0" y1="0" x2="100" y2="100" stroke="var(--colorNeutralStroke1)" vectorEffect="non-scaling-stroke" />
+          </svg>
+          <span style={faceBvDrCornerBvStyle}>BV</span>
+          <span style={faceBvDrCornerDrStyle}>{cornerLabel.split("\\")[1] ?? columnLabel}</span>
+        </div>
         {Array.from({ length: columnCount }, (_, columnIndex) => {
           const field = source?.columnHeaderFields[columnIndex] ?? null;
           const value = source?.columnHeaders[columnIndex] ?? NaN;
@@ -12130,11 +12135,6 @@ const innerCanvasStyle: CSSProperties = {
   padding: 0,
 };
 
-const hiddenScrollbarStyle: CSSProperties = {
-  scrollbarWidth: "none",
-  msOverflowStyle: "none",
-};
-
 function tabButtonStyle(active: boolean): CSSProperties {
   return {
     minWidth: 88,
@@ -12157,7 +12157,7 @@ function tabButtonStyle(active: boolean): CSSProperties {
 const thresholdCardStyle: CSSProperties = {
   position: "relative",
   border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 12,
+  borderRadius: "12px 12px 0 0",
   margin: "0 0 12px",
   padding: 0,
   background: "var(--colorNeutralBackground1)",
@@ -12240,7 +12240,7 @@ const thresholdDualControlStyle: CSSProperties = {
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 12,
   minWidth: 0,
-  padding: 12,
+  padding: 0,
 };
 
 const mtwvControlWrapStyle: CSSProperties = {
@@ -12268,7 +12268,7 @@ const mtwvFormulaPanelStyle: CSSProperties = {
   minWidth: 0,
   padding: 12,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   background: "var(--colorNeutralBackground2)",
 };
 
@@ -12480,7 +12480,7 @@ const touchCalcRowStyle: CSSProperties = {
   minWidth: 0,
   padding: "10px 12px",
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 78%, transparent)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   background: "color-mix(in srgb, var(--colorNeutralForeground1) 3%, var(--colorNeutralBackground1))",
 };
 
@@ -12552,7 +12552,7 @@ const touchStableExplainStyle: CSSProperties = {
   minWidth: 0,
   padding: 14,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-  borderRadius: 10,
+  borderRadius: "10px 10px 0 0",
   background: "color-mix(in srgb, #fff7e6 58%, var(--colorNeutralBackground1))",
 };
 
@@ -12576,7 +12576,7 @@ const touchStableFormulaBoxStyle: CSSProperties = {
   marginTop: 2,
   padding: "10px 12px",
   borderLeft: "4px solid #f59e0b",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   background: "color-mix(in srgb, #fef3c7 74%, var(--colorNeutralBackground1))",
   color: "var(--colorNeutralForeground1)",
   fontFamily: "ui-monospace, Consolas, monospace",
@@ -12603,7 +12603,7 @@ const touchStableParamStyle: CSSProperties = {
   minWidth: 0,
   padding: "10px 12px",
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: 9,
+  borderRadius: "9px 9px 0 0",
   background: "var(--colorNeutralBackground1)",
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
 };
@@ -12638,7 +12638,7 @@ const touchStableTableStyle: CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
   border: "1px solid color-mix(in srgb, #f59e0b 42%, var(--colorNeutralStroke2))",
-  borderRadius: 10,
+  borderRadius: "10px 10px 0 0",
   background: "var(--colorNeutralBackground1)",
 };
 
@@ -12678,7 +12678,7 @@ function mtwvFlowBoxStyle(kind: "block" | "weight" | "sum"): CSSProperties {
     minWidth: 82,
     padding: "8px 10px",
     border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 76%, transparent)",
-    borderRadius: 8,
+    borderRadius: "8px 8px 0 0",
     background: tone,
     color: "var(--colorNeutralForeground1)",
     textAlign: "center",
@@ -12712,7 +12712,7 @@ function mtwvStatStyle(strong: boolean): CSSProperties {
     border: strong
       ? "1px solid color-mix(in srgb, var(--colorBrandForeground1) 45%, var(--colorNeutralStroke2))"
       : "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-    borderRadius: 8,
+    borderRadius: "8px 8px 0 0",
     background: strong
       ? "color-mix(in srgb, var(--colorBrandBackground2) 34%, var(--colorNeutralBackground1))"
       : "var(--colorNeutralBackground2)",
@@ -12778,7 +12778,7 @@ function hsTargetTermCardStyle(hasMissing: boolean, active: boolean): CSSPropert
     minWidth: 0,
     padding: 12,
     border: `1px solid ${hasMissing ? "var(--colorPaletteRedBorder2)" : active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)"}`,
-    borderRadius: 8,
+    borderRadius: "8px 8px 0 0",
     background: hasMissing
       ? "color-mix(in srgb, var(--colorPaletteRedBackground2) 42%, var(--colorNeutralBackground1))"
       : active
@@ -12989,7 +12989,7 @@ const nsNorTPanelStyle: CSSProperties = {
   height: "100%",
   minWidth: 0,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   background: "var(--colorNeutralBackground2)",
   overflow: "hidden",
 };
@@ -13438,7 +13438,7 @@ const nsProbabilityChartCardStyle: CSSProperties = {
   height: "100%",
   minWidth: 0,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 72%, transparent)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
   overflow: "hidden",
   background: "var(--colorNeutralBackground1)",
@@ -13717,7 +13717,7 @@ const hsWeightPendingStyle: CSSProperties = {
   color: "var(--colorNeutralForeground3)",
   fontSize: 12,
   border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   background: "var(--colorNeutralBackground2)",
 };
 
@@ -13942,7 +13942,7 @@ const hsDarkAreaBodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   minWidth: 0,
-  padding: 12,
+  padding: 0,
   background: "var(--colorNeutralBackground1)",
 };
 
@@ -13965,7 +13965,7 @@ function hsDarkAreaGridStyle(columnCount: number): CSSProperties {
     boxSizing: "border-box",
     overflow: "hidden",
     border: HS_WEIGHT_FRAME_BORDER,
-    borderRadius: 8,
+    borderRadius: 0,
     background: "var(--colorNeutralBackground1)",
     fontFamily: "ui-monospace, Consolas, monospace",
     fontSize: compact ? 10 : 11,
@@ -13974,6 +13974,7 @@ function hsDarkAreaGridStyle(columnCount: number): CSSProperties {
 }
 
 const hsDarkAreaCornerStyle: CSSProperties = {
+  position: "relative",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -13984,6 +13985,7 @@ const hsDarkAreaCornerStyle: CSSProperties = {
   background: "color-mix(in srgb, var(--normal-sheet-palegreen-bg) 72%, var(--colorNeutralBackground1))",
   color: "var(--normal-sheet-palegreen-fg)",
   fontWeight: 900,
+  overflow: "hidden",
 };
 
 function hsDarkAreaColumnHeaderStyle(active: boolean): CSSProperties {
@@ -14036,7 +14038,7 @@ const thresholdGroupStyle: CSSProperties = {
   flexDirection: "column",
   minWidth: 0,
   border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 10,
+  borderRadius: "10px 10px 0 0",
   background: "var(--colorNeutralBackground2)",
   overflow: "hidden",
 };
@@ -14958,7 +14960,7 @@ function thresholdCellInputStyle(editable: boolean): CSSProperties {
 
 const sourceSectionStyle: CSSProperties = {
   border: "1px solid var(--colorNeutralStroke2)",
-  borderRadius: 8,
+  borderRadius: "8px 8px 0 0",
   margin: "0 0 12px",
   padding: 0,
   background: "var(--colorNeutralBackground1)",
@@ -14975,7 +14977,7 @@ const ablGridStyle: CSSProperties = {
 const ablCardStyle: CSSProperties = {
   ...sourceSectionStyle,
   margin: 0,
-  borderRadius: 12,
+  borderRadius: "12px 12px 0 0",
   boxShadow: "0 8px 22px rgba(0, 0, 0, 0.08)",
 };
 
@@ -15193,7 +15195,7 @@ const faceMetricCardStyle: CSSProperties = {
   minHeight: 116,
   padding: 12,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: 10,
+  borderRadius: "10px 10px 0 0",
   background: faceMetricCardBackground,
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
@@ -15275,7 +15277,7 @@ function faceProbTableStyle(columnCount: number, hasAxisHeader = false): CSSProp
     width: "100%",
     minWidth: 0,
     border: HS_WEIGHT_FRAME_BORDER,
-    borderRadius: "0 0 12px 12px",
+    borderRadius: 0,
     overflow: "hidden",
     background: "var(--colorNeutralBackground1)",
     fontFamily: "ui-monospace, Consolas, monospace",
@@ -15388,7 +15390,7 @@ const faceThresholdWithFddrCardStyle: CSSProperties = {
 const faceFddrCardStyle: CSSProperties = {
   ...faceFbtGroupCardStyle,
   containerType: "inline-size",
-  borderRadius: 12,
+  borderRadius: "12px 12px 0 0",
 };
 
 const faceFddrEmbeddedCardStyle: CSSProperties = {
@@ -15433,7 +15435,7 @@ const faceBvDrCardStyle: CSSProperties = {
   width: "100%",
   minWidth: 0,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: 10,
+  borderRadius: "10px 10px 0 0",
   overflow: "hidden",
   background: "var(--colorNeutralBackground1)",
   boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
@@ -15486,7 +15488,7 @@ function faceBvDrTableStyle(columnCount: number): CSSProperties {
     minWidth: 0,
     boxSizing: "border-box",
     border: FACE_BV_DR_FRAME_BORDER,
-    borderRadius: "0 0 9px 9px",
+    borderRadius: 0,
     overflow: "hidden",
     background: "var(--colorNeutralBackground1)",
     fontFamily: "ui-monospace, Consolas, monospace",
