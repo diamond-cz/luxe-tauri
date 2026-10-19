@@ -1948,7 +1948,7 @@ export function ChartMapMode({
           axisLabel="EVD"
           thdLabel="BT_THD"
           thdValue={brightInput?.thd ?? null}
-          cornerLabel="BV\\EVD"
+          cornerLabel={"BV\\EVD"}
           sourceJumpLabel="HS.Bright Area"
           sourcePaths={[...HS_BRIGHT_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -1982,7 +1982,7 @@ export function ChartMapMode({
           axisLabel="B2M"
           thdLabel="MT_THD"
           thdValue={middleInput?.thd ?? null}
-          cornerLabel="BV\\B2M"
+          cornerLabel={"BV\\B2M"}
           sourceJumpLabel="HS.Middle Area"
           sourcePaths={[...HS_MIDDLE_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -2016,7 +2016,7 @@ export function ChartMapMode({
           axisLabel="B2D"
           thdLabel="DT_THD"
           thdValue={darkInput?.thd ?? null}
-          cornerLabel="BV\\B2D"
+          cornerLabel={"BV\\B2D"}
           sourceJumpLabel="HS.Dark Area"
           sourcePaths={[...HS_DARK_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -9419,7 +9419,7 @@ function HsAreaGrid({
             <line x1="0" y1="0" x2="100" y2="100" stroke="var(--colorNeutralStroke1)" vectorEffect="non-scaling-stroke" />
           </svg>
           <span style={faceBvDrCornerBvStyle}>BV</span>
-          <span style={faceBvDrCornerDrStyle}>{cornerLabel.split("\\")[1] ?? columnLabel}</span>
+          <span style={faceBvDrCornerDrStyle}>{columnLabel}</span>
         </div>
         {Array.from({ length: columnCount }, (_, columnIndex) => {
           const field = source?.columnHeaderFields[columnIndex] ?? null;
