@@ -609,7 +609,7 @@ const DetailsPanel = memo(function DetailsPanel({
         {detailsTab === "normal" && <NormalTable tomlData={tomlData} />}
         {detailsTab === "face" && <FaceTable tomlData={tomlData} />}
         {detailsTab === "lce" && <LceTab schema={schema} tomlData={tomlData} />}
-        {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} session={session} />}
+        {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} />}
         {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
           sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
       </div>

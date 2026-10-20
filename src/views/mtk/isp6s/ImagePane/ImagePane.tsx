@@ -91,6 +91,7 @@ export function ImagePane({
   const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
   const sourceDraftRef = useRef<SourceCodeDraft | null>(null);
   const undoHistoryRef = useRef<string[]>([]);
+  const redoHistoryRef = useRef<string[]>([]);
   const [sourceDraftError, setSourceDraftError] = useState<string | null>(null);
   const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
   const [tempDraftPending, setTempDraftPending] = useState(false);
@@ -193,6 +194,7 @@ export function ImagePane({
     setSourceDraft(null);
     sourceDraftRef.current = null;
     undoHistoryRef.current = [];
+    redoHistoryRef.current = [];
     setSourceDraftError(null);
     setTempDraft(null);
     setTempDraftPending(false);
@@ -281,6 +283,7 @@ export function ImagePane({
     const current = sourceDraftRef.current;
     if (!current || current.text === text) return;
     undoHistoryRef.current.push(current.text);
+    redoHistoryRef.current = [];
     if (undoHistoryRef.current.length > 100) undoHistoryRef.current.shift();
     const nextDraft = { ...current, text, version: current.version + 1 };
     sourceDraftRef.current = nextDraft;
@@ -288,21 +291,27 @@ export function ImagePane({
   }, []);
 
   useEffect(() => {
-    if (effectiveMode !== "chart_map") return;
-    const onUndo = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z" || event.shiftKey) return;
+    const onHistory = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
       if (!rootRef.current?.contains(event.target as Node)) return;
-      const previous = undoHistoryRef.current.pop();
       const current = sourceDraftRef.current;
-      if (previous === undefined || !current) return;
+      if (!current) return;
+      const key = event.key.toLowerCase();
+      const undo = key === "z" && !event.shiftKey;
+      const redo = key === "y" || (key === "z" && event.shiftKey);
+      if (!undo && !redo) return;
+      const history = undo ? undoHistoryRef.current : redoHistoryRef.current;
+      const nextText = history.pop();
+      if (nextText === undefined) return;
+      (undo ? redoHistoryRef.current : undoHistoryRef.current).push(current.text);
       event.preventDefault();
       event.stopPropagation();
-      const nextDraft = { ...current, text: previous, version: current.version + 1 };
+      const nextDraft = { ...current, text: nextText, version: current.version + 1 };
       sourceDraftRef.current = nextDraft;
       setSourceDraft(nextDraft);
     };
-    window.addEventListener("keydown", onUndo, true);
-    return () => window.removeEventListener("keydown", onUndo, true);
+    window.addEventListener("keydown", onHistory, true);
+    return () => window.removeEventListener("keydown", onHistory, true);
   }, [effectiveMode]);
 
   const handleSaveDraft = useCallback(async () => {
@@ -346,10 +355,31 @@ export function ImagePane({
     const current = sourceDraftRef.current;
     if (!current || current.text === current.initialText) return;
     undoHistoryRef.current.push(current.text);
+    redoHistoryRef.current = [];
     const nextDraft = { ...current, text: current.initialText, version: current.version + 1 };
     sourceDraftRef.current = nextDraft;
     setSourceDraft(nextDraft);
     setTempDraft(null);
+  }, []);
+
+  const handleUndoDraft = useCallback(() => {
+    const current = sourceDraftRef.current;
+    const previous = undoHistoryRef.current.pop();
+    if (!current || previous === undefined) return;
+    redoHistoryRef.current.push(current.text);
+    const nextDraft = { ...current, text: previous, version: current.version + 1 };
+    sourceDraftRef.current = nextDraft;
+    setSourceDraft(nextDraft);
+  }, []);
+
+  const handleRedoDraft = useCallback(() => {
+    const current = sourceDraftRef.current;
+    const nextText = redoHistoryRef.current.pop();
+    if (!current || nextText === undefined) return;
+    undoHistoryRef.current.push(current.text);
+    const nextDraft = { ...current, text: nextText, version: current.version + 1 };
+    sourceDraftRef.current = nextDraft;
+    setSourceDraft(nextDraft);
   }, []);
 
   return (
@@ -461,6 +491,10 @@ export function ImagePane({
             onSaveDraft={handleSaveDraft}
             onSaveDraftAs={handleSaveDraftAs}
             onRestoreDraft={handleRestoreDraft}
+            onUndoDraft={handleUndoDraft}
+            onRedoDraft={handleRedoDraft}
+            canUndoDraft={undoHistoryRef.current.length > 0}
+            canRedoDraft={redoHistoryRef.current.length > 0}
             onBackToChart={handleBackToChart}
             sourceFields={toneSourceFields}
             sourceTree={toneImportedPathsMatchDraft ? toneParsed?.tree : undefined}

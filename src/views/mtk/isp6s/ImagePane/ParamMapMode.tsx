@@ -3,7 +3,11 @@ import type { WorkspaceSession } from "../workspaceSession";
 import { Button } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular,
+  ArrowRedo24Regular,
   ArrowReset24Regular,
+  ArrowUndo24Regular,
+  ChevronRight16Regular,
+  Folder24Regular,
   Save24Regular,
 } from "@fluentui/react-icons";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -34,6 +38,10 @@ interface Props {
   onSaveDraft: () => Promise<void>;
   onSaveDraftAs: (path: string) => Promise<void>;
   onRestoreDraft: () => void;
+  onUndoDraft: () => void;
+  onRedoDraft: () => void;
+  canUndoDraft: boolean;
+  canRedoDraft: boolean;
   onBackToChart?: (target?: ChartPreviewTarget) => void;
   sourceFields?: FieldEntry[];
   sourceTree?: StructNode;
@@ -150,6 +158,10 @@ export function ParamMapMode({
   onSaveDraft,
   onSaveDraftAs,
   onRestoreDraft,
+  onUndoDraft,
+  onRedoDraft,
+  canUndoDraft,
+  canRedoDraft,
   onBackToChart,
   sourceFields,
   sourceTree,
@@ -241,25 +253,32 @@ export function ParamMapMode({
   return (
     <div className="flex h-full w-full flex-col">
       <div
-        className="flex items-center gap-3 px-3 py-1.5 text-xs"
+        className="flex h-8 shrink-0 items-center gap-3 px-4 text-xs"
         style={{
-          background: "var(--colorNeutralBackground3)",
+          background: "var(--colorNeutralBackground1)",
           color: "var(--colorNeutralForeground3)",
           borderBottom: "1px solid var(--colorNeutralStroke2)",
         }}
       >
-        <span className="shrink-0">
-          {activeLabel
-            ? `\u5361\u7247\uff1a${activeLabel}`
-            : "\u70b9\u51fb\u5de6\u4fa7\u4efb\u4e00\u5b50\u5361\u7247\u5728\u6e90\u7801\u4e2d\u5b9a\u4f4d"}
-        </span>
-        <span
-          className="min-w-0 flex-1 truncate text-right"
-          style={{ color: err ? "var(--colorPaletteRedForeground1)" : "var(--colorNeutralForeground3)" }}
-        >
-          {err ?? actionMessage}
-        </span>
+        <SourcePathBreadcrumb path={filePath} />
+        {activeLabel && <span className="hidden shrink-0 text-[11px] xl:inline" style={{ color: "var(--colorNeutralForeground3)" }}>· {activeLabel}</span>}
+        {(err || actionMessage) && (
+          <span
+            className="min-w-0 max-w-[42%] truncate text-right"
+            style={{ color: err ? "var(--colorPaletteRedForeground1)" : "var(--colorNeutralForeground3)" }}
+          >
+            {err ?? actionMessage}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-1">
+          <HoverTooltip content="撤销" positioning="below-center" inline>
+            <Button size="small" appearance="subtle" icon={<ArrowUndo24Regular />} disabled={!canUndoDraft || saving}
+              onClick={onUndoDraft} aria-label="撤销" />
+          </HoverTooltip>
+          <HoverTooltip content="重做" positioning="below-center" inline>
+            <Button size="small" appearance="subtle" icon={<ArrowRedo24Regular />} disabled={!canRedoDraft || saving}
+              onClick={onRedoDraft} aria-label="重做" />
+          </HoverTooltip>
           <HoverTooltip content={"\u4fdd\u5b58\u5230\u539f\u59cb\u53c2\u6570\u6587\u4ef6"} positioning="below-center" inline>
             <Button
               size="small"
@@ -313,6 +332,34 @@ export function ParamMapMode({
           }}
         />
       </div>
+    </div>
+  );
+}
+
+function SourcePathBreadcrumb({ path }: { path: string }) {
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  // 只显示源码所在目录，不显示当前源码文件名。
+  const directoryParts = parts.slice(0, -1);
+  const directoryPath = directoryParts.join("\\");
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden"
+      style={{ scrollbarWidth: "none", whiteSpace: "nowrap" }}
+      aria-label={`源码目录：${directoryPath || path}`}>
+      <Folder24Regular className="mr-1 h-4 w-4 shrink-0"
+        style={{ color: "var(--colorNeutralForeground3)" }} aria-hidden="true" />
+      {directoryParts.length === 0
+        ? <span className="truncate" style={{ color: "var(--colorNeutralForeground3)" }}>未加载源码目录</span>
+        : directoryParts.map((part, index) => (
+          <span key={`${part}-${index}`} className="flex shrink-0 items-center gap-0.5">
+            {index > 0 && <ChevronRight16Regular className="h-3 w-3 shrink-0"
+              style={{ color: "var(--colorNeutralForeground4)" }} aria-hidden="true" />}
+            <span
+              className={index === directoryParts.length - 1 ? "font-semibold" : undefined}
+              style={{ color: index === directoryParts.length - 1 ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)" }}>
+              {part}
+            </span>
+          </span>
+        ))}
     </div>
   );
 }
