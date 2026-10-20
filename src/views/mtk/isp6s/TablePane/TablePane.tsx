@@ -106,6 +106,7 @@ const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 36;
 // Keep the corner cell in sync with faceBvDrCornerCellStyle in ChartMapMode.
 const IMAGE_TABLE_CORNER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))";
+const IMAGE_TABLE_SELECTED_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))";
 const IMAGE_TABLE_ROW_HEIGHT = 54;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
 const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 6;
@@ -2234,7 +2235,6 @@ export function ImageTab({
             const baseBackground = i % 2 === 0 ? "var(--colorNeutralBackground1)"
               : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))";
             const rowBackground = heatmapSelected ? "var(--colorPaletteGreenBackground1)" : baseBackground;
-            const selectedBackground = "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))";
             return (
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
@@ -2256,7 +2256,7 @@ export function ImageTab({
                      compact={column.kind === "thumbnail"}
                      stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
                      stickyBackground={column.kind === "idx" && i === current ? baseBackground
-                       : i === current ? selectedBackground : rowBackground}
+                     : i === current ? IMAGE_TABLE_SELECTED_BACKGROUND : rowBackground}
                      selected={column.kind === "idx" && i === current}
                      selectedBody={column.kind !== "idx" && i === current}
                      selectedOutlineStart={column.kind === "thumbnail"}
@@ -2312,9 +2312,10 @@ export function ImageTab({
         type="button"
         className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border shadow-md transition-transform hover:scale-105"
         style={{
-          background: "var(--colorBrandBackground)",
-          color: "var(--colorNeutralForegroundOnBrand)",
+          background: IMAGE_TABLE_SELECTED_BACKGROUND,
+          color: "var(--colorBrandForeground1)",
           borderColor: "var(--colorBrandStroke1)",
+          opacity: 0.7,
         }}
         aria-label={selectedRowVisible ? "返回第一行" : "定位到选中项"}
         title={selectedRowVisible ? "返回第一行" : "定位到选中项"}
