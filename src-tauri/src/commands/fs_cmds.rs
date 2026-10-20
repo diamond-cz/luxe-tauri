@@ -4,6 +4,48 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, AppResult};
 
+/// Resolve a dropped Windows shortcut to the file it points to. Native drag
+/// and drop reports the `.lnk` file itself, while the parsers need the target.
+#[tauri::command]
+pub fn resolve_dropped_path(path: String) -> AppResult<String> {
+    let input = Path::new(&path);
+    if !input.is_file() {
+        return Err(AppError::NotFound(format!("path: {path}")));
+    }
+    #[cfg(windows)]
+    {
+        if input.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("lnk")) == Some(true) {
+            return resolve_windows_shortcut(input).ok_or_else(|| AppError::NotFound(format!("shortcut target: {path}")));
+        }
+    }
+    Ok(path)
+}
+
+#[cfg(windows)]
+fn resolve_windows_shortcut(path: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+    unsafe {
+        let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let result = (|| {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+            let persist: IPersistFile = link.cast().ok()?;
+            let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+            let mut target = [0u16; 32768];
+            link.GetPath(&mut target, std::ptr::null_mut(), 0).ok()?;
+            let end = target.iter().position(|value| *value == 0).unwrap_or(target.len());
+            let resolved = String::from_utf16_lossy(&target[..end]);
+            (!resolved.is_empty()).then_some(resolved)
+        })();
+        if initialized { CoUninitialize(); }
+        result
+    }
+}
+
 /// Return the app config directory (parent of state.toml).
 #[tauri::command]
 pub fn get_config_dir(app: AppHandle) -> AppResult<String> {

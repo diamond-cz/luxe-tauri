@@ -4,6 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { resolveDroppedPath } from "@/ipc/shell";
 
 interface Props {
   cppFileHint: string;
@@ -54,8 +55,9 @@ export function MtkPickerBar(props: Props) {
           setHoverValid(null);
           lastHoverValidRef.current = null;
           if (!slot || payload.paths.length === 0) return;
-          const path = payload.paths.find((p) => matchExt(p, CPP_EXTS));
-          if (path) props.onCppPathChange(path);
+          void resolveDropCandidate(payload.paths).then((path) => {
+            if (path) props.onCppPathChange(path);
+          }).catch((error) => console.warn("resolve dropped MTK path failed", error));
         }
       });
       if (disposed) stop();
@@ -201,8 +203,21 @@ function matchExt(path: string, exts: string[]): boolean {
   return exts.includes(lower.slice(dot + 1));
 }
 
+async function resolveDropCandidate(paths: string[]): Promise<string | null> {
+  for (const path of paths) {
+    if (!matchExt(path, CPP_EXTS) && !path.toLowerCase().endsWith(".lnk")) continue;
+    try {
+      const resolved = await resolveDroppedPath(path);
+      if (matchExt(resolved, CPP_EXTS)) return resolved;
+    } catch (error) {
+      console.warn("resolve dropped path failed", error);
+    }
+  }
+  return null;
+}
+
 function classify(slot: NonNullable<Slot>, paths: string[]): "ok" | "bad" {
   if (paths.length === 0) return "bad";
-  if (slot === "cpp") return paths.some((p) => matchExt(p, CPP_EXTS)) ? "ok" : "bad";
+  if (slot === "cpp") return paths.some((p) => matchExt(p, CPP_EXTS) || p.toLowerCase().endsWith(".lnk")) ? "ok" : "bad";
   return "bad";
 }

@@ -59,3 +59,6 @@ export const isFile = (path: string) =>
 
 export const ensureDirectory = (path: string) =>
   call<string>("ensure_directory", { path });
+
+export const resolveDroppedPath = (path: string) =>
+  call<string>("resolve_dropped_path", { path });

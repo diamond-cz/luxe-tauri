@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Eye20Regular, EyeOff20Regular, Search24Regular } from "@fluentui/react-icons";
 import { loadImageTomlSections, type ImageTomlSection } from "@/ipc/imageScan";
+import type { WorkspaceSession } from "../workspaceSession";
 
 const ROW_HEIGHT = 38;
 const OVERSCAN = 8;
@@ -8,12 +9,13 @@ const EXIF_HEADER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 
 const EXIF_KEY_BACKGROUND = "color-mix(in srgb, var(--colorNeutralBackground2) 45%, var(--colorNeutralBackground1))";
 const EXIF_SELECTED_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 45%, var(--colorNeutralBackground1))";
 
-export function ExifTable({ tomlPath }: { tomlPath: string | null }) {
+export function ExifTable({ tomlPath, session }: { tomlPath: string | null; session: WorkspaceSession }) {
   const [loaded, setLoaded] = useState<{ path: string; sections: ImageTomlSection[]; error: string | null } | null>(null);
   const [selectedName, setSelectedName] = useState("");
   const [query, setQuery] = useState("");
   const [keyColumnRatio, setKeyColumnRatio] = useState(50);
-  const [showHeader, setShowHeader] = useState(true);
+  const [, forceRender] = useState(0);
+  const showHeader = session.exifShowHeader;
 
   useEffect(() => {
     if (!tomlPath) return;
@@ -60,6 +62,14 @@ export function ExifTable({ tomlPath }: { tomlPath: string | null }) {
           aria-invalid={Boolean(search.error)}
           className="min-w-0 flex-1 bg-transparent text-[11px] outline-none"
           style={{ color: "var(--colorNeutralForeground2)", caretColor: "var(--colorBrandForeground1)" }} />
+        <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded"
+          aria-label={showHeader ? "隐藏 KEY 和 VALUE 表头" : "显示 KEY 和 VALUE 表头"}
+          title={showHeader ? "隐藏 KEY 和 VALUE 表头" : "显示 KEY 和 VALUE 表头"}
+          aria-pressed={showHeader}
+          onClick={() => { session.exifShowHeader = !showHeader; forceRender((value) => value + 1); }}
+          style={{ color: "var(--colorNeutralForeground2)", background: "transparent" }}>
+          {showHeader ? <Eye20Regular aria-hidden="true" /> : <EyeOff20Regular aria-hidden="true" />}
+        </button>
       </div>
       <div className="flex h-9 shrink-0 items-stretch border-b px-2"
         style={{ borderColor: "var(--colorNeutralStroke2)", background: EXIF_HEADER_BACKGROUND }}>
@@ -75,13 +85,6 @@ export function ExifTable({ tomlPath }: { tomlPath: string | null }) {
             </button>
           ))}
         </div>
-        <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded"
-          aria-label={showHeader ? "隐藏 KEY 和 VALUE 表头" : "显示 KEY 和 VALUE 表头"}
-          title={showHeader ? "隐藏 KEY 和 VALUE 表头" : "显示 KEY 和 VALUE 表头"}
-          aria-pressed={showHeader} onClick={() => setShowHeader((value) => !value)}
-          style={{ color: "var(--colorNeutralForeground2)", background: "transparent" }}>
-          {showHeader ? <Eye20Regular aria-hidden="true" /> : <EyeOff20Regular aria-hidden="true" />}
-        </button>
       </div>
       {selected ? <ExifRows key={`${tomlPath}:${selected.name}:${query}`} fields={selected.fields}
           keyColumnRatio={keyColumnRatio} onKeyColumnRatioChange={setKeyColumnRatio} showHeader={showHeader} />

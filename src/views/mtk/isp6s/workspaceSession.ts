@@ -11,6 +11,7 @@ export interface WorkspaceSession {
   selectedToml: { dir: string; path: string; data: Record<string, string> } | null;
   imageScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
+  exifShowHeader: boolean;
   detailsScroll: Partial<Record<DetailsTab, ScrollPosition>>;
   sourceScroll: Record<string, ScrollPosition>;
   toneSourceSize: number;
@@ -42,6 +43,7 @@ export function workspaceSession(key: string): WorkspaceSession {
     selectedToml: null,
     imageScroll: null,
     detailsTab: "normal",
+    exifShowHeader: true,
     detailsScroll: {},
     sourceScroll: {},
     toneSourceSize: 40,

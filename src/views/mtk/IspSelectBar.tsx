@@ -8,6 +8,7 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { ToastKind } from "@/components/common/Toast";
 import { ISP_LIST, ISP_TABS, type IspId, type IspTab } from "./ispTabs";
+import { resolveDroppedPath } from "@/ipc/shell";
 
 interface Props {
   isp: IspId;
@@ -135,13 +136,14 @@ export function IspSelectBar({
           dropPathsRef.current = [];
           updateDropState(null, []);
           if (!slot || classifyPickerDrop(slot, payload.paths) !== "ok") return;
-          if (slot === "cpp") {
-            const path = payload.paths.find((item) => matchExt(item, CPP_EXTS));
-            if (path) onCppPathChange(path);
-          } else {
-            const path = payload.paths.find(isDebugParserPath);
-            if (path) onDebugParserPathChange(path);
-          }
+          void (async () => {
+            const path = await resolveDropCandidate(payload.paths, slot === "cpp"
+              ? (item) => matchExt(item, CPP_EXTS)
+              : isDebugParserPath);
+            if (!path) return;
+            if (slot === "cpp") onCppPathChange(path);
+            else onDebugParserPathChange(path);
+          })().catch((error) => console.warn("resolve dropped picker path failed", error));
         }
       });
       if (cancelled) stopListening();
@@ -562,9 +564,26 @@ function matchExt(path: string, exts: string[]): boolean {
   return exts.includes(lower.slice(dot + 1));
 }
 
+function isShortcutPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".lnk");
+}
+
+async function resolveDropCandidate(paths: string[], predicate: (path: string) => boolean): Promise<string | null> {
+  for (const path of paths) {
+    if (!predicate(path) && !isShortcutPath(path)) continue;
+    try {
+      const resolved = await resolveDroppedPath(path);
+      if (predicate(resolved)) return resolved;
+    } catch (error) {
+      console.warn("resolve dropped path failed", error);
+    }
+  }
+  return null;
+}
+
 function classifyCppDrop(paths: string[]): "ok" | "bad" {
   if (paths.length === 0) return "bad";
-  return paths.some((path) => matchExt(path, CPP_EXTS)) ? "ok" : "bad";
+  return paths.some((path) => matchExt(path, CPP_EXTS) || isShortcutPath(path)) ? "ok" : "bad";
 }
 
 function isDebugParserPath(path: string): boolean {
@@ -573,5 +592,5 @@ function isDebugParserPath(path: string): boolean {
 
 function classifyPickerDrop(slot: Exclude<PickerSlot, null>, paths: string[]): "ok" | "bad" {
   if (slot === "cpp") return classifyCppDrop(paths);
-  return paths.some(isDebugParserPath) ? "ok" : "bad";
+  return paths.some((path) => isDebugParserPath(path) || isShortcutPath(path)) ? "ok" : "bad";
 }

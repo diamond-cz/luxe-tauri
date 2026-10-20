@@ -101,10 +101,8 @@ git push origin vX.Y.Z
 
 | 工作流                                                   | 触发与行为                                                                       |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送、收到 Star 或手动运行；检查版本、发布脚本、前端和 Rust。仅 Markdown 变更跳过 |
+| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。仅 Markdown 变更跳过 |
 | [Publish Windows release](.github/workflows/release.yml) | 推送`v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布        |
-
-仓库收到新的 GitHub Star 时，`Validate changes` 会启动 Windows 编译与测试。Star 触发的任务按用户排队，避免短时间内的多个 Star 互相取消；取消 Star 后再次点 Star 不会产生新的 `started` 事件。
 
 发布任务固定 Node.js 22、Rust 1.95.0，复用 npm/Rust 依赖缓存，并按以下顺序执行：
 
