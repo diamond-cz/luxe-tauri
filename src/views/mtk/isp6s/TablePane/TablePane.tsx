@@ -4,6 +4,8 @@ import { Button } from "@fluentui/react-components";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
+  ArrowLeft24Regular,
+  ArrowRight24Regular,
   TableCellCenterSearch24Regular,
   Image24Regular,
   ImageMultiple24Regular,
@@ -78,7 +80,7 @@ interface Props {
   selectedHeatmapPaths: string[];
   onVisibleHeatmapPathsChange?: (entries: ImageEntry[], paths: string[] | null) => void;
   imageDir:  string | null;
-  onPickImage: (idx: number) => void;
+  onPickImage: (idx: number, options?: { preserveHeatmapSelection?: boolean }) => void;
   onImageDirChange: (dir: string) => void;
   imageSearchQuery: string;
   imageSearchError: string | null;
@@ -297,6 +299,28 @@ export function TablePane({
   const [parseProgress, setParseProgress] = useState<{ done: number; total: number; error?: string } | null>(null);
   const [applyPending, setApplyPending] = useState(false);
 
+  // 热力图命中选择只记录 TOML 路径。标题栏按钮通过同一顺序切换当前图片，
+  // 不会改变热力图的多选集合。
+  const selectedImageIndexes = useMemo(
+    () => selectedHeatmapPaths
+      .map((path) => entries.findIndex((entry) => entry.toml_path === path))
+      .filter((index): index is number => index >= 0),
+    [entries, selectedHeatmapPaths],
+  );
+  const selectedCurrentPosition = selectedImageIndexes.indexOf(current);
+  const canNavigateSelectedImages = selectedImageIndexes.length > 1;
+  const pickRelativeSelectedImage = (delta: -1 | 1) => {
+    if (!canNavigateSelectedImages) return;
+    const position = selectedCurrentPosition >= 0
+      ? selectedCurrentPosition
+      : delta > 0 ? -1 : 0;
+    const nextPosition = (position + delta + selectedImageIndexes.length) % selectedImageIndexes.length;
+    const nextIndex = selectedImageIndexes[nextPosition];
+    if (nextIndex !== undefined) {
+      onPickImage(nextIndex, { preserveHeatmapSelection: true });
+    }
+  };
+
   useEffect(() => {
     setAppliedCalculatorSourcePath(null);
     setApplyAllVersion(0);
@@ -387,9 +411,32 @@ export function TablePane({
           <ImageMultiple24Regular className="h-4 w-4 shrink-0" aria-hidden="true" style={{ color: "var(--colorBrandForeground1)" }} />
           <span className="truncate">图片列表卡片</span>
           {selectedHeatmapPaths.length > 0 && (
-            <span style={{ color: "var(--colorPaletteGreenForeground1)", whiteSpace: "nowrap" }}>
-              已选中 {selectedHeatmapPaths.length} 张
-            </span>
+            <div className="flex items-center gap-1" style={{ color: "var(--colorPaletteGreenForeground1)" }}>
+              <span style={{ whiteSpace: "nowrap" }}>
+                已选中 {selectedHeatmapPaths.length}
+                {selectedCurrentPosition >= 0 ? `(:${selectedCurrentPosition + 1})` : ""} 张
+              </span>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowLeft24Regular className="h-3.5 w-3.5" />}
+                disabled={!canNavigateSelectedImages}
+                onClick={() => pickRelativeSelectedImage(-1)}
+                aria-label="上一个已选图片"
+                title="上一个已选图片"
+                style={{ width: 22, minWidth: 22, height: 22, padding: 0 }}
+              />
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight24Regular className="h-3.5 w-3.5" />}
+                disabled={!canNavigateSelectedImages}
+                onClick={() => pickRelativeSelectedImage(1)}
+                aria-label="下一个已选图片"
+                title="下一个已选图片"
+                style={{ width: 22, minWidth: 22, height: 22, padding: 0 }}
+              />
+            </div>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -451,7 +498,6 @@ export function TablePane({
           aria-label="搜索图片名称"
           maxLength={200}
           aria-invalid={Boolean(imageSearchError)}
-          title={imageSearchError ?? "输入图片名称后按 Enter 搜索"}
           className="min-w-0 flex-1 bg-transparent text-[11px] outline-none"
           style={{
             color: "var(--colorNeutralForeground2)",

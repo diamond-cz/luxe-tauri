@@ -202,7 +202,7 @@ export function Isp6sAeVisual({
 
   /* Image switching is driven by TablePane row clicks; folder selection also
    * lives in the image-list card. */
-  const onPickImage = async (idx: number) => {
+  const onPickImage = async (idx: number, options?: { preserveHeatmapSelection?: boolean }) => {
     if (idx < 0 || idx >= imageDir.entries.length) return;
     const selectedEntry = imageDir.entries[idx];
     session.imageDir = imageDir.dir;
@@ -213,7 +213,9 @@ export function Isp6sAeVisual({
       return current?.dir === imageDir.dir && current.current === idx
         && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
     };
-    setHeatmapSelection(null);
+    // 普通点击图片时清除热力图筛选；标题栏的上一张/下一张导航会显式保留
+    // 当前命中集合，避免切换当前图片时把多选状态一并清空。
+    if (!options?.preserveHeatmapSelection) setHeatmapSelection(null);
     const cachedToml = session.selectedToml?.dir === imageDir.dir
       && session.selectedToml.path === selectedEntry.toml_path
       ? session.selectedToml.data : null;
