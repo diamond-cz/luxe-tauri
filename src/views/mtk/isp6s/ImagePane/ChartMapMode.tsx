@@ -1004,11 +1004,11 @@ export function ChartMapMode({
       const dr = parseFiniteNumber(readTomlValue(data, drKey));
       const nsProb = parseFiniteNumber(readTomlValue(data, NS_PROB_KEY));
       const faceProb = parseFiniteNumber(readFirstTomlValue(data, FACE_PROB_KEYS));
-      const faceSzRaw = parseFiniteNumber(readTomlValue(data, FACE_FLT_FDSZ_KEY));
+      const faceSz = parseFiniteNumber(readTomlValue(data, FACE_FLT_FDSZ_KEY));
       const fddrKey = tab === "Face_FLT" ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY;
       const fddr = parseFiniteNumber(readTomlValue(data, fddrKey));
-      return [bv, faceProb, faceSzRaw, fddr].some(Number.isFinite)
-        ? [{ path: entry.toml_path, bv, dr, nsProb, faceProb, faceSz: faceSzRaw / 100, fddr }]
+      return [bv, faceProb, faceSz, fddr].some(Number.isFinite)
+        ? [{ path: entry.toml_path, bv, dr, nsProb, faceProb, faceSz, fddr }]
         : [];
     });
   }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey, tab]);
@@ -6279,7 +6279,7 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const { bv, dr, cwv, fdy, nsProb, normalTarget, oeSys, exifThreshold, fltMode } = input;
   const fddrRa = selectFaceFddrRa(source?.fddrRa ?? null, input.fddr).result;
   const faceWeight = fltMode
-    ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz / 100).result
+    ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz).result
     : input.faceProb;
   const exifWeight = fltMode ? input.exifFdszRa : input.faceProb;
   const oethInterpolated = source ? interpolateFaceBvDrTableSource(source.oeth, bv, dr) : NaN;
@@ -7137,9 +7137,10 @@ function FaceFdszTableCard({
     label, path, values: [], fields: [],
   }));
   const columnCount = Math.max(1, ...rows.map((row) => row.values.length));
-  const faceSz = parseFiniteNumber(fdszValue) / 100;
-  const { axis, points, result } = selectFaceFddrRa(source, faceSz);
-  const activeColumns = selectFaceProbActiveColumns(faceSz, axis, points);
+  const faceSz = parseFiniteNumber(fdszValue);
+  const { points, result } = selectFaceFddrRa(source, faceSz);
+  // 高亮实际参与插值的列；超出表格范围时只命中对应的端点列。
+  const activeColumns = new Set(points.map((point) => point.index));
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
   const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode("Face_FLT_fdszRa", true);
   const heatmap = useMemo(
