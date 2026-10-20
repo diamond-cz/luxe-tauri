@@ -466,7 +466,7 @@ export function TablePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ImageTab schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
+        <ImageTab key={imageDir ?? ""} schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
           onApplyResult={(result) => {
             setApplyPending(false);
@@ -1013,14 +1013,15 @@ export function ImageTab({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const restoreScrollRef = useRef(scrollPosition);
   const preserveRestoredScrollRef = useRef(Boolean(scrollPosition));
-  const filterMountedRef = useRef(false);
+  const previousKindFilterRef = useRef({ showScene: true, showPortrait: true });
+  const scrollPositionChangeRef = useRef(onScrollPositionChange);
   const tableWindowPathsRef = useRef<string[]>([]);
   const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
   const tableFieldAccessOrderRef = useRef<string[]>([]);
   const tableTomlPathSetRef = useRef<Set<string>>(new Set());
   const loadingTableFieldPathsRef = useRef<Set<string>>(new Set());
   const tableFieldKeySignatureRef = useRef("");
-  const scrollTopRef = useRef(0);
+  const scrollTopRef = useRef(scrollPosition?.top ?? 0);
   const scrollDirectionRef = useRef<1 | -1>(1);
   const lastViewportHeightRef = useRef(0);
   const tableViewportFrameRef = useRef<number | null>(null);
@@ -1144,7 +1145,7 @@ export function ImageTab({
       applyResultRef.current?.({ kind: "success", title: "批量图片计算完成", detail: "已计算并刷新 " + entries.length + " 张图片" });
     }
   }, [allTargets, applyAllVersion, calculatorError, entries.length, parseAllError, parseAllVersion, parsedTomls?.version]);
-  const [scrollTop, setScrollTop] = useState(0);
+  const [scrollTop, setScrollTop] = useState(() => scrollPosition?.top ?? 0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
   const [sortState, setSortState] = useState<ImageSortState | null>(null);
@@ -1168,17 +1169,6 @@ export function ImageTab({
     widths: Record<string, number>;
   } | null>(null);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const saved = restoreScrollRef.current;
-    if (!el || !saved) return;
-    el.scrollTop = saved.top;
-    el.scrollLeft = saved.left;
-    scrollTopRef.current = el.scrollTop;
-    setScrollTop(el.scrollTop);
-    restoreScrollRef.current = null;
-  }, [entries]);
 
   useEffect(() => {
     setShowScene(true);
@@ -1395,6 +1385,37 @@ export function ImageTab({
       return av < bv ? -direction : direction;
     });
   }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, sortControlsEnabled, sortState, sortValues]);
+
+  useLayoutEffect(() => {
+    scrollPositionChangeRef.current = onScrollPositionChange;
+  }, [onScrollPositionChange]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    return () => {
+      // Layout cleanup runs before the viewport is detached. A pending restore
+      // must keep the saved position rather than replace it with an empty view.
+      if (el && !restoreScrollRef.current) {
+        scrollPositionChangeRef.current?.({ top: el.scrollTop, left: el.scrollLeft });
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const saved = restoreScrollRef.current;
+    if (!el || !saved || entries.length === 0 || el.clientHeight === 0) return;
+    const expectedHeight = IMAGE_TABLE_HEADER_HEIGHT + sortedRows.length * IMAGE_TABLE_ROW_HEIGHT;
+    if (el.scrollHeight + 1 < expectedHeight) return;
+
+    el.scrollTop = Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight));
+    el.scrollLeft = saved.left;
+    const restoredPosition = { top: el.scrollTop, left: el.scrollLeft };
+    scrollTopRef.current = restoredPosition.top;
+    setScrollTop((top) => top === restoredPosition.top ? top : restoredPosition.top);
+    restoreScrollRef.current = null;
+    scrollPositionChangeRef.current?.(restoredPosition);
+  }, [entries, sortedRows.length, viewportHeight]);
 
   const currentDisplayIndex = useMemo(
     () => sortedRows.findIndex((row) => row.i === current),
@@ -1637,6 +1658,11 @@ export function ImageTab({
     if (!el) return;
 
     const nextViewportHeight = el.clientHeight;
+    if (restoreScrollRef.current) {
+      lastViewportHeightRef.current = nextViewportHeight;
+      setViewportHeight((prev) => prev === nextViewportHeight ? prev : nextViewportHeight);
+      return;
+    }
     const maxScrollTop = Math.max(0, el.scrollHeight - nextViewportHeight);
     const nextScrollTop = Math.max(0, Math.min(el.scrollTop, maxScrollTop));
     lastViewportHeightRef.current = nextViewportHeight;
@@ -1673,6 +1699,7 @@ export function ImageTab({
     scrollDirectionRef.current = clamped >= scrollTopRef.current ? 1 : -1;
     scrollTopRef.current = clamped;
     el.scrollTop = clamped;
+    scrollPositionChangeRef.current?.({ top: el.scrollTop, left: el.scrollLeft });
     setScrollTop(clamped);
   }
 
@@ -1846,21 +1873,22 @@ export function ImageTab({
   }
 
   useEffect(() => {
-    if (!preserveRestoredScrollRef.current && currentDisplayIndex >= 0) {
+    if (!preserveRestoredScrollRef.current && !restoreScrollRef.current
+      && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT && currentDisplayIndex >= 0) {
       ensureImageTableRowVisible(currentDisplayIndex);
     }
-  }, [currentDisplayIndex]);
+  }, [currentDisplayIndex, viewportHeight]);
 
   useEffect(() => {
-    if (!filterMountedRef.current) {
-      filterMountedRef.current = true;
-      return;
-    }
+    const previous = previousKindFilterRef.current;
+    previousKindFilterRef.current = { showScene, showPortrait };
+    // Effect replay on mount is not a filter change.
+    if (previous.showScene === showScene && previous.showPortrait === showPortrait) return;
+    restoreScrollRef.current = null;
+    preserveRestoredScrollRef.current = false;
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = 0;
-    scrollTopRef.current = 0;
-    setScrollTop(0);
+    setImageTableScrollTop(0);
   }, [showScene, showPortrait]);
 
   useEffect(() => {
@@ -2040,8 +2068,9 @@ export function ImageTab({
         }
       }}
       onScroll={(event) => {
+        if (restoreScrollRef.current) return;
         const nextScrollTop = event.currentTarget.scrollTop;
-        onScrollPositionChange?.({ top: nextScrollTop, left: event.currentTarget.scrollLeft });
+        scrollPositionChangeRef.current?.({ top: nextScrollTop, left: event.currentTarget.scrollLeft });
         scrollDirectionRef.current = nextScrollTop >= scrollTopRef.current ? 1 : -1;
         scrollTopRef.current = nextScrollTop;
         setScrollTop(nextScrollTop);
