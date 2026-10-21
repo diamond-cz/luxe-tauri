@@ -1,5 +1,6 @@
 import { call } from "@/ipc/client";
 import type { Shortcuts, Settings } from "@/types/ipc";
+import { flushStateNow, saveStateSection } from "./stateIo";
 
 /* ---- locales ---- */
 export const getAllLocaleBundles = () =>
@@ -28,18 +29,22 @@ export type CloseDecision = "ask" | "tray" | "quit";
 export const resolveCloseDecision = () =>
   call<CloseDecision>("resolve_close_decision");
 
-export const hideMainWindow = () =>
-  call<void>("hide_main_window");
+export const hideMainWindow = async () => {
+  await flushStateNow();
+  await call<void>("hide_main_window");
+};
 
 export const showMainWindow = () =>
   call<void>("show_main_window");
 
-export const quitApp = () =>
-  call<void>("quit_app");
+export const quitApp = async () => {
+  await flushStateNow();
+  await call<void>("quit_app");
+};
 
 /* ---- settings convenience ---- */
 export const saveSettings = (next: Settings) =>
-  call<void>("save_state_section", { section: "settings", value: next });
+  saveStateSection("settings", next);
 
 /* ---- fs helpers ---- */
 export const getConfigDir = () =>

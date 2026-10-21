@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StateRoot {
+    #[serde(default = "default_last_route")]
+    pub last_route: String,
     #[serde(default)]
     pub main_window:      MainWindow,
     #[serde(default)]
@@ -19,6 +21,7 @@ pub struct StateRoot {
     #[serde(default)]
     pub isp6s_ae_visual:  Isp6sAeVisual,
 }
+fn default_last_route() -> String { "/home".into() }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MainWindow {
@@ -86,6 +89,13 @@ pub struct Mtk {
     #[serde(default)]                         pub cpp_path: Option<String>,
     #[serde(default)]                         pub cpp_paths: BTreeMap<String, String>,
     #[serde(default)]                         pub debug_parser_path: Option<String>,
+    #[serde(default)]                         pub image_workspaces: BTreeMap<String, ImageWorkspace>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageWorkspace {
+    #[serde(default)] pub dir: String,
+    #[serde(default)] pub selected_image: Option<String>,
 }
 fn default_current_isp() -> u32 { 1 }
 

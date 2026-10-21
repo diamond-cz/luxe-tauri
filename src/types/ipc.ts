@@ -37,6 +37,7 @@ export interface Mtk {
   cpp_path?: string | null;
   cpp_paths?: Record<string, string>;
   debug_parser_path?: string | null;
+  image_workspaces?: Record<string, { dir: string; selected_image?: string | null }>;
 }
 
 export interface Isp6sAeVisual {
@@ -70,6 +71,7 @@ export interface Isp6sAeVisual {
 }
 
 export interface StateRoot {
+  last_route?: string;
   main_window:     MainWindow;
   settings:        Settings;
   shortcuts:       Shortcuts;

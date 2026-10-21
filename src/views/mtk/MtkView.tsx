@@ -1,6 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
-import { saveStateSection } from "@/ipc/stateIo";
 import { parseCppFile } from "@/ipc/cppParser";
 import { isFile } from "@/ipc/shell";
 import { scanImageDir, loadImageToml } from "@/ipc/imageScan";
@@ -33,12 +32,7 @@ export function MtkView() {
   const cppRequestId = useRef(0);
   const parserRequestId = useRef(0);
   const imageRequestId = useRef(0);
-
-  useEffect(() => () => {
-    cppRequestId.current += 1;
-    parserRequestId.current += 1;
-    imageRequestId.current += 1;
-  }, []);
+  const imageLoadKey = useRef<string | null>(null);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -46,14 +40,22 @@ export function MtkView() {
   const tabIdx = Math.max(0, Math.min(mtk.current_tab, tabs.length - 1));
   const tab    = tabs[tabIdx];
   const key    = `${ispId}|${tabIdx}`;
+  const imageTabIdx = ispId === "ISP6S" && (tabIdx === 0 || tabIdx === 1) ? 0 : tabIdx;
+  const imageKey = `${ispId}|${imageTabIdx}`;
 
-  /* Debounced persist of MTK nav state. */
-  useEffect(() => {
-    const t = setTimeout(() => {
-      saveStateSection("mtk", mtk).catch((err) => console.warn("save mtk", err));
-    }, 200);
-    return () => clearTimeout(t);
-  }, [mtk]);
+  useEffect(() => () => { cppRequestId.current += 1; }, [key]);
+  useEffect(() => () => { parserRequestId.current += 1; }, []);
+  useEffect(() => () => {
+    imageRequestId.current += 1;
+    const pendingKey = imageLoadKey.current;
+    const pending = pendingKey ? useMtkStore.getState().imageDir[pendingKey] : null;
+    if (pendingKey && (pending?.status === "scanning" || pending?.status === "loading")) {
+      const [isp, tab] = pendingKey.split("|");
+      useMtkStore.getState().setImageDir(isp as IspId, Number(tab), {
+        dir: null, entries: [], current: 0, tomlData: {}, status: "idle",
+      });
+    }
+  }, [imageKey]);
 
   const importsEntry = useMtkStore((s) => s.imports[key]);
   const imports = importsEntry ?? { filePath: null, parsed: null, revision: 0, status: "idle" as const, message: null };
@@ -98,8 +100,6 @@ export function MtkView() {
       });
       restoredCppPaths.current[`${ispId}|${tabIdx}`] = path;
       setCppPath(path, ispId, tabIdx);
-      void saveStateSection("mtk", useMtkStore.getState().mtk)
-        .catch((error) => console.warn("save cpp path", error));
       setToast({
         kind:  "success",
         title: "解析完成",
@@ -127,8 +127,6 @@ export function MtkView() {
       if (requestId !== parserRequestId.current) return;
       restoredParserPath.current = path;
       setDebugParserPath(path);
-      void saveStateSection("mtk", useMtkStore.getState().mtk)
-        .catch((error) => console.warn("save debug parser path", error));
     } catch (error) {
       if (requestId === parserRequestId.current) setToast({ kind: "error", title: "检查 DP 解析工具失败", detail: String(error) });
     }
@@ -145,6 +143,7 @@ export function MtkView() {
     restoredCppPaths.current[key] = path;
     const requestId = ++cppRequestId.current;
     let cancelled = false;
+    let completed = false;
     isFile(path).then(async (valid) => {
       if (cancelled || requestId !== cppRequestId.current) return;
       if (!valid) {
@@ -155,7 +154,10 @@ export function MtkView() {
       setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
       try {
         const parsed = await parseCppFile(path);
-        if (!cancelled && requestId === cppRequestId.current) setImport(ispId, tabIdx, { parsed, status: "done", message: null });
+        if (!cancelled && requestId === cppRequestId.current) {
+          completed = true;
+          setImport(ispId, tabIdx, { parsed, status: "done", message: null });
+        }
       } catch (error) {
         if (cancelled || requestId !== cppRequestId.current) return;
         setImport(ispId, tabIdx, { filePath: null, parsed: null, status: "idle", message: null });
@@ -165,16 +167,22 @@ export function MtkView() {
     }).catch((error) => {
       if (!cancelled && requestId === cppRequestId.current) setToast({ kind: "error", title: "检查参数文件失败", detail: String(error) });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (!completed && restoredCppPaths.current[key] === path) delete restoredCppPaths.current[key];
+    };
   }, [key, mtk.cpp_path, mtk.cpp_paths, ispId, tabIdx, setCppPath, setImport]);
 
   useEffect(() => {
     const path = mtk.debug_parser_path;
     if (!path || restoredParserPath.current === path) return;
     restoredParserPath.current = path;
+    const requestId = ++parserRequestId.current;
     let cancelled = false;
+    let completed = false;
     isFile(path).then((valid) => {
-      if (cancelled) return;
+      if (cancelled || requestId !== parserRequestId.current) return;
+      completed = true;
       if (valid && path.split(/[\\/]/).pop()?.toLowerCase() === "debugparser.exe") {
         setDebugParserPath(path);
       } else {
@@ -182,14 +190,17 @@ export function MtkView() {
         setToast({ kind: "error", title: "上次的 DP 解析工具路径已失效", detail: path });
       }
     }).catch((error) => {
-      if (!cancelled) setToast({ kind: "error", title: "检查 DP 解析工具失败", detail: String(error) });
+      if (!cancelled && requestId === parserRequestId.current) setToast({ kind: "error", title: "检查 DP 解析工具失败", detail: String(error) });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (!completed && restoredParserPath.current === path) restoredParserPath.current = null;
+    };
   }, [mtk.debug_parser_path, setDebugParserPath]);
 
-  const onImageDirChange = async (dir: string) => {
+  const onImageDirChange = useCallback(async (dir: string, selectedImage?: string | null) => {
     const requestId = ++imageRequestId.current;
-    const imageTabIdx = ispId === "ISP6S" && (tabIdx === 0 || tabIdx === 1) ? 0 : tabIdx;
+    imageLoadKey.current = `${ispId}|${imageTabIdx}`;
     const previousDir = useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`]?.dir;
     setImageDir(ispId, imageTabIdx, {
       dir,
@@ -207,12 +218,15 @@ export function MtkView() {
         });
         return;
       }
-      setImageDir(ispId, imageTabIdx, { entries, current: 0, tomlData: {}, status: "loading", message: null });
-      const tomlData = await loadImageToml(entries[0].toml_path).catch((): Record<string, string> => ({}));
+      const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedImage));
+      setImageDir(ispId, imageTabIdx, { entries, current, tomlData: {}, status: "loading", message: null });
+      const tomlData = await loadImageToml(entries[current].toml_path).catch((): Record<string, string> => ({}));
       if (requestId !== imageRequestId.current) return;
+      const latest = useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`];
+      if (latest?.dir !== dir || latest.entries[latest.current]?.jpg_path !== entries[current].jpg_path) return;
       setImageDir(ispId, imageTabIdx, {
         tomlData, status: "done",
-        message: `已加载 ${entries.length} 张图片 · 当前 ${entries[0].name}`,
+        message: `已加载 ${entries.length} 张图片 · 当前 ${entries[current].name}`,
       });
     } catch (e) {
       if (requestId !== imageRequestId.current) return;
@@ -221,7 +235,25 @@ export function MtkView() {
         message: e instanceof Error ? e.message : String(e),
       });
     }
-  };
+  }, [ispId, imageTabIdx, setImageDir]);
+
+  const savedImageDir = mtk.image_workspaces?.[imageKey]?.dir;
+  useEffect(() => {
+    if (!savedImageDir || useMtkStore.getState().imageDir[imageKey]?.dir === savedImageDir) return;
+    const selected = useMtkStore.getState().mtk.image_workspaces?.[imageKey]?.selected_image;
+    void onImageDirChange(savedImageDir, selected);
+    const request = imageRequestId.current;
+    return () => {
+      if (imageRequestId.current === request) {
+        imageRequestId.current += 1;
+        // A cancelled restore must remain eligible when the effect remounts.
+        const current = useMtkStore.getState().imageDir[imageKey];
+        if (current?.status === "scanning" || current?.status === "loading") {
+          setImageDir(ispId, imageTabIdx, { dir: null, entries: [], current: 0, tomlData: {}, status: "idle" });
+        }
+      }
+    };
+  }, [savedImageDir, imageKey, imageTabIdx, ispId, onImageDirChange, setImageDir]);
 
   const isIsp6sWorkspace = ispId === "ISP6S" && (tab.label === "AE Basic" || tab.label === "ToneMap");
   const parsedReady = Boolean(imports.parsed && imports.filePath);

@@ -11,11 +11,20 @@ import type {
 export const loadState = () =>
   call<StateRoot>("load_state");
 
-export const saveStateSection = (section: string, value: unknown) =>
-  call<void>("save_state_section", { section, value });
+let stateWrites: Promise<void> = Promise.resolve();
 
-export const flushStateNow = () =>
-  call<void>("flush_state_now");
+export const saveStateSection = (section: string, value: unknown) => {
+  const pending = stateWrites.catch(() => {}).then(() =>
+    call<void>("save_state_section", { section, value }));
+  stateWrites = pending;
+  return pending;
+};
+
+export const flushStateNow = () => {
+  const pending = stateWrites.then(() => call<void>("flush_state_now"));
+  stateWrites = pending;
+  return pending;
+};
 
 /* -------- window geometry -------- */
 

@@ -11,6 +11,7 @@ import { GlobalTitleTooltip } from "@/components/common/HoverTooltip";
 import { useShellBootstrap } from "@/hooks/useShellBootstrap";
 import { useIdleMemoryTrim } from "@/hooks/useIdleMemoryTrim";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { saveStateSection } from "@/ipc/stateIo";
 
 const HomeView = lazy(() => import("@/views/HomeView").then(({ HomeView }) => ({ default: HomeView })));
 const MtkView = lazy(() => import("@/views/mtk/MtkView").then(({ MtkView }) => ({ default: MtkView })));
@@ -39,12 +40,18 @@ function ShellRoot() {
   const location = useLocation();
   const [askClose, setAskClose] = useState(false);
   const [sideNavVisible, setSideNavVisible] = useState(true);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
   const onNavigate         = useCallback((path: string) => navigate(path), [navigate]);
   const onRequestCloseAsk  = useCallback(() => setAskClose(true), []);
   const toggleSideNav = useCallback(() => setSideNavVisible((visible) => !visible), []);
 
-  useShellBootstrap({ onNavigate, onRequestCloseAsk });
+  useShellBootstrap({ onNavigate, onRequestCloseAsk, onReady: () => setBootstrapped(true) });
+  useEffect(() => {
+    if (bootstrapped) {
+      void saveStateSection("last_route", location.pathname).catch((error) => console.warn("save route", error));
+    }
+  }, [bootstrapped, location.pathname]);
   useIdleMemoryTrim();
 
   const themeKey = useSettingsStore((s) => s.settings.theme);

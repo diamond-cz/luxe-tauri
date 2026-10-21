@@ -7,6 +7,7 @@ import {
   currentAvailRect,
   applyWindowGeometry,
   saveWindowGeometry,
+  saveStateSection,
 } from "@/ipc/stateIo";
 import {
   fetchPoetry,
@@ -39,6 +40,7 @@ interface ShellHandlers {
   onNavigate?: (path: string) => void;
   onRequestCloseAsk?: () => void; // open the "remember choice" dialog
   onPoetryChanged?: (line: string) => void;
+  onReady?: () => void;
 }
 
 /**
@@ -70,7 +72,18 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       setSettings(root.settings);
       setShortcuts(root.shortcuts);
       useMtkStore.setState((s) => { s.mtk = root.mtk; });
+      // The backend already debounces disk writes. Submit path changes now,
+      // even when the user leaves MTK or exits before a UI timer could fire.
+      unlisteners.push(useMtkStore.subscribe((next, previous) => {
+        if (next.mtk !== previous.mtk) {
+          void saveStateSection("mtk", next.mtk).catch((error) => console.warn("save mtk", error));
+        }
+      }));
       useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
+      const route = ["/home", "/mtk", "/qualcomm", "/unisoc", "/settings"].includes(root.last_route ?? "")
+        ? root.last_route! : "/home";
+      handlersRef.current.onNavigate?.(route);
+      handlersRef.current.onReady?.();
       void win.show().catch((err) => console.warn("show main window failed", err));
 
       /* 2. Load translations without delaying the first visible frame. */

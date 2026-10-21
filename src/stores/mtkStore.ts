@@ -76,6 +76,15 @@ export const useMtkStore = create<MtkState>()(
     setImageDir: (isp, tabIdx, patch) => set((s) => {
       const key = `${isp}|${tabIdx}`;
       s.imageDir[key] = { ...(s.imageDir[key] ?? DEFAULT_IMAGE_DIR), ...patch };
+      const image = s.imageDir[key];
+      if (image.dir && (image.status === "done" || (image.status === "loading" && image.entries[image.current]))) {
+        s.mtk.image_workspaces ??= {};
+        const selected = image.entries[image.current]?.jpg_path ?? null;
+        const saved = s.mtk.image_workspaces[key];
+        if (saved?.dir !== image.dir || saved.selected_image !== selected) {
+          s.mtk.image_workspaces[key] = { dir: image.dir, selected_image: selected };
+        }
+      }
     }),
   })),
 );

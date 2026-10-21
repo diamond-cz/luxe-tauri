@@ -19,6 +19,10 @@ src-tauri/gen/
 Thumbs.db
 
 # Local config
+/resources/state.toml
+/resources/state.toml.tmp
+/src-tauri/resources/state.toml
+/src-tauri/resources/state.toml.tmp
 .env
 .env.local
 .tauri-updater.key

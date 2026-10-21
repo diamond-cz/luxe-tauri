@@ -39,10 +39,10 @@ fn b2d_b2m_columns_are_exposed_in_the_frontend_schema() {
     let json = serde_json::to_value(&schema).unwrap();
     assert_eq!(json["Image"]["B2D"], "AE_TAG_DRV6_B2D");
     assert_eq!(json["Image"]["B2M"], "AE_TAG_DRV6_B2M");
-    for kind in ["scene", "portrait"] {
-        assert_eq!(json["image_table"][kind]["B2D"], "AE_TAG_DRV6_B2D");
-        assert_eq!(json["image_table"][kind]["B2M"], "AE_TAG_DRV6_B2M");
-    }
+    assert_eq!(json["image_table"]["scene"]["B2D"], "AE_TAG_DRV6_B2D");
+    assert_eq!(json["image_table"]["scene"]["B2M"], "AE_TAG_DRV6_B2M");
+    assert!(json["image_table"]["portrait"].get("B2D").is_none());
+    assert!(json["image_table"]["portrait"].get("B2M").is_none());
     let columns: Vec<_> = schema.image.keys().map(String::as_str).collect();
     assert!(columns.ends_with(&["FdMinCWR", "B2D", "B2M"]));
 }

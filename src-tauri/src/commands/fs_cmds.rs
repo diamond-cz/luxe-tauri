@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use tauri::{AppHandle, Manager};
+use tauri::State;
+use crate::state::AppState;
 
 use crate::error::{AppError, AppResult};
 
@@ -46,13 +47,11 @@ fn resolve_windows_shortcut(path: &Path) -> Option<String> {
     }
 }
 
-/// Return the app config directory (parent of state.toml).
+/// Return the directory containing the active state.toml.
 #[tauri::command]
-pub fn get_config_dir(app: AppHandle) -> AppResult<String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|err| AppError::Path(err.to_string()))?;
+pub fn get_config_dir(state: State<'_, AppState>) -> AppResult<String> {
+    let dir = state.state_store.path.parent()
+        .ok_or_else(|| AppError::Path("state.toml has no parent directory".into()))?;
     Ok(dir.to_string_lossy().into_owned())
 }
 

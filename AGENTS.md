@@ -2,7 +2,7 @@
 
 ## 内存与 CPU 性能约定
 
-新增图片预览、解析缓存、观察器或后台任务前，先阅读 `MEMORY_RECOVERY.md`。沿用已有的缓存预算、过期请求隔离、卸载清理和 `trimMemory` 入口；尺寸监听仅在测量值变化时更新 React 状态。性能问题按宿主、WebView2 browser、renderer、GPU 进程分别测量，不以任务管理器的应用汇总值推断根因。
+新增图片预览、解析缓存、观察器或后台任务前，先阅读 [性能维护约定](docs/performance/MEMORY_RECOVERY.md)。沿用已有的缓存预算、过期请求隔离、卸载清理和 `trimMemory` 入口；尺寸监听仅在测量值变化时更新 React 状态。性能问题按宿主、WebView2 browser、renderer、GPU 进程分别测量，不以任务管理器的应用汇总值推断根因。
 
 ## 项目结构与模块组织
 
@@ -16,6 +16,7 @@
 - `src-tauri/src/` 存放 Rust 后端逻辑，包括命令、配置解析、托盘、窗口和业务模块。
 - `src-tauri/resources/` 存放随应用打包的 TOML 表和翻译 JSON。
 - `src-tauri/tests/` 存放 Rust 集成测试。
+- `docs/` 存放功能与性能维护文档，入口为 `docs/README.md`；新增专题文档按领域归档，并同步维护索引。
 
 ## 构建、测试与开发命令
 
