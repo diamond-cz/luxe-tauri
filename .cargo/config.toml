@@ -1,0 +1,4 @@
+# Keep native CMake dependencies on the Visual Studio version used by the
+# project toolchain. CMake 3.30 cannot generate projects for VS 18 2026.
+[env]
+CMAKE_GENERATOR = "Visual Studio 17 2022"
