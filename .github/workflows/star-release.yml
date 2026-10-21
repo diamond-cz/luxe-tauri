@@ -179,7 +179,7 @@ jobs:
 
           # Remove only previous Star-generated installers after the new
           # manifest and its referenced package have been verified.
-          $stale = @($release.assets | Where-Object { $_.name -match '^LUXE_\d+\.\d+\.\d+-star\.\d+_x64' -and $_.name -notin @((Split-Path -Leaf $env:ASSET1), (Split-Path -Leaf $env:ASSET2), (Split-Path -Leaf $env:ASSET3)) })
+          $stale = @($release.assets | Where-Object { $_.name -match '^LUXE_\d+\.\d+\.\d+(?:-star\.\d+|-\d+)_x64' -and $_.name -notin @((Split-Path -Leaf $env:ASSET1), (Split-Path -Leaf $env:ASSET2), (Split-Path -Leaf $env:ASSET3)) })
           foreach ($asset in $stale) {
             gh release delete-asset $env:RELEASE_TAG $asset.name --yes
             if ($LASTEXITCODE -ne 0) { throw "Could not remove stale Star asset $($asset.name)" }

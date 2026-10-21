@@ -16,6 +16,8 @@ import {
   DocumentData24Regular,
   CalculatorArrowClockwise24Regular,
   Search24Regular,
+  ChevronLeft24Regular,
+  ChevronRight24Regular,
 } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -514,7 +516,7 @@ export function TablePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ImageTab key={imageDir ?? ""} schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} calculatorSourcePath={appliedCalculatorSourcePath}
+        <ImageTab key={imageDir ?? ""} schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} directoryName={getPathBaseName(imageDir ?? "")} calculatorSourcePath={appliedCalculatorSourcePath}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
           onApplyResult={(result) => {
             setApplyPending(false);
@@ -1034,7 +1036,7 @@ function ImageTableHoverPreview({ scrollRef }: { scrollRef: RefObject<HTMLDivEle
 }
 
 export function ImageTab({
-  schema, toneMode = false, filePath, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
+  schema, toneMode = false, filePath, directoryName, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
   entries, current, selectedHeatmapPaths, onPick, onVisibleHeatmapPathsChange,
   imageDataRevision = 0,
   scrollPosition,
@@ -1043,6 +1045,7 @@ export function ImageTab({
   schema:   Isp6sSchemaRoot;
   toneMode?: boolean;
   filePath: string | null;
+  directoryName: string;
   cppImportRevision: number;
   calculatorSourcePath?: string | null;
   parseAllVersion?: number;
@@ -1200,6 +1203,7 @@ export function ImageTab({
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
+  const [nameColumnCollapsed, setNameColumnCollapsed] = useState(false);
   const [showScene, setShowScene] = useState(true);
   const [showPortrait, setShowPortrait] = useState(true);
   const [imageKinds, setImageKinds] = useState<{
@@ -2041,9 +2045,9 @@ export function ImageTab({
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
   const nameColumnWidth = useMemo(() => entries.reduce(
-    (width, entry) => Math.max(width, estimateImageColumnTextWidth(entry.name)),
-    estimateImageColumnTextWidth("FileName") + (sortControlsEnabled ? 16 : 0),
-  ), [entries, sortControlsEnabled]);
+    (width, entry) => Math.max(width, Math.min(2000, estimateImageColumnTextWidth(entry.name))),
+    Math.max(estimateImageColumnTextWidth(directoryName) + 32, 160),
+  ), [directoryName, entries]);
   const fullColumnWidths = measuredColumnWidths?.entries === entries
     && measuredColumnWidths.keySignature === imageTomlKeySignature
     && measuredColumnWidths.revision === imageDataRevision
@@ -2057,7 +2061,7 @@ export function ImageTab({
         continue;
       }
       if (column.kind === "name") {
-        byId[column.id] = nameColumnWidth;
+        byId[column.id] = nameColumnCollapsed ? 48 : nameColumnWidth;
         continue;
       }
       const minWidth = column.kind === "idx" ? 34 : 52;
@@ -2077,20 +2081,21 @@ export function ImageTab({
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnCollapsed, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       const fallback = baseColumnWidths.byId[column.id] ?? 72;
-      const width = columnWidthOverrides[column.id] ?? fallback;
+      const width = column.id === "name" && nameColumnCollapsed
+        ? 48 : columnWidthOverrides[column.id] ?? fallback;
       byId[column.id] = width;
     }
     return {
       byId,
       table: displayedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
     };
-  }, [baseColumnWidths, columnWidthOverrides, displayedColumns, tableColumns]);
+  }, [baseColumnWidths, columnWidthOverrides, displayedColumns, nameColumnCollapsed, tableColumns]);
 
   const startColumnResize = (column: string, initialWidth: number, minWidth: number) =>
     (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -2099,7 +2104,8 @@ export function ImageTab({
 
       const startX = event.clientX;
       const onMove = (moveEvent: PointerEvent) => {
-        const nextWidth = Math.max(minWidth, Math.min(640, initialWidth + moveEvent.clientX - startX));
+        const maxWidth = column === "name" ? 2000 : 640;
+        const nextWidth = Math.max(minWidth, Math.min(maxWidth, initialWidth + moveEvent.clientX - startX));
         setColumnWidthOverrides((current) => ({ ...current, [column]: nextWidth }));
       };
       const onUp = () => {
@@ -2165,7 +2171,7 @@ export function ImageTab({
                 : column.kind === "thumbnail"
                   ? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH
                   : column.kind === "name"
-                    ? 120
+                    ? 160
                     : 52;
               return (
                 <Th
@@ -2175,12 +2181,10 @@ export function ImageTab({
                   dragOver={dragOverColumnId === column.id}
                   stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
                   onPointerDown={column.kind === "idx" || column.kind === "thumbnail" ? undefined : startImageTableColumnDrag(column.id)}
-                  onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
+                  onResizeStart={column.kind === "name" && nameColumnCollapsed ? undefined : startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
                 >
                   {column.kind === "idx" ? (
-                    <HoverTooltip content="IDX 原始顺序" positioning="below-center" inline>
-                      <span>idx</span>
-                    </HoverTooltip>
+                    <span>idx</span>
                   ) : column.kind === "thumbnail" ? (
                     <span className="inline-flex items-center justify-center gap-1">
                       <button
@@ -2211,11 +2215,18 @@ export function ImageTab({
                       </button>
                     </span>
                   ) : column.kind === "name" ? (
-                    <ImageSortToggleHeader
-                      enabled={sortControlsEnabled}
-                      onToggle={toggleImageSortControls}
-                      label={column.label}
-                    />
+                    <div className="relative flex w-full items-center justify-center">
+                      <button type="button" className="absolute left-0.5 inline-flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90"
+                        style={{ color: "var(--colorNeutralForeground2)" }}
+                        title={nameColumnCollapsed ? "展开 FILENAME 列" : "折叠 FILENAME 列"}
+                        aria-label={nameColumnCollapsed ? "展开 FILENAME 列" : "折叠 FILENAME 列"}
+                        aria-expanded={!nameColumnCollapsed}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); setNameColumnCollapsed((value) => !value); }}>
+                        {nameColumnCollapsed ? <ChevronRight24Regular className="h-4 w-4" /> : <ChevronLeft24Regular className="h-4 w-4" />}
+                      </button>
+                      {!nameColumnCollapsed && <span className="max-w-full truncate px-7 font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>}
+                    </div>
                   ) : column.kind !== "extra" ? (
                     column.label
                   ) : sortControlsEnabled ? (
@@ -2276,7 +2287,16 @@ export function ImageTab({
                      title={column.kind === "name" ? e.name : undefined}
                    >
                      {column.kind === "idx"
-                       ? i + 1
+                       ? <button
+                           type="button"
+                           className="inline-flex min-w-6 items-center justify-center rounded px-1 py-0.5 transition-[background-color,transform] duration-100 hover:bg-black/10 active:scale-90"
+                           style={{ color: sortControlsEnabled ? "var(--colorBrandForeground1)" : "inherit" }}
+                           title={sortControlsEnabled ? "关闭其他列排序" : "开启其他列排序"}
+                           aria-label={sortControlsEnabled ? "关闭其他列排序" : "开启其他列排序"}
+                           aria-pressed={sortControlsEnabled}
+                           onPointerDown={(event) => event.stopPropagation()}
+                           onClick={toggleImageSortControls}
+                         >{i + 1}</button>
                        : column.kind === "thumbnail"
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
@@ -2762,47 +2782,6 @@ function parseImageSortNumber(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function ImageSortToggleHeader({
-  enabled,
-  label,
-  onToggle,
-}: {
-  enabled: boolean;
-  label: string;
-  onToggle: () => void;
-}) {
-  const tooltip = enabled ? "关闭其它列排序按钮" : "开启其它列排序按钮";
-  return (
-    <HoverTooltip content={tooltip} positioning="below-center" inline>
-      <button
-        type="button"
-        className="flex w-full items-center justify-center gap-1 rounded px-0.5 py-0 text-xs font-semibold uppercase transition-colors"
-        style={{
-          background: "transparent",
-          border: 0,
-          cursor: "pointer",
-          color: enabled ? "var(--colorBrandForeground1)" : "inherit",
-          opacity: enabled ? 1 : 0.62,
-        }}
-        aria-label={tooltip}
-        onClick={onToggle}
-      >
-        <span>{label}</span>
-        <span className="flex shrink-0 flex-col leading-none" aria-hidden="true">
-          <ChevronUp24Regular
-            className="h-2.5 w-2.5"
-            style={{ opacity: enabled ? 0.9 : 0.28 }}
-          />
-          <ChevronDown24Regular
-            className="h-2.5 w-2.5"
-            style={{ marginTop: -3, opacity: enabled ? 0.9 : 0.28 }}
-          />
-        </span>
-      </button>
-    </HoverTooltip>
-  );
-}
-
 function ImageSortHeader({
   label,
   align,
@@ -2983,4 +2962,8 @@ function looksLikeDirectory(path: string): boolean {
   const dot = path.lastIndexOf(".");
   const slashes = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return dot < 0 || dot < slashes;
+}
+
+function getPathBaseName(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || path;
 }

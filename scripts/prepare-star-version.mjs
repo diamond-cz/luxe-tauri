@@ -14,7 +14,14 @@ if (!/^\d+$/.test(runNumber ?? "") || Number(runNumber) < 1) {
 
 const [major, minor, patch] = tag.slice(1).split(".").map(Number);
 const baseVersion = `${major}.${minor}.${patch}`;
-const appVersion = `${major}.${minor}.${patch + 1}-star.${runNumber}`;
+// MSI accepts a pre-release only when every identifier is numeric and <= 65535.
+// Keep the workflow run in the version so every Star build remains newer than
+// the stable release while still producing a valid Windows package version.
+const numericRun = Number(runNumber);
+if (numericRun > 65535) {
+  throw new Error(`Workflow run number ${runNumber} is too large for an MSI pre-release version`);
+}
+const appVersion = `${major}.${minor}.${patch + 1}-${numericRun}`;
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 config.version = appVersion;
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);

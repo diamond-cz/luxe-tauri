@@ -13,7 +13,7 @@ const appVersion = process.env.APP_VERSION ?? version;
 const isStarBuild = process.env.STAR_BUILD === "true";
 const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
 if (config.version !== appVersion) throw new Error(`Expected app version ${appVersion}; found ${config.version}`);
-if (!/^\d+\.\d+\.\d+(?:-star\.\d+)?$/.test(appVersion)) throw new Error(`Invalid app version: ${appVersion}`);
+if (!/^\d+\.\d+\.\d+(?:-\d+)?$/.test(appVersion)) throw new Error(`Invalid app version: ${appVersion}`);
 const notes = isStarBuild
   ? `# LUXE ${appVersion}\n\nStar-triggered build based on ${tag}.\n`
   : releaseNotesFor(version);
@@ -44,7 +44,7 @@ const manifest = path.join(bundle, "latest.json");
 const assetName = path.basename(installer);
 const githubAssetUrl = `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
 writeFileSync(manifest, `${JSON.stringify({
-  version,
+  version: isStarBuild ? appVersion : version,
   notes,
   pub_date: new Date().toISOString(),
   platforms: {

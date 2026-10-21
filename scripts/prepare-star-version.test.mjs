@@ -14,7 +14,7 @@ function withProject(callback) {
   try { callback(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test("Star version increments the latest stable patch and includes run number", () => withProject((root) => {
+test("Star version increments the latest stable patch and uses a numeric MSI pre-release", () => withProject((root) => {
   const output = path.join(root, "outputs.txt");
   const result = spawnSync(process.execPath, [script], {
     cwd: root,
@@ -22,11 +22,11 @@ test("Star version increments the latest stable patch and includes run number", 
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8")), { version: "1.4.10-star.37" });
-  assert.equal(readFileSync(output, "utf8"), "base_version=1.4.9\napp_version=1.4.10-star.37\ntag=v1.4.9\n");
+  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8")), { version: "1.4.10-37" });
+  assert.equal(readFileSync(output, "utf8"), "base_version=1.4.9\napp_version=1.4.10-37\ntag=v1.4.9\n");
 }));
 
-for (const [tag, runNumber] of [["v1.2.3-beta.1", "1"], ["v01.2.3", "1"], ["v1.2.3", "0"]]) {
+for (const [tag, runNumber] of [["v1.2.3-beta.1", "1"], ["v01.2.3", "1"], ["v1.2.3", "0"], ["v1.2.3", "65536"]]) {
   test(`invalid Star build input is rejected (${tag}, ${runNumber})`, () => withProject((root) => {
     const result = spawnSync(process.execPath, [script], {
       cwd: root,
