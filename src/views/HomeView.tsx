@@ -14,6 +14,7 @@ import {
   ArrowDownload24Regular,
   Code24Regular,
   DocumentText24Regular,
+  Sparkle24Regular,
 } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -71,7 +72,6 @@ export function HomeView() {
   const poetry = usePoetryStore((s) => s.line);
   const updateStatus = useUpdateStore((s) => s.status);
   const latestVersion = useUpdateStore((s) => s.latestVersion);
-  const releaseUrl = useUpdateStore((s) => s.releaseUrl);
   const updateNotes = useUpdateStore((s) => s.notes);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
   const downloadTotal = useUpdateStore((s) => s.totalBytes);
@@ -119,10 +119,6 @@ export function HomeView() {
   const openReleaseUrl = (url: string) => {
     openUrl(url)
       .catch((err) => setUpdateError(err, "manual"));
-  };
-
-  const openLatestRelease = () => {
-    openReleaseUrl(releaseUrl || GITHUB_RELEASES_URL);
   };
 
   const checkUpdate = async () => {
@@ -213,12 +209,13 @@ export function HomeView() {
           </h2>
 
           <div
-            className="relative flex min-h-28 flex-col justify-between gap-5 overflow-hidden rounded-xl border p-5 shadow-sm md:flex-row md:items-center"
+            className="relative flex min-h-28 flex-col gap-4 overflow-hidden rounded-xl border p-5 shadow-sm"
             style={{
-              background: "var(--colorNeutralBackground1)",
+              background: "var(--colorNeutralBackground2)",
               borderColor: "var(--colorNeutralStroke2)",
             }}
           >
+            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div className="min-w-0">
               <div className="text-2xl font-semibold"
                    style={{ color: "var(--colorNeutralForeground1)" }}>
@@ -226,7 +223,7 @@ export function HomeView() {
               </div>
               <div className="mt-1 text-sm"
                    style={{ color: "var(--colorNeutralForeground3)" }}>
-                当前版本 v{CURRENT_VERSION}
+                版本 v{CURRENT_VERSION}
               </div>
               <div className="mt-2 flex items-center gap-2 text-sm"
                    style={{ color: updateStatus === "error" ? "var(--colorPaletteRedForeground1)" : updateStatus === "ok" ? "var(--colorPaletteGreenForeground1)" : "var(--colorNeutralForeground2)" }}>
@@ -234,7 +231,7 @@ export function HomeView() {
                 {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
               </div>
               {updateStatus === "available" && updateNotes && (
-                <details className="mt-3 max-w-lg rounded-lg px-3 py-2 text-sm" style={{ background: "var(--colorNeutralBackground2)", color: "var(--colorNeutralForeground2)" }}>
+                <details className="mt-3 max-w-lg rounded-lg px-3 py-2 text-sm" style={{ background: "var(--colorNeutralBackground1)", color: "var(--colorNeutralForeground2)" }}>
                   <summary className="cursor-pointer">版本说明</summary>
                   <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{updateNotes}</p>
                 </details>
@@ -242,17 +239,6 @@ export function HomeView() {
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <Button appearance="secondary" icon={<Code24Regular />} onClick={openGithub}>
-                GitHub
-              </Button>
-              <Button appearance="secondary" icon={<DocumentText24Regular />} onClick={() => setUpdateLogOpen(true)}>
-                更新日志
-              </Button>
-              {(updateStatus === "available" || updateStatus === "error") && (
-                <Button appearance="secondary" onClick={openLatestRelease}>
-                  打开 Release
-                </Button>
-              )}
               <Button
                 appearance="primary"
                 icon={updateStatus === "available"
@@ -262,6 +248,37 @@ export function HomeView() {
                 onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
               >
                 {primaryUpdateLabel}
+              </Button>
+            </div>
+            </div>
+
+            <div
+              className="flex flex-wrap items-center gap-2 border-t pt-3"
+              style={{ borderColor: "var(--colorNeutralStroke2)" }}
+            >
+              <Button
+                appearance="secondary"
+                icon={<Code24Regular />}
+                onClick={openGithub}
+                style={{ background: "var(--colorNeutralBackground1)" }}
+              >
+                GitHub
+              </Button>
+              <Button
+                appearance="secondary"
+                icon={<DocumentText24Regular />}
+                onClick={() => openReleaseUrl(GITHUB_RELEASES_URL)}
+                style={{ background: "var(--colorNeutralBackground1)" }}
+              >
+                更新日志
+              </Button>
+              <Button
+                appearance="secondary"
+                icon={<Sparkle24Regular />}
+                onClick={() => setUpdateLogOpen(true)}
+                style={{ background: "var(--colorNeutralBackground1)" }}
+              >
+                近期更新
               </Button>
             </div>
 
