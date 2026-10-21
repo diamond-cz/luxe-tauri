@@ -6,9 +6,12 @@ import {
 } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular,
+  ChevronDown24Regular,
   Dismiss24Regular,
   Open24Regular,
+  Sparkle24Regular,
 } from "@fluentui/react-icons";
+import { useState } from "react";
 
 import {
   CURRENT_VERSION,
@@ -45,6 +48,9 @@ function releaseUrlFor(version: string) {
 }
 
 export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
+  const [showAll, setShowAll] = useState(false);
+  const visibleLogs = showAll ? UPDATE_LOGS : UPDATE_LOGS.slice(0, 3);
+
   return (
     <Dialog
       open={open}
@@ -58,10 +64,10 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
         backdrop={{ className: "luxe-update-log-backdrop" }}
         className="luxe-update-log-surface"
         style={{
-          width: "min(900px, calc(100vw - 56px))",
-          maxWidth: 900,
-          height: "min(660px, calc(100vh - 72px))",
-          maxHeight: "calc(100vh - 72px)",
+          width: "min(720px, calc(100vw - 32px))",
+          maxWidth: 720,
+          height: "min(760px, calc(100vh - 32px))",
+          maxHeight: "calc(100vh - 32px)",
           padding: 0,
           borderRadius: 18,
           overflow: "hidden",
@@ -74,7 +80,11 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
             className="flex min-h-16 shrink-0 items-center justify-between gap-4 border-b px-5 py-4 sm:min-h-20 sm:px-7"
             style={{ borderColor: "var(--colorNeutralStroke2)" }}
           >
-            <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "var(--colorBrandBackground2)", color: "var(--colorBrandForeground1)" }}>
+                <Sparkle24Regular className="h-6 w-6" />
+              </span>
+              <div className="min-w-0">
               <h2
                 className="text-xl font-bold"
                 style={{ color: "var(--colorNeutralForeground1)" }}
@@ -86,6 +96,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                 style={{ color: "var(--colorNeutralForeground3)" }}
               >
                 当前版本 v{CURRENT_VERSION} · 已收录 {UPDATE_LOGS.length} 个版本
+              </div>
               </div>
             </div>
             <Button
@@ -101,14 +112,14 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
             className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-7 sm:py-6"
             style={{ background: "var(--colorNeutralBackground2)" }}
           >
-            <div className="flex flex-col gap-5">
-              {UPDATE_LOGS.map((entry) => {
+            <div className="flex flex-col gap-3">
+              {visibleLogs.map((entry) => {
                 const isCurrent = entry.version === CURRENT_VERSION;
 
                 return (
                   <article
                     key={entry.version}
-                    className="rounded-xl border px-5 py-4 shadow-sm"
+                    className="rounded-xl border px-4 py-3 shadow-sm sm:px-5"
                     style={{
                       background: "var(--colorNeutralBackground1)",
                       borderColor: "var(--colorNeutralStroke2)",
@@ -208,6 +219,17 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                   </article>
                 );
               })}
+              {!showAll && UPDATE_LOGS.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="flex items-center gap-2 self-start rounded-lg px-2 py-2 text-sm transition-colors hover:bg-black/[0.04]"
+                  style={{ color: "var(--colorNeutralForeground3)" }}
+                >
+                  <ChevronDown24Regular className="h-4 w-4" />
+                  还有 {UPDATE_LOGS.length - 3} 个更早版本
+                </button>
+              )}
             </div>
           </div>
 

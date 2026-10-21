@@ -70,7 +70,7 @@ export function HomeView() {
   const { t } = useTranslation();
   const poetry = usePoetryStore((s) => s.line);
   const updateStatus = useUpdateStore((s) => s.status);
-  const updateMessage = useUpdateStore((s) => s.message);
+  const latestVersion = useUpdateStore((s) => s.latestVersion);
   const releaseUrl = useUpdateStore((s) => s.releaseUrl);
   const updateNotes = useUpdateStore((s) => s.notes);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
@@ -213,9 +213,9 @@ export function HomeView() {
           </h2>
 
           <div
-            className="relative flex min-h-28 flex-col justify-between gap-5 overflow-hidden rounded-lg border p-5 md:flex-row md:items-center"
+            className="relative flex min-h-28 flex-col justify-between gap-5 overflow-hidden rounded-xl border p-5 shadow-sm md:flex-row md:items-center"
             style={{
-              background: "var(--colorNeutralBackground2)",
+              background: "var(--colorNeutralBackground1)",
               borderColor: "var(--colorNeutralStroke2)",
             }}
           >
@@ -228,12 +228,13 @@ export function HomeView() {
                    style={{ color: "var(--colorNeutralForeground3)" }}>
                 当前版本 v{CURRENT_VERSION}
               </div>
-              <div className="mt-2 text-xs"
-                   style={{ color: "var(--colorBrandForeground1)" }}>
-                {updateMessage}
+              <div className="mt-2 flex items-center gap-2 text-sm"
+                   style={{ color: updateStatus === "error" ? "var(--colorPaletteRedForeground1)" : updateStatus === "ok" ? "var(--colorPaletteGreenForeground1)" : "var(--colorNeutralForeground2)" }}>
+                {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" ? <span aria-hidden>✦</span> : null}
+                {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
               </div>
               {updateStatus === "available" && updateNotes && (
-                <details className="mt-2 max-w-lg text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+                <details className="mt-3 max-w-lg rounded-lg px-3 py-2 text-sm" style={{ background: "var(--colorNeutralBackground2)", color: "var(--colorNeutralForeground2)" }}>
                   <summary className="cursor-pointer">版本说明</summary>
                   <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{updateNotes}</p>
                 </details>

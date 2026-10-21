@@ -13,7 +13,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fetchPoetry } from "@/ipc/shell";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
-import { installAvailableUpdate } from "@/services/installUpdate";
 
 /**
  * Frameless title bar — replaces the OS-drawn title bar (`decorations: false`).
@@ -154,6 +153,11 @@ function AvailableUpdateButton() {
   const total = useUpdateStore((state) => state.totalBytes);
   const update = useUpdateStore((state) => state.update);
   const visible = Boolean(version && update && ["available", "downloading", "installing"].includes(status));
+  const noteLines = (notes ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:#{1,6}\s*|[-*]\s*)/, "").trim())
+    .filter((line) => line && !/^v?\d+\.\d+\.\d+$/.test(line))
+    .slice(0, 4);
   if (!visible) return null;
 
   const busy = status !== "available";
@@ -174,30 +178,35 @@ function AvailableUpdateButton() {
         <ArrowCircleUp24Regular className="h-5 w-5" />
       </button>
       <div
-        className="invisible absolute right-0 top-full z-50 w-[min(22rem,calc(100vw-1rem))] pt-1 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        className="invisible absolute right-1 top-full z-50 w-[min(21rem,calc(100vw-1rem))] pt-2 opacity-0 transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
       >
         <div
-          className="rounded-md border p-3 shadow-lg"
+          className="overflow-hidden rounded-xl border shadow-xl"
           style={{ background: "var(--colorNeutralBackground1)", borderColor: "var(--colorNeutralStroke2)" }}
         >
-          <div className="text-sm font-semibold" style={{ color: "var(--colorNeutralForeground1)" }}>
+          <div className="px-4 pt-4 text-sm font-semibold" style={{ color: "var(--colorNeutralForeground1)" }}>
             发现新版本 v{version}
           </div>
-          {notes && (
-            <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5"
-              style={{ color: "var(--colorNeutralForeground2)" }}>
-              {notes}
-            </div>
+          {noteLines.length > 0 && (
+            <ul className="mx-4 mt-3 max-h-36 space-y-2 overflow-y-auto border-t pt-3" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+              {noteLines.map((line, index) => (
+                <li key={`${index}-${line}`} className="flex gap-2 text-xs leading-5" style={{ color: "var(--colorNeutralForeground2)" }}>
+                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full" style={{ background: "var(--colorBrandBackground)" }} />
+                  <span className="line-clamp-2">{line}</span>
+                </li>
+              ))}
+            </ul>
           )}
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 flex justify-end px-4 pb-4">
             <button
               type="button"
+              title={label}
               disabled={busy}
-              onClick={() => void installAvailableUpdate()}
+              onClick={() => navigate("/home")}
               className="rounded px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-default disabled:opacity-60"
               style={{ background: "var(--colorBrandBackground)" }}
             >
-              {label}
+              前往更新
             </button>
           </div>
         </div>
