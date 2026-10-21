@@ -8,16 +8,14 @@ on:
     branches: [main]
     paths-ignore:
       - "**/*.md"
-  watch:
-    types: [started]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: validate-${{ github.workflow }}-${{ github.event_name == 'watch' && github.event.watcher.login || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'watch' }}
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:

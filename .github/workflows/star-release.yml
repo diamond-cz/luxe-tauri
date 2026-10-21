@@ -1,0 +1,188 @@
+name: Publish latest build on Star
+
+on:
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-star-build
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # A Star is public input. Only the repository owner can spend the release
+    # signing secret and publish replacement assets.
+    if: github.event_name != 'watch' || github.event.sender.login == github.repository_owner
+    runs-on: windows-2022
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Keep repository line endings
+        run: git config --global core.autocrlf false
+
+      - name: Checkout latest default-branch source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve latest stable tag and Star build version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch --tags --force origin
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch repository tags' }
+          $tags = @(git tag --list 'v*' --sort=-version:refname | Where-Object { $_ -match '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' })
+          if ($tags.Count -eq 0) { throw 'No stable vX.Y.Z tag exists' }
+          $env:BASE_TAG = $tags[0]
+          $release = gh release view $env:BASE_TAG --json isDraft,isPrerelease
+          if ($LASTEXITCODE -ne 0) { throw "Could not find release for $env:BASE_TAG" }
+          $releaseInfo = $release | ConvertFrom-Json
+          if ($releaseInfo.isDraft -or $releaseInfo.isPrerelease) { throw "Latest tag $env:BASE_TAG is not a published stable release" }
+          node scripts/prepare-star-version.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up NASM for libjpeg-turbo
+        uses: ilammy/setup-nasm@v1
+
+      - name: Synchronize Star build version
+        run: npm run version:sync
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify updater signing key and password
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY) -or [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
+            throw 'Missing updater signing secrets'
+          }
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
+          $probe = Join-Path $env:RUNNER_TEMP 'star-updater-signing-probe.txt'
+          Set-Content -LiteralPath $probe -Value 'updater signing probe' -NoNewline
+          $version = (Get-Content src-tauri/tauri.conf.json -Encoding UTF8 -Raw | ConvertFrom-Json).version
+          node node_modules/@tauri-apps/cli/tauri.js signer sign $probe --app-version $version | Out-Null
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$probe.sig" -PathType Leaf)) { throw 'Updater signing probe failed' }
+
+      - name: Verify synchronized version
+        run: npm run version:check
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-x64
+          cache-on-failure: true
+
+      - name: Build application and frontend
+        run: npm run tauri -- build --no-bundle --ci -- --locked
+
+      - name: Test Rust
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build signed NSIS and MSI installers
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $target = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'src-tauri/target'))
+          $bundle = [IO.Path]::GetFullPath((Join-Path $target 'release/bundle'))
+          if (-not $bundle.StartsWith("$target$([IO.Path]::DirectorySeparatorChar)", [StringComparison]::OrdinalIgnoreCase)) { throw 'Bundle path escaped target directory' }
+          if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.TrimEnd("`r", "`n")
+          npm run tauri -- bundle --bundles nsis,msi --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate updater package and manifest
+        id: assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+          STAR_BUILD: 'true'
+        run: node scripts/prepare-release.mjs $env:RELEASE_TAG
+
+      - name: Archive verified Star build
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-star-${{ steps.version.outputs.app_version }}
+          path: |
+            ${{ steps.assets.outputs.asset1 }}
+            ${{ steps.assets.outputs.asset2 }}
+            ${{ steps.assets.outputs.asset3 }}
+            ${{ steps.assets.outputs.asset4 }}
+            ${{ steps.assets.outputs.asset5 }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish replacement assets to the latest stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          ASSET1: ${{ steps.assets.outputs.asset1 }}
+          ASSET2: ${{ steps.assets.outputs.asset2 }}
+          ASSET3: ${{ steps.assets.outputs.asset3 }}
+          ASSET4: ${{ steps.assets.outputs.asset4 }}
+          ASSET5: ${{ steps.assets.outputs.asset5 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $installers = @($env:ASSET1, $env:ASSET2, $env:ASSET3, $env:ASSET5)
+          gh release upload $env:RELEASE_TAG @installers --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload Star build packages' }
+          # Publish latest.json last so clients keep resolving the previous
+          # complete updater package if any installer upload fails.
+          gh release upload $env:RELEASE_TAG $env:ASSET4 --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the updater manifest' }
+
+          $release = gh release view $env:RELEASE_TAG --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify release assets' }
+          foreach ($file in @($env:ASSET1, $env:ASSET2, $env:ASSET3, $env:ASSET4, $env:ASSET5)) {
+            $name = Split-Path -Leaf $file
+            $asset = @($release.assets | Where-Object { $_.name -ceq $name })
+            if ($asset.Count -ne 1 -or $asset[0].size -ne (Get-Item -LiteralPath $file).Length) { throw "Published asset verification failed: $name" }
+          }
+
+          # Remove only previous Star-generated installers after the new
+          # manifest and its referenced package have been verified.
+          $stale = @($release.assets | Where-Object { $_.name -match '^LUXE_\d+\.\d+\.\d+-star\.\d+_x64' -and $_.name -notin @((Split-Path -Leaf $env:ASSET1), (Split-Path -Leaf $env:ASSET2), (Split-Path -Leaf $env:ASSET3)) })
+          foreach ($asset in $stale) {
+            gh release delete-asset $env:RELEASE_TAG $asset.name --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove stale Star asset $($asset.name)" }
+          }
+          gh release edit $env:RELEASE_TAG --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not mark the Star-updated stable release as latest' }

@@ -7,7 +7,7 @@
   "scripts": {
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",
-    "release:test": "node --test scripts/prepare-release.test.mjs scripts/sync-version.test.mjs",
+    "release:test": "node --test scripts/prepare-release.test.mjs scripts/prepare-star-version.test.mjs scripts/sync-version.test.mjs",
     "predev": "npm run version:sync",
     "dev": "vite",
     "prebuild": "npm run version:sync",

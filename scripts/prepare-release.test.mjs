@@ -63,7 +63,7 @@ test("tag must match application version", () => withPackages(({ target }) => {
   const parts = version.split(".").map(Number);
   const result = run(target, `v${parts[0]}.${parts[1]}.${parts[2] + 1}`);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /does not match/);
+  assert.match(result.stderr, /app version/);
 }));
 
 test("checksums and Actions outputs cover all release assets", () => withPackages(({ target, bundle, nsis }) => {

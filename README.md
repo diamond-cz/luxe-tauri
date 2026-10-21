@@ -141,3 +141,8 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 ## 许可
 
 © 2026 diamond-cz · 仅内部 Camera Tuning 使用。
+
+
+### Star-triggered build
+
+A Star by the repository owner runs `.github/workflows/star-release.yml`. It checks out the latest default-branch source, finds the highest stable `vX.Y.Z` tag, and builds signed NSIS/MSI installers using the unique version `X.Y.(Z+1)-star.<Actions run number>`. After verification it replaces the updater assets and `latest.json` on that stable release without creating a new stable tag. Only the repository owner's Star event runs the publishing job, protecting signing secrets from public-trigger abuse. The client Overwrite Update action checks for and installs this build.

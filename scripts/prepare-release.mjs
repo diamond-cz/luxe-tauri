@@ -9,9 +9,14 @@ if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag ?? "")) throw new Er
 if (repository !== "diamond-cz/luxe-tauri") throw new Error(`Unexpected repository: ${repository}`);
 
 const version = tag.slice(1);
+const appVersion = process.env.APP_VERSION ?? version;
+const isStarBuild = process.env.STAR_BUILD === "true";
 const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
-if (config.version !== version) throw new Error(`Tag ${tag} does not match app version ${config.version}`);
-const notes = releaseNotesFor(version);
+if (config.version !== appVersion) throw new Error(`Expected app version ${appVersion}; found ${config.version}`);
+if (!/^\d+\.\d+\.\d+(?:-star\.\d+)?$/.test(appVersion)) throw new Error(`Invalid app version: ${appVersion}`);
+const notes = isStarBuild
+  ? `# LUXE ${appVersion}\n\nStar-triggered build based on ${tag}.\n`
+  : releaseNotesFor(version);
 
 const bundle = path.join(path.resolve(process.env.CARGO_TARGET_DIR ?? "src-tauri/target"), "release", "bundle");
 const files = (folder) => readdirSync(path.join(bundle, folder)).map((name) => path.join(bundle, folder, name));
@@ -28,8 +33,8 @@ const installer = exactlyOne(nsis, /-setup\.exe$/i, "NSIS installer");
 const signature = exactlyOne(nsis, /-setup\.exe\.sig$/i, "NSIS updater signature");
 const msi = exactlyOne(files("msi"), /\.msi$/i, "MSI installer");
 if (signature !== `${installer}.sig`) throw new Error("NSIS installer and signature names do not match");
-if (!path.basename(installer).endsWith(`_${version}_x64-setup.exe`) ||
-    !path.basename(msi).includes(`_${version}_x64_`)) {
+if (!path.basename(installer).endsWith(`_${appVersion}_x64-setup.exe`) ||
+    !path.basename(msi).includes(`_${appVersion}_x64_`)) {
   throw new Error("Installer filenames must match the release version and x64 architecture");
 }
 const signatureText = readFileSync(signature, "utf8").trim();
