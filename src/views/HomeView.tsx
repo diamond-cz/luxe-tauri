@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Button } from "@fluentui/react-components";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+} from "@fluentui/react-components";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -12,7 +20,6 @@ import {
 import {
   ArrowSync24Regular,
   ArrowDownload24Regular,
-  Code24Regular,
   DocumentText24Regular,
   Sparkle24Regular,
 } from "@fluentui/react-icons";
@@ -82,6 +89,7 @@ export function HomeView() {
     PLATFORM_CARDS.map((card) => card.to),
   );
   const [updateLogOpen, setUpdateLogOpen] = useState(false);
+  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -129,6 +137,23 @@ export function HomeView() {
     try {
       const result = await checkForUpdate();
       setUpdateResult(result, "manual");
+    } catch (err) {
+      setUpdateError(err, "manual");
+    }
+  };
+
+  const confirmOverwriteUpdate = async () => {
+    if (updateBusy) return;
+    setOverwriteConfirmOpen(false);
+    const oldUpdate = useUpdateStore.getState().update;
+    if (oldUpdate) await oldUpdate.close().catch(() => {});
+    setUpdateChecking("manual");
+    try {
+      const result = await checkForUpdate();
+      setUpdateResult(result, "manual");
+      if (result.status === "available") {
+        await installAvailableUpdate();
+      }
     } catch (err) {
       setUpdateError(err, "manual");
     }
@@ -257,14 +282,23 @@ export function HomeView() {
               style={{ borderColor: "var(--colorNeutralStroke2)" }}
             >
               <Button
+                className="transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
                 appearance="secondary"
-                icon={<Code24Regular />}
+                icon={
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.726-4.043-1.416-4.043-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.762-1.605-2.665-.3-5.467-1.334-5.467-5.93 0-1.31.468-2.38 1.235-3.22-.123-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.92.43.372.823 1.103.823 2.222v3.293c0 .32.216.694.825.576C20.565 21.796 24 17.3 24 12 24 5.37 18.63 0 12 0z"
+                    />
+                  </svg>
+                }
                 onClick={openGithub}
                 style={{ background: "var(--colorNeutralBackground1)" }}
               >
                 GitHub
               </Button>
               <Button
+                className="transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
                 appearance="secondary"
                 icon={<DocumentText24Regular />}
                 onClick={() => openReleaseUrl(GITHUB_RELEASES_URL)}
@@ -273,12 +307,23 @@ export function HomeView() {
                 更新日志
               </Button>
               <Button
+                className="transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
                 appearance="secondary"
                 icon={<Sparkle24Regular />}
                 onClick={() => setUpdateLogOpen(true)}
                 style={{ background: "var(--colorNeutralBackground1)" }}
               >
                 近期更新
+              </Button>
+              <Button
+                className="shrink-0 whitespace-nowrap transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
+                appearance="secondary"
+                icon={<ArrowDownload24Regular />}
+                onClick={() => setOverwriteConfirmOpen(true)}
+                disabled={updateBusy}
+                style={{ background: "var(--colorNeutralBackground1)" }}
+              >
+                覆盖更新
               </Button>
             </div>
 
@@ -302,6 +347,62 @@ export function HomeView() {
           onOpenRelease={openReleaseUrl}
         />
       )}
+
+      <Dialog
+        open={overwriteConfirmOpen}
+        modalType="modal"
+        onOpenChange={(_, data) => {
+          if (!data.open) setOverwriteConfirmOpen(false);
+        }}
+      >
+        <DialogSurface
+          style={{
+            maxWidth: 520,
+            padding: 0,
+            overflow: "hidden",
+            borderRadius: 14,
+            background: "var(--colorNeutralBackground1)",
+            border: "1px solid var(--colorNeutralStroke2)",
+          }}
+        >
+          <DialogBody>
+            <DialogTitle
+              style={{
+                padding: "20px 24px",
+                borderBottom: "1px solid var(--colorNeutralStroke2)",
+                color: "var(--colorNeutralForeground1)",
+                fontSize: 20,
+                fontWeight: 600,
+              }}
+            >
+              确认覆盖更新
+            </DialogTitle>
+            <DialogContent
+              style={{
+                margin: 0,
+                padding: "20px 24px",
+                color: "var(--colorNeutralForeground2)",
+                lineHeight: 1.6,
+              }}
+            >
+              将检查并下载 GitHub 上的最新版本，安装后替换当前版本并重新启动应用。是否继续？
+            </DialogContent>
+            <DialogActions
+              style={{
+                padding: "14px 24px 18px",
+                borderTop: "1px solid var(--colorNeutralStroke2)",
+              }}
+            >
+              <Button appearance="secondary" onClick={() => setOverwriteConfirmOpen(false)} style={{ minWidth: 88 }}>
+                取消
+              </Button>
+              <Button appearance="primary" icon={<ArrowDownload24Regular />} onClick={() => void confirmOverwriteUpdate()} style={{ minWidth: 132, whiteSpace: "nowrap" }}>
+                覆盖更新
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 }
