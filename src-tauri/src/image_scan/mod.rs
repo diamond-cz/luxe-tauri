@@ -7,6 +7,7 @@
 
 #[cfg(test)]
 mod bench;
+mod natural_order;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -410,7 +411,10 @@ pub fn scan_directory(dir: &Path) -> AppResult<Vec<ImageEntry>> {
             toml_path: toml_path.to_string_lossy().into_owned(),
         });
     }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries.sort_by(|a, b| {
+        natural_order::compare_names(&a.name, &b.name)
+            .then_with(|| a.jpg_path.cmp(&b.jpg_path))
+    });
     Ok(entries)
 }
 

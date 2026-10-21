@@ -2128,7 +2128,7 @@ export function ImageTab({
                 fontFamily: '"Segoe UI", Arial, sans-serif',
                 fontSize: 13,
                 color: "var(--colorNeutralForeground1)",
-                background: "var(--colorNeutralBackground1)",
+                background: entries.length === 0 ? "transparent" : "var(--colorNeutralBackground1)",
                 borderCollapse: "separate",
                 borderSpacing: 0,
                 borderLeft: "1px solid var(--colorNeutralStroke2)",
@@ -2296,16 +2296,19 @@ export function ImageTab({
               <td colSpan={colSpan} style={{ height: bottomPadding, padding: 0, border: 0 }} />
             </tr>
           )}
-          {entries.length === 0 && (
-            <tr><td className="p-4 text-center"
-                    style={{ color: "var(--colorNeutralForeground3)" }}
-                    colSpan={colSpan}>
-              拖入图片文件夹，或点击上方路径文本加载图片
-            </td></tr>
-          )}
         </tbody>
       </table>
     </div>
+    {entries.length === 0 && (
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-xs"
+        style={{ top: IMAGE_TABLE_HEADER_HEIGHT, color: "var(--colorNeutralForeground3)" }}
+      >
+        <ImageMultiple24Regular className="h-7 w-7" aria-hidden="true" />
+        <span>尚未导入图片</span>
+        <span className="text-[11px]">拖入图片文件夹，或点击标题栏的文件夹按钮添加</span>
+      </div>
+    )}
     <ImageTableHoverPreview scrollRef={scrollRef} />
     {currentDisplayIndex >= 0 && (!selectedRowVisible || !firstRowVisible) && (
       <button
