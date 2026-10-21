@@ -55,6 +55,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
   handlersRef.current = handlers;
   useEffect(() => {
     let disposed = false;
+    let closeDecisionPending = false;
     const unlisteners: Array<() => void> = [];
     let cancelPersist: (() => void) | undefined;
     const win = getCurrentWindow();
@@ -100,7 +101,19 @@ export function useShellBootstrap(handlers: ShellHandlers) {
 
       /* 4. Wire close handler: backend decision → quit / hide / ask. */
       await track(win.onCloseRequested(async (event) => {
-        const decision: CloseDecision = await resolveCloseDecision();
+        // Tauri requires the close to be prevented before any awaited IPC.
+        event.preventDefault();
+        if (closeDecisionPending) return;
+        closeDecisionPending = true;
+        let decision: CloseDecision;
+        try {
+          decision = await resolveCloseDecision();
+        } catch (error) {
+          closeDecisionPending = false;
+          console.error("resolve close behavior failed", error);
+          return;
+        }
+        try {
         if (decision === "tray") {
           event.preventDefault();
           await hideMainWindow();
@@ -120,6 +133,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           // registered). Force a full process exit via app.exit(0).
           event.preventDefault();
           await quitApp().catch(() => {});
+        }
+        } finally {
+          closeDecisionPending = false;
         }
       }));
       if (disposed) return;

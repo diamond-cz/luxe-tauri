@@ -42,18 +42,31 @@ export function CloseBehaviorDialog({ open, onClose }: Props) {
   const settings    = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const [remember, setRemember] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (!open) setRemember(false); }, [open]);
+  useEffect(() => {
+    if (!open) {
+      setRemember(false);
+      setBusy(false);
+    }
+  }, [open]);
 
   const onPick = async (kind: "tray" | "quit") => {
+    if (busy) return;
+    setBusy(true);
     if (remember) {
       const next: Settings = { ...settings, close_behavior: kind === "tray" ? 1 : 2 };
       setSettings(next);
       await saveSettings(next).catch(() => {});
     }
     onClose();
-    if (kind === "tray") await hideMainWindow().catch(() => {});
-    else                 await quitApp().catch(() => {});
+    try {
+      if (kind === "tray") await hideMainWindow();
+      else await quitApp();
+    } catch (error) {
+      console.error("close action failed", error);
+      setBusy(false);
+    }
   };
 
   const options: OptionMeta[] = [
@@ -104,10 +117,11 @@ export function CloseBehaviorDialog({ open, onClose }: Props) {
                   <button
                     key={kind}
                     type="button"
+                    disabled={busy}
                     onClick={() => onPick(kind)}
                     className={
                       "group flex items-center gap-4 rounded-xl border px-4 py-4 text-left " +
-                      "transition-all hover:shadow-md focus:outline-none"
+                      "transition-all hover:shadow-md focus:outline-none disabled:cursor-wait disabled:opacity-60"
                     }
                     style={{
                       background:  "var(--colorNeutralBackground1)",
