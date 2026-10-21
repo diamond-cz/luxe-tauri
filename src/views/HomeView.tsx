@@ -254,7 +254,9 @@ export function HomeView() {
               )}
               <Button
                 appearance="primary"
-                icon={updateStatus === "available" ? <ArrowDownload24Regular /> : <ArrowSync24Regular />}
+                icon={updateStatus === "available"
+                  ? <ArrowDownload24Regular />
+                  : <ArrowSync24Regular className={updateStatus === "checking" ? "animate-spin motion-reduce:animate-none" : undefined} />}
                 disabled={updateBusy}
                 onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
               >
