@@ -30,6 +30,7 @@ import { LceChart } from "./LceChart";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
+import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
 import type { ScrollPosition } from "../workspaceSession";
 
 /** 空景筛选图标：线条树叶和右下角保护标记。 */
@@ -1076,7 +1077,7 @@ export function ImageTab({
   const sortRequestRef = useRef(0);
   const extraCols = useMemo(
     () => {
-      if (!toneMode) return Object.entries(schema.Image ?? {});
+      if (!toneMode) return imageTableExtraColumns(schema);
       const items = schema.preview_info?.items ?? [];
       const key = (label: string, index: number, fallback: string) => {
         const item = items.find((candidate) => candidate.label === label);
@@ -1365,10 +1366,23 @@ export function ImageTab({
   }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, onVisibleHeatmapPathsChange]);
   const sceneOnly = (Boolean(classifiedKinds) && hasScene && !hasPortrait)
     || (canFilterKinds && activeKindFilter === "scene");
-  const displayedColumns = useMemo(() => orderedColumns.filter((column) => !sceneOnly || (
-    column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr"
-    && column.label !== "FaceSt" && column.label !== "1sSt"
-  )), [orderedColumns, sceneOnly]);
+  const portraitOnly = (Boolean(classifiedKinds) && hasPortrait && !hasScene && !hasNa)
+    || (canFilterKinds && activeKindFilter === "portrait");
+  const displayedColumns = useMemo(() => {
+    const kind = sceneOnly ? "scene" : portraitOnly ? "portrait" : undefined;
+    const mapping = kind && !toneMode ? imageTableMapping(schema, kind) : null;
+    return orderedColumns.filter((column) => {
+      if (column.kind === "extra") {
+        if (mapping) return Object.values(mapping).includes(column.key ?? "");
+        return !sceneOnly || (column.label !== "FaceSt" && column.label !== "1sSt");
+      }
+      return !sceneOnly || (column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr");
+    }).map((column) => {
+      if (!mapping || column.kind !== "extra") return column;
+      const label = Object.entries(mapping).find(([, key]) => key === column.key)?.[0];
+      return label === undefined || label === column.label ? column : { ...column, label };
+    });
+  }, [orderedColumns, portraitOnly, sceneOnly, schema, toneMode]);
 
   useEffect(() => {
     if (toneMode) return;
@@ -1623,9 +1637,7 @@ export function ImageTab({
 
   useEffect(() => {
     if (!sortControlsEnabled || !sortState) return;
-    const stillSortable = extraCols.some(([col, key]) =>
-      col === sortState.column && key === sortState.key,
-    );
+    const stillSortable = extraCols.some(([, key]) => key === sortState.key);
     if (!stillSortable) {
       setSortState(null);
     }
@@ -2285,7 +2297,9 @@ export function ImageTab({
                                    <span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
                                    <span>|</span>
                                    <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
-                               : imageTableColumnText(column, data, target, sceneOnly)}
+                               : !toneMode && column.kind === "extra"
+                                 && !isImageTableColumnMapped(schema, column.key ?? "", classifiedKinds?.[e.toml_path])
+                                 ? "-" : imageTableColumnText(column, data, target, sceneOnly)}
                    </Td>
                  ))}
               </tr>

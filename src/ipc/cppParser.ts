@@ -72,6 +72,10 @@ export interface FaceTouchCard {
 export interface Isp6sSchemaRoot {
   card?: { Normal?: NormalCard; face_touch?: FaceTouchCard };
   Image: Record<string, string>;
+  image_table?: {
+    scene?: Record<string, string> | null;
+    portrait?: Record<string, string> | null;
+  };
   lce?:  { group?: any[] };
   para_check?:   { items?: ParaCheckItem[] };
   preview_info?: { items?: PreviewInfoItem[] };

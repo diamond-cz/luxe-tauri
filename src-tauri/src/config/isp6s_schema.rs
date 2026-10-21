@@ -15,11 +15,19 @@ use crate::error::AppResult;
 pub struct Isp6sSchema {
     #[serde(default)] pub card:         CardSection,
     #[serde(default, rename = "Image")] pub image:    IndexMap<String, String>,
+    #[serde(default)] pub image_table: ImageTableMappings,
     #[serde(default)] pub lce:          LceSection,
     #[serde(default)] pub para_check:   ParaCheckSection,
     #[serde(default)] pub preview_info: PreviewInfoSection,
     /// `[card_source.<CardName>]` blocks keyed by card name.
     #[serde(default)] pub card_source:  HashMap<String, CardSourceSpec>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageTableMappings {
+    // None falls back to legacy [Image]; an explicit empty table hides extras.
+    #[serde(default)] pub scene: Option<IndexMap<String, String>>,
+    #[serde(default)] pub portrait: Option<IndexMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -106,6 +114,16 @@ pub struct PreviewInfoItem {
 impl Isp6sSchema {
     pub fn load(path: &Path) -> AppResult<Self> {
         let text = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&text)?)
+        let mut schema: Self = toml::from_str(&text)?;
+        // Existing chart consumers still use Image.BV/FDY. Derive this view
+        // from the separate mappings so only the two tables need maintenance.
+        if schema.image.is_empty() {
+            for columns in [&schema.image_table.portrait, &schema.image_table.scene].into_iter().flatten() {
+                for (label, key) in columns {
+                    schema.image.entry(label.clone()).or_insert_with(|| key.clone());
+                }
+            }
+        }
+        Ok(schema)
     }
 }
