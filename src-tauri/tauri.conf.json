@@ -13,7 +13,7 @@
   },
   "identifier": "io.luxe.tauri",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/start-tauri-vite.mjs",
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"

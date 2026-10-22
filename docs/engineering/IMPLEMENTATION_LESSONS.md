@@ -26,6 +26,29 @@
 
 ## 已沉淀经验
 
+### 2026-10-22：Tauri 开发端口复用
+
+**亮点**
+
+- `src-tauri/tauri.conf.json` 的 `beforeDevCommand` 改由 `scripts/start-tauri-vite.mjs` 启动：端口 1420 空闲时启动 Vite，已有本项目 Vite 时复用，其他服务占用时报明原因。
+- `scripts/start-tauri-vite.test.mjs` 用本地 HTTP 服务验证空闲、复用和冲突分支。
+
+**痛点**
+
+- Vite `strictPort: true` 与 Tauri `devUrl` 都锁定 1420；已有开发服务时重复执行 `npm run dev` 会报 `Port 1420 is already in use`。
+- Vite 返回的入口路径可能带 `?t=` 时间戳；按原始 `index.html` 的完整脚本标签匹配会误判已有开发服务。
+
+**闭坑**
+
+- 调整开发端口时同时核对 `vite.config.ts` 的 `server.port`、`src-tauri/tauri.conf.json` 的 `devUrl` 和 `scripts/start-tauri-vite.mjs` 的探测地址。
+- 验证服务复用时检查 Vite 实际返回的 HTML；不要只依据 `index.html` 源文件断言。
+
+**验证**
+
+- `node --test scripts/start-tauri-vite.test.mjs`：3 项通过；`npm run typecheck`、`git diff --check`：通过。
+- 已有本项目 Vite 占用 1420 时，`npm run tauri:dev` 输出“复用现有开发服务器”，Rust 开发构建完成并运行 `target/debug/luxe-tauri.exe`。
+- 未验证：端口空闲时的完整 Tauri 窗口启动；未手动验收窗口交互。
+
 ### 2026-10-22：独立表格列设置窗口
 
 **亮点**
