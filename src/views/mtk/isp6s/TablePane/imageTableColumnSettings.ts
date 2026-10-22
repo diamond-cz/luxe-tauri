@@ -5,8 +5,13 @@ export type ColumnMode = "isp6s" | "tone";
 export const COLUMN_SETTINGS_SAVED_EVENT = "luxe:image-table-columns-saved";
 export const COLUMN_SETTINGS_PREVIEW_EVENT = "luxe:image-table-columns-preview";
 export const COLUMN_SETTINGS_CANCEL_EVENT = "luxe:image-table-columns-cancel";
+export const COLUMN_SETTINGS_SCOPE_EVENT = "luxe:image-table-columns-scope";
 
 export type ColumnSettingsSaved = { mode: ColumnMode; settings: ImageTableModeColumns };
+
+export function columnScopeForThumbnail(kind: "mixed" | "portrait" | "scene"): ColumnScope {
+  return kind === "scene" ? "normal" : kind === "portrait" ? "face" : "all";
+}
 
 export function orderedSettingsRows<T extends { id: string }>(rows: T[], settings: ImageTableScopeColumns): T[] {
   const byId = new Map(rows.map((row) => [row.id, row]));

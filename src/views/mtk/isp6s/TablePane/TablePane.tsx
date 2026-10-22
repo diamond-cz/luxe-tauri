@@ -38,7 +38,8 @@ import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
 import { customImageColumnText, imageColumnSourceKeys } from "./imageTableCustomColumns";
-import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
+import { deltaEv, formatDeltaEv, metricDirection, parseMetricResult, selectImageTableEv } from "./imageTableMetrics";
+import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, columnScopeForThumbnail, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
 import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
 import { columnSettingsPlacement } from "./columnSettingsPlacement";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -254,8 +255,13 @@ function formatFaceTargetDelta(value: number | null): string {
 }
 
 function faceTargetDeltaStyle(value: number | null): React.CSSProperties | undefined {
-  return value !== null && Math.abs(value) > 2
-    ? { color: "var(--colorPaletteRedForeground1)" } : undefined;
+  return metricDirectionStyle(value, 5);
+}
+
+function metricDirectionStyle(value: number | null, threshold: number): React.CSSProperties | undefined {
+  const direction = metricDirection(value, threshold);
+  return direction === "positive" ? { color: "var(--colorPaletteRedForeground1)" }
+    : direction === "negative" ? { color: "var(--colorPaletteBlueForeground2)" } : undefined;
 }
 
 function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | null) {
@@ -268,8 +274,8 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
   const backDelta = backExif !== null && backCalculated !== null ? backCalculated - backExif : null;
   const linkDelta = linkExif !== null && linkCalculated !== null ? linkCalculated - linkExif : null;
   const normalDelta = normalExif !== null && normalCalculated !== null ? normalCalculated - normalExif : null;
-  const evPair = linkExif !== null && linkCalculated !== null && linkExif > 0 && linkCalculated > 0
-    ? Math.log2(linkCalculated / linkExif) : null;
+  const evPair = deltaEv(linkExif, linkCalculated);
+  const normalEv = deltaEv(normalExif, normalCalculated);
   return {
     aeGain: formatFaceTargetPair(faceTargetRatio(linkExif, backExif), faceTargetRatio(linkCalculated, backCalculated)),
     normalCwr: formatFaceTargetPair(normalExif, normalCalculated),
@@ -279,7 +285,9 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
     normalDelta,
     backDelta,
     linkDelta,
-    ev: evPair === null ? "-" : `${evPair >= 0 ? "+" : ""}${evPair.toFixed(3)}`,
+    ev: formatDeltaEv(evPair),
+    evPair,
+    normalEv,
   };
 }
 
@@ -1257,6 +1265,7 @@ export function ImageTab({
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
   const openColumnSettingsWindow = async () => {
+    const selectedScope = columnScopeForThumbnail(thumbnailHeaderKind);
     const label = toneMode ? "column-settings-tone" : "column-settings-isp6s";
     const [existing, monitor] = await Promise.all([
       WebviewWindow.getByLabel(label),
@@ -1264,6 +1273,7 @@ export function ImageTab({
     ]);
     const placement = monitor ? columnSettingsPlacement(monitor) : null;
     if (existing) {
+      if (!toneMode) await emit(COLUMN_SETTINGS_SCOPE_EVENT, { scope: selectedScope });
       if (placement && monitor) {
         await existing.setPosition(new PhysicalPosition(
           Math.round(placement.x * monitor.scaleFactor),
@@ -1277,6 +1287,7 @@ export function ImageTab({
     prepareColumnSettingsBootstrap(toneMode ? "tone" : "isp6s", schema, useSettingsStore.getState().settings.theme);
     const url = new URL("/column-settings.html", window.location.href);
     url.searchParams.set("mode", toneMode ? "tone" : "isp6s");
+    if (!toneMode) url.searchParams.set("scope", selectedScope);
     const child = new WebviewWindow(label, {
       url: url.toString(), title: "LUXE Column Settings", resizable: true,
       ...(placement ?? { width: 920, height: 720, minWidth: 680, minHeight: 500, center: true }),
@@ -2145,6 +2156,8 @@ export function ImageTab({
 
 
   const colSpan = displayedColumns.length;
+  const evOverrideColumn = displayedColumns.find((column) => column.kind === "ev" && column.sourceOverride);
+  const deltaOverrideColumn = displayedColumns.find((column) => column.kind === "delta" && column.sourceOverride);
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
   const nameColumnWidth = useMemo(() => entries.reduce(
@@ -2178,13 +2191,13 @@ export function ImageTab({
       for (const { e: entry } of visible.rows) {
         const target = visibleFaceValues[entry.toml_path];
         const data = allParsedRows?.[entry.toml_path] ?? tomls[entry.toml_path] ?? {};
-        const text = imageTableColumnText(column, data, target, sceneOnly);
+        const text = imageTableColumnText(column, data, target, sceneOnly || classifiedKinds?.[entry.toml_path] === "scene");
         width = Math.max(width, estimateImageColumnTextWidth(text));
       }
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, classifiedKinds, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -2351,6 +2364,12 @@ export function ImageTab({
             const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
             const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
             const target = visibleFaceValues[e.toml_path];
+            const rowIsScene = sceneOnly || classifiedKinds?.[e.toml_path] === "scene";
+            const rowEv = selectImageTableEv(sceneOnly, classifiedKinds?.[e.toml_path],
+              target?.normalEv ?? null, target?.evPair ?? null);
+            const evOverrideText = evOverrideColumn ? imageTableColumnText(evOverrideColumn, data, target, rowIsScene) : null;
+            const displayedEv = evOverrideText === null ? rowEv : parseMetricResult(evOverrideText);
+            const deltaOverrideText = deltaOverrideColumn ? imageTableColumnText(deltaOverrideColumn, data, target, rowIsScene) : null;
             const baseBackground = i % 2 === 0 ? "var(--colorNeutralBackground1)"
               : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))";
             const rowBackground = heatmapSelected ? "var(--colorPaletteGreenBackground1)" : baseBackground;
@@ -2397,10 +2416,14 @@ export function ImageTab({
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
+                           : column.kind === "ev"
+                             ? <span style={metricDirectionStyle(displayedEv, 0.005)}>{formatDeltaEv(displayedEv)}</span>
+                           : column.kind === "delta" && deltaOverrideText !== null
+                             ? <span style={faceTargetDeltaStyle(parseMetricResult(deltaOverrideText))}>{deltaOverrideText}</span>
                            : column.sourceOverride
                              ? !toneMode && column.kind === "extra"
                                && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])
-                               ? "-" : imageTableColumnText(column, data, target, sceneOnly)
+                               ? "-" : imageTableColumnText(column, data, target, rowIsScene)
                            : column.kind === "aeGain"
                              ? target?.aeGain ?? "-"
                            : column.kind === "normalCwr"
@@ -2420,7 +2443,7 @@ export function ImageTab({
                                  : !toneMode && column.kind === "extra"
                                  && !column.id.startsWith("custom:")
                                  && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])
-                                 ? "-" : imageTableColumnText(column, data, target, sceneOnly)}
+                                 ? "-" : imageTableColumnText(column, data, target, rowIsScene)}
                    </Td>
                  ))}
               </tr>
@@ -2792,7 +2815,8 @@ function imageTableColumnText(
   if (column.kind === "delta") {
     return sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
   }
-  if (column.kind === "ev") return target?.ev ?? "-";
+  if (column.kind === "ev") return formatDeltaEv(selectImageTableEv(sceneOnly, undefined,
+    target?.normalEv ?? null, target?.evPair ?? null));
   return "-";
 }
 

@@ -7,9 +7,15 @@ const source = readFileSync(new URL("./imageTableColumnSettings.ts", import.meta
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
+const { columnScopeForThumbnail, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
+
+test("settings opens on the visible thumbnail mode", () => {
+  assert.equal(columnScopeForThumbnail("mixed"), "all");
+  assert.equal(columnScopeForThumbnail("portrait"), "face");
+  assert.equal(columnScopeForThumbnail("scene"), "normal");
+});
 
 test("legacy table settings become independent tab snapshots", () => {
   const store = new Map([

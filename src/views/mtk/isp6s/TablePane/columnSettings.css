@@ -102,3 +102,46 @@ html.dark .column-settings-row:hover {
 .column-settings-pin.is-pinned {
   color: var(--colorBrandForeground1) !important;
 }
+
+.column-settings-history-anchor {
+  width: 100%;
+  gap: 2px;
+}
+
+.column-settings-history-toggle,
+.column-settings-history-action {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--colorNeutralForeground2);
+}
+
+.column-settings-history-toggle:hover,
+.column-settings-history-action:hover,
+.column-settings-history-item:hover {
+  background: var(--colorNeutralBackground2);
+}
+
+.column-settings-history-list {
+  position: fixed;
+  z-index: 1000;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 4px;
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  box-shadow: var(--shadow8);
+}
+
+.column-settings-history-item {
+  display: flex;
+  min-height: 36px;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
