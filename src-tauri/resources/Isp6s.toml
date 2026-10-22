@@ -21,6 +21,7 @@ NS    = "AE_TAG_NS_PROB"
 
 # 空景
 [image_table.scene]
+Stable      = "AE_TAG_STABLE"
 BV          = "AE_TAG_REALBVX1000"
 CWV         = "AE_TAG_CWV"
 B2D         = "AE_TAG_DRV6_B2D"

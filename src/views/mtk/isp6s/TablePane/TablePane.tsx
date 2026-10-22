@@ -16,11 +16,11 @@ import {
   DocumentData24Regular,
   CalculatorArrowClockwise24Regular,
   Search24Regular,
-  ChevronLeft24Regular,
-  ChevronRight24Regular,
+  Settings24Regular,
 } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
@@ -33,6 +33,7 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
+import { customImageColumnText, imageColumnSourceKeys, readUserImageColumns, type UserImageTableColumn } from "./imageTableCustomColumns";
 import type { ScrollPosition } from "../workspaceSession";
 
 /** 空景筛选图标：线条树叶和右下角保护标记。 */
@@ -54,12 +55,13 @@ type ImageSortState = {
   key: string;
   direction: ImageSortDirection;
 };
-type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "aeGain" | "normalCwr" | "backCwr" | "cwr" | "delta" | "extra";
+type ImageTableColumnKind = "idx" | "thumbnail" | "name" | "aeGain" | "normalCwr" | "backCwr" | "cwr" | "delta" | "ev" | "extra";
 type ImageTableColumn = {
   id: string;
   kind: ImageTableColumnKind;
   label: string;
   key?: string;
+  scope?: "all" | "face" | "normal";
   align: "left" | "center";
 };
 type ImageTableColumnDragState = {
@@ -123,6 +125,10 @@ const IMAGE_TABLE_PREFETCH_PAGES = 3;
 const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
 const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
 const TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:tone-image-table-column-order";
+const IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY = "luxe:isp6s:image-table-column-visibility";
+const TONE_IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY = "luxe:isp6s:tone-image-table-column-visibility";
+const IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY = "luxe:isp6s:image-table-custom-columns";
+const TONE_IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY = "luxe:isp6s:tone-image-table-custom-columns";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
 const IMAGE_TABLE_GLOBAL_CACHE_LIMIT = 4096;
@@ -257,6 +263,8 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
   const backDelta = backExif !== null && backCalculated !== null ? backCalculated - backExif : null;
   const linkDelta = linkExif !== null && linkCalculated !== null ? linkCalculated - linkExif : null;
   const normalDelta = normalExif !== null && normalCalculated !== null ? normalCalculated - normalExif : null;
+  const evPair = linkExif !== null && linkCalculated !== null && linkExif > 0 && linkCalculated > 0
+    ? Math.log2(linkCalculated / linkExif) : null;
   return {
     aeGain: formatFaceTargetPair(faceTargetRatio(linkExif, backExif), faceTargetRatio(linkCalculated, backCalculated)),
     normalCwr: formatFaceTargetPair(normalExif, normalCalculated),
@@ -266,6 +274,7 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
     normalDelta,
     backDelta,
     linkDelta,
+    ev: evPair === null ? "-" : `${evPair >= 0 ? "+" : ""}${evPair.toFixed(3)}`,
   };
 }
 
@@ -1104,6 +1113,15 @@ export function ImageTab({
   );
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   const faceFdyKey = schema.Image?.FDY ?? "AE_TAG_FLT_FDY";
+  const customColumnsStorageKey = toneMode ? TONE_IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY : IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY;
+  const [userColumns, setUserColumns] = useState<UserImageTableColumn[]>(() => readUserImageColumns(customColumnsStorageKey));
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === customColumnsStorageKey) setUserColumns(readUserImageColumns(customColumnsStorageKey));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [customColumnsStorageKey]);
   const tableColumns = useMemo<ImageTableColumn[]>(
     () => [
       { id: "idx", kind: "idx", label: "idx", align: "center" },
@@ -1114,6 +1132,7 @@ export function ImageTab({
         { id: "normalCwr", kind: "normalCwr" as const, label: "CWR(Normal)", align: "center" as const },
         { id: "backCwr", kind: "backCwr" as const, label: "CWR(BackTar)", align: "center" as const },
         { id: "cwr", kind: "cwr" as const, label: "CWR(FLinkTar)", align: "center" as const },
+        { id: "ev", kind: "ev" as const, label: "ΔEV", align: "center" as const },
         { id: "delta", kind: "delta" as const, label: "∆CWR", align: "center" as const },
       ] : []),
       ...extraCols.map(([label, key], index) => ({
@@ -1123,11 +1142,25 @@ export function ImageTab({
         key,
         align: toneMode || index < 2 ? "center" as const : "left" as const,
       })),
+      ...userColumns.filter((column) => column.source.trim()).map((column) => ({
+        id: `custom:${column.id}`, kind: "extra" as const, label: column.label || "新列",
+        key: column.source.trim(), scope: column.scope, align: "center" as const,
+      })),
     ],
-    [extraCols, toneMode],
+    [extraCols, toneMode, userColumns],
   );
   const columnOrderStorageKey = toneMode ? TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY : IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY;
+  const columnVisibilityStorageKey = toneMode ? TONE_IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY : IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY;
   const [columnOrder, setColumnOrder] = useState<string[]>(() => readImageTableColumnOrder(columnOrderStorageKey));
+  const [hiddenColumnIds, setHiddenColumnIds] = useState<string[]>(() => readStringArray(columnVisibilityStorageKey));
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === columnVisibilityStorageKey) setHiddenColumnIds(readStringArray(columnVisibilityStorageKey));
+      if (event.key === columnOrderStorageKey) setColumnOrder(readImageTableColumnOrder(columnOrderStorageKey));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [columnOrderStorageKey, columnVisibilityStorageKey]);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const columnDragRef = useRef<ImageTableColumnDragState | null>(null);
   const suppressColumnClickRef = useRef(false);
@@ -1140,9 +1173,10 @@ export function ImageTab({
     [columnOrder, tableColumns],
   );
   const imageTomlKeys = useMemo(
-    () => toneMode ? expandImageColumnKeys(extraCols) : [...new Set([...expandImageColumnKeys(extraCols), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
+    () => toneMode ? [...new Set([...expandImageColumnKeys(extraCols), ...userColumns.flatMap((column) => imageColumnSourceKeys(column.source))])]
+      : [...new Set([...expandImageColumnKeys(extraCols), ...userColumns.flatMap((column) => imageColumnSourceKeys(column.source)), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
       .filter((key) => key.length > 0),
-    [extraCols, faceBvKey, toneMode],
+    [extraCols, faceBvKey, toneMode, userColumns],
   );
   const imageTomlKeySignature = useMemo(
     () => imageTomlKeys.join("\u001f"),
@@ -1203,7 +1237,12 @@ export function ImageTab({
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
-  const [nameColumnCollapsed, setNameColumnCollapsed] = useState(false);
+  const openColumnSettingsWindow = async () => {
+    const existing = await WebviewWindow.getByLabel("column-settings");
+    if (existing) { await existing.show(); await existing.setFocus(); return; }
+    const url = `${window.location.origin}${window.location.pathname}?window=column-settings${toneMode ? "&mode=tone" : ""}`;
+    new WebviewWindow("column-settings", { url, title: "LUXE Column Settings", width: 920, height: 720, minWidth: 680, minHeight: 500, center: true, resizable: true });
+  };
   const [showScene, setShowScene] = useState(true);
   const [showPortrait, setShowPortrait] = useState(true);
   const [imageKinds, setImageKinds] = useState<{
@@ -1376,17 +1415,21 @@ export function ImageTab({
     const kind = sceneOnly ? "scene" : portraitOnly ? "portrait" : undefined;
     const mapping = kind && !toneMode ? imageTableMapping(schema, kind) : null;
     return orderedColumns.filter((column) => {
+      if (hiddenColumnIds.includes(column.id)) return false;
       if (column.kind === "extra") {
+        if (column.id.startsWith("custom:")) {
+          return column.scope === "all" || column.scope === (sceneOnly ? "normal" : portraitOnly ? "face" : "all");
+        }
         if (mapping) return Object.values(mapping).includes(column.key ?? "");
         return !sceneOnly || (column.label !== "FaceSt" && column.label !== "1sSt");
       }
       return !sceneOnly || (column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr");
     }).map((column) => {
-      if (!mapping || column.kind !== "extra") return column;
+      if (!mapping || column.kind !== "extra" || column.id.startsWith("custom:")) return column;
       const label = Object.entries(mapping).find(([, key]) => key === column.key)?.[0];
       return label === undefined || label === column.label ? column : { ...column, label };
     });
-  }, [orderedColumns, portraitOnly, sceneOnly, schema, toneMode]);
+  }, [hiddenColumnIds, orderedColumns, portraitOnly, sceneOnly, schema, toneMode]);
 
   useEffect(() => {
     if (toneMode) return;
@@ -1641,11 +1684,12 @@ export function ImageTab({
 
   useEffect(() => {
     if (!sortControlsEnabled || !sortState) return;
-    const stillSortable = extraCols.some(([, key]) => key === sortState.key);
+    const stillSortable = extraCols.some(([, key]) => key === sortState.key)
+      || userColumns.some((column) => column.source.trim() === sortState.key);
     if (!stillSortable) {
       setSortState(null);
     }
-  }, [extraCols, sortControlsEnabled, sortState]);
+  }, [extraCols, sortControlsEnabled, sortState, userColumns]);
 
   useEffect(() => {
     const requestId = sortRequestRef.current + 1;
@@ -1660,12 +1704,21 @@ export function ImageTab({
     setSortLoading(true);
     const paths = entries.map((entry) => entry.toml_path);
     const sortKey = sortState.key;
-    loadImageTomlFieldsBatchShared(paths, [sortKey])
+    const sortKeys = sortKey.startsWith("=") ? imageColumnSourceKeys(sortKey) : [sortKey];
+    if (sortKeys.length === 0) {
+      setSortValues({});
+      setSortLoading(false);
+      return;
+    }
+    loadImageTomlFieldsBatchShared(paths, sortKeys)
       .then((batch) => {
         if (sortRequestRef.current !== requestId) return;
         const nextValues: Record<string, string> = {};
         for (const entry of entries) {
-          nextValues[entry.toml_path] = batch[entry.toml_path]?.[sortKey] ?? "";
+          const data = batch[entry.toml_path] ?? {};
+          nextValues[entry.toml_path] = sortKey.startsWith("=")
+            ? customImageColumnText(sortKey, (key) => tomlLookup(data, key))
+            : tomlLookup(data, sortKey);
         }
         setSortValues(nextValues);
       })
@@ -2061,7 +2114,7 @@ export function ImageTab({
         continue;
       }
       if (column.kind === "name") {
-        byId[column.id] = nameColumnCollapsed ? 48 : nameColumnWidth;
+        byId[column.id] = nameColumnWidth;
         continue;
       }
       const minWidth = column.kind === "idx" ? 34 : 52;
@@ -2081,21 +2134,20 @@ export function ImageTab({
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnCollapsed, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
     for (const column of tableColumns) {
       const fallback = baseColumnWidths.byId[column.id] ?? 72;
-      const width = column.id === "name" && nameColumnCollapsed
-        ? 48 : columnWidthOverrides[column.id] ?? fallback;
+      const width = columnWidthOverrides[column.id] ?? fallback;
       byId[column.id] = width;
     }
     return {
       byId,
       table: displayedColumns.reduce((sum, column) => sum + (byId[column.id] ?? 72), 0),
     };
-  }, [baseColumnWidths, columnWidthOverrides, displayedColumns, nameColumnCollapsed, tableColumns]);
+  }, [baseColumnWidths, columnWidthOverrides, displayedColumns, tableColumns]);
 
   const startColumnResize = (column: string, initialWidth: number, minWidth: number) =>
     (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -2179,9 +2231,9 @@ export function ImageTab({
                   columnId={column.id}
                   align={column.align}
                   dragOver={dragOverColumnId === column.id}
-                  stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
-                  onPointerDown={column.kind === "idx" || column.kind === "thumbnail" ? undefined : startImageTableColumnDrag(column.id)}
-                  onResizeStart={column.kind === "name" && nameColumnCollapsed ? undefined : startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
+                  stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : column.kind === "name" ? (columnWidths.byId.idx ?? 34) + (columnWidths.byId.thumbnail ?? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH) : undefined}
+                  onPointerDown={column.kind === "idx" || column.kind === "thumbnail" || column.kind === "name" ? undefined : startImageTableColumnDrag(column.id)}
+                  onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
                 >
                   {column.kind === "idx" ? (
                     <span>idx</span>
@@ -2215,17 +2267,11 @@ export function ImageTab({
                       </button>
                     </span>
                   ) : column.kind === "name" ? (
-                    <div className="relative flex w-full items-center justify-center">
-                      <button type="button" className="absolute left-0.5 inline-flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90"
-                        style={{ color: "var(--colorNeutralForeground2)" }}
-                        title={nameColumnCollapsed ? "展开 FILENAME 列" : "折叠 FILENAME 列"}
-                        aria-label={nameColumnCollapsed ? "展开 FILENAME 列" : "折叠 FILENAME 列"}
-                        aria-expanded={!nameColumnCollapsed}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => { event.stopPropagation(); setNameColumnCollapsed((value) => !value); }}>
-                        {nameColumnCollapsed ? <ChevronRight24Regular className="h-4 w-4" /> : <ChevronLeft24Regular className="h-4 w-4" />}
+                    <div className="flex w-full min-w-0 items-center justify-center gap-1">
+                      <button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90" title="表格列设置" aria-label="表格列设置" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void openColumnSettingsWindow(); }}>
+                        <Settings24Regular className="h-4 w-4" />
                       </button>
-                      {!nameColumnCollapsed && <span className="max-w-full truncate px-7 font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>}
+                      <span className="min-w-0 truncate font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>
                     </div>
                   ) : column.kind !== "extra" ? (
                     column.label
@@ -2277,7 +2323,7 @@ export function ImageTab({
                      key={column.id}
                      align={column.align}
                      compact={column.kind === "thumbnail"}
-                     stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : undefined}
+                     stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : column.kind === "name" ? (columnWidths.byId.idx ?? 34) + (columnWidths.byId.thumbnail ?? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH) : undefined}
                      stickyBackground={column.kind === "idx" && i === current ? baseBackground
                      : i === current ? IMAGE_TABLE_SELECTED_BACKGROUND : rowBackground}
                      selected={column.kind === "idx" && i === current}
@@ -2318,6 +2364,7 @@ export function ImageTab({
                                    <span>|</span>
                                    <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
                                : !toneMode && column.kind === "extra"
+                                 && !column.id.startsWith("custom:")
                                  && !isImageTableColumnMapped(schema, column.key ?? "", classifiedKinds?.[e.toml_path])
                                  ? "-" : imageTableColumnText(column, data, target, sceneOnly)}
                    </Td>
@@ -2654,6 +2701,9 @@ function imageTableColumnText(
   sceneOnly: boolean,
 ): string {
   if (column.kind === "extra") {
+    if (column.id.startsWith("custom:")) {
+      return customImageColumnText(column.key ?? "", (key) => tomlLookup(data, key));
+    }
     const keys = (column.key ?? "").split("").filter(Boolean);
     const fallbackKeys: Record<string, string[]> = {
       LV: ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"],
@@ -2684,6 +2734,7 @@ function imageTableColumnText(
   if (column.kind === "delta") {
     return sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
   }
+  if (column.kind === "ev") return target?.ev ?? "-";
   return "-";
 }
 
@@ -2716,6 +2767,10 @@ function readImageTableColumnOrder(storageKey: string): string[] {
   }
 }
 
+function readStringArray(storageKey: string): string[] {
+  try { const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]"); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; } catch { return []; }
+}
+
 function writeImageTableColumnOrder(storageKey: string, order: string[]) {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(order));
@@ -2744,7 +2799,8 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
   }
   if (defaults.includes("idx")) {
     return ["idx", ...(defaults.includes("thumbnail") ? ["thumbnail"] : []),
-      ...next.filter((id) => id !== "idx" && id !== "thumbnail")];
+      ...(defaults.includes("name") ? ["name"] : []),
+      ...next.filter((id) => id !== "idx" && id !== "thumbnail" && id !== "name")];
   }
   return next;
 }

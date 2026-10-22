@@ -1,0 +1,48 @@
+.column-settings-window {
+  background: var(--colorNeutralBackground1);
+}
+
+.column-settings-header,
+.column-settings-grid.border-b,
+.column-settings-window .border-t {
+  border-color: var(--colorNeutralStroke2);
+}
+
+.column-settings-grid {
+  grid-template-columns: minmax(140px, 1.1fr) minmax(220px, 2fr) 40px 64px;
+}
+
+.column-settings-row {
+  border-color: var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+html.dark .column-settings-row {
+  background: var(--colorNeutralBackground2);
+}
+
+.column-settings-row:hover {
+  border-color: var(--colorNeutralStroke1);
+  background: var(--colorNeutralBackground2);
+}
+
+html.dark .column-settings-row:hover {
+  background: var(--colorNeutralBackground3);
+}
+
+.column-settings-row.is-dragging {
+  border-color: var(--colorBrandStroke1);
+  background: var(--colorNeutralBackground2);
+}
+
+.column-settings-handle:hover,
+.column-settings-handle:focus-visible {
+  color: var(--colorBrandForeground1) !important;
+  background: var(--colorNeutralBackground3);
+}
+
+.column-settings-handle:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1);
+  outline-offset: 1px;
+}

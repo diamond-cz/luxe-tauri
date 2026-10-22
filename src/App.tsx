@@ -11,7 +11,8 @@ import { GlobalTitleTooltip } from "@/components/common/HoverTooltip";
 import { useShellBootstrap } from "@/hooks/useShellBootstrap";
 import { useIdleMemoryTrim } from "@/hooks/useIdleMemoryTrim";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { saveStateSection } from "@/ipc/stateIo";
+import { loadState, saveStateSection } from "@/ipc/stateIo";
+import { ColumnSettingsWindow } from "@/views/mtk/isp6s/TablePane/ColumnSettingsWindow";
 
 const HomeView = lazy(() => import("@/views/HomeView").then(({ HomeView }) => ({ default: HomeView })));
 const MtkView = lazy(() => import("@/views/mtk/MtkView").then(({ MtkView }) => ({ default: MtkView })));
@@ -20,16 +21,33 @@ const UnisocView = lazy(() => import("@/views/UnisocView").then(({ UnisocView })
 const SettingsView = lazy(() => import("@/views/settings/SettingsView").then(({ SettingsView }) => ({ default: SettingsView })));
 
 export default function App() {
+  const columnSettingsWindow = new URLSearchParams(window.location.search).get("window") === "column-settings";
   const themeKey = useSettingsStore((s) => s.settings.theme);
   const theme    = pickTheme(themeKey);
+  useEffect(() => {
+    if (!columnSettingsWindow) return;
+    let active = true;
+    void loadState().then((state) => {
+      if (active) useSettingsStore.getState().setSettings(state.settings);
+    }).catch((error) => console.warn("load column settings theme", error));
+    return () => { active = false; };
+  }, [columnSettingsWindow]);
+  useEffect(() => {
+    if (!columnSettingsWindow) return;
+    const light = themeKey === "light" || (themeKey === "system" && !window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.classList.toggle("light", light);
+    document.documentElement.classList.toggle("dark", !light);
+  }, [columnSettingsWindow, themeKey]);
 
   return (
     <FluentProvider theme={theme} className="h-full">
       <ErrorBoundary>
-        <MemoryRouter initialEntries={["/home"]}>
-          <ShellRoot />
-          <GlobalTitleTooltip />
-        </MemoryRouter>
+        {columnSettingsWindow
+          ? <ColumnSettingsWindow />
+          : <MemoryRouter initialEntries={["/home"]}>
+            <ShellRoot />
+            <GlobalTitleTooltip />
+          </MemoryRouter>}
       </ErrorBoundary>
     </FluentProvider>
   );
