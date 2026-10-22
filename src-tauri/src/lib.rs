@@ -93,6 +93,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::state_cmds::load_state,
             commands::state_cmds::save_state_section,
+            commands::state_cmds::save_image_table_mode,
             commands::state_cmds::flush_state_now,
             commands::window_cmds::compute_adaptive_geometry,
             commands::window_cmds::current_avail_rect,

@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use super::state_schema::StateRoot;
+use super::state_schema::{ImageTableColumns, ImageTableModeColumns, StateRoot};
 use crate::error::{AppError, AppResult};
 
 const STATE_FILE_NAME: &str = "state.toml";
@@ -124,6 +124,33 @@ impl StateStore {
         Ok(())
     }
 
+    pub async fn save_image_table_mode(
+        self: &Arc<Self>,
+        mode: &str,
+        value: ImageTableModeColumns,
+        legacy_other: ImageTableModeColumns,
+    ) -> AppResult<()> {
+        if mode != "isp6s" && mode != "tone" {
+            return Err(AppError::Other(format!("invalid image table mode: {mode}")));
+        }
+        {
+            let mut root = self.root.write();
+            let columns = root.image_table_columns.get_or_insert_with(|| {
+                let mut columns = ImageTableColumns::default();
+                if mode == "isp6s" { columns.tone = legacy_other; }
+                else { columns.isp6s = legacy_other; }
+                columns
+            });
+            match mode {
+                "isp6s" => columns.isp6s = value,
+                "tone" => columns.tone = value,
+                _ => unreachable!(),
+            }
+        }
+        self.schedule_flush().await;
+        Ok(())
+    }
+
     pub async fn schedule_flush(self: &Arc<Self>) {
         let mut guard = self.debouncer.lock().await;
         if let Some(prev) = guard.take() {
@@ -164,5 +191,40 @@ impl StateStore {
             prev.abort();
         }
         self.write_now()
+    }
+}
+
+#[cfg(test)]
+mod image_table_mode_tests {
+    use super::{ImageTableModeColumns, StateStore};
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[tokio::test]
+    async fn simultaneous_modes_keep_their_own_settings_after_reload() {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("luxe-columns-{}-{nonce}", std::process::id()));
+        let preferred = dir.join("resources/state.toml");
+        let fallback = dir.join("user/state.toml");
+        let store = Arc::new(StateStore::load_paths(preferred.clone(), fallback.clone()).unwrap());
+        let mut isp6s = ImageTableModeColumns::default();
+        isp6s.face.hidden.push("ev".into());
+        let mut tone = ImageTableModeColumns::default();
+        tone.all.order.push("extra:SW_LCE_LV".into());
+
+        let (first, second) = tokio::join!(
+            store.save_image_table_mode("isp6s", isp6s, ImageTableModeColumns::default()),
+            store.save_image_table_mode("tone", tone, ImageTableModeColumns::default()),
+        );
+        first.unwrap();
+        second.unwrap();
+        store.flush_now().await.unwrap();
+
+        let restored = StateStore::load_paths(preferred, fallback).unwrap().snapshot();
+        let columns = restored.image_table_columns.unwrap();
+        assert_eq!(columns.isp6s.face.hidden, vec!["ev"]);
+        assert_eq!(columns.tone.all.order, vec!["extra:SW_LCE_LV"]);
+        assert!(columns.isp6s.normal.hidden.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

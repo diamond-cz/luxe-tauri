@@ -1,62 +1,86 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Switch, Tab, TabList } from "@fluentui/react-components";
-import { Add24Regular, Delete24Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { Add24Regular, ArrowReset24Regular, ArrowUp24Regular, Checkmark24Regular, Delete24Regular, Dismiss24Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
+import { getIsp6sSchema } from "@/ipc/cppParser";
+import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
+import type { ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
+import type { ColumnSettingsSchema } from "./columnSettingsBootstrap";
+import { COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
 import "./columnSettings.css";
 
-type Scope = "all" | "face" | "normal";
-type UserColumn = { id: string; label: string; source: string; scope: Scope };
+type EditableField = "label" | "source";
+type UserColumn = ImageTableScopeColumns["custom"][number];
 type ColumnRow = { id: string; label: string; source: string; custom?: UserColumn };
 
-const SETTINGS_KEYS = {
-  isp6s: { visibility: "luxe:isp6s:image-table-column-visibility", order: "luxe:isp6s:image-table-column-order", custom: "luxe:isp6s:image-table-custom-columns" },
-  tone: { visibility: "luxe:isp6s:tone-image-table-column-visibility", order: "luxe:isp6s:tone-image-table-column-order", custom: "luxe:isp6s:tone-image-table-custom-columns" },
-} as const;
+const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 
-const COMPUTED_COLUMNS: Record<Scope, ColumnRow[]> = {
+const COMPUTED_COLUMNS: Record<ColumnScope, ColumnRow[]> = {
   all: [
-    { id: "aeGain", label: "AEGain(new)", source: "计算：人像 AE 增益" },
-    { id: "normalCwr", label: "CWR(Normal)", source: "计算：空景 CWR" },
-    { id: "backCwr", label: "CWR(BackTar)", source: "计算：BackTar CWR" },
-    { id: "cwr", label: "CWR(FLinkTar)", source: "计算：FLinkTar CWR" },
-    { id: "delta", label: "∆CWR", source: "CWR(new) - CWR(old)" },
-    { id: "ev", label: "ΔEV", source: "log₂(CWR_new / CWR_old)" },
+    { id: "aeGain", label: "AEGain(new)", source: "=FLinkTar_new / BackTar_new" },
+    { id: "normalCwr", label: "CWR(Normal)", source: "Normal_old (Normal_new)" },
+    { id: "backCwr", label: "CWR(BackTar)", source: "BackTar_old (BackTar_new)" },
+    { id: "cwr", label: "CWR(FLinkTar)", source: "FLinkTar_old (FLinkTar_new)" },
+    { id: "delta", label: "∆CWR", source: "=CWR_new - CWR_old" },
+    { id: "ev", label: "ΔEV", source: "=log2(CWR_new / CWR_old)" },
   ],
   face: [
-    { id: "aeGain", label: "AEGain(new)", source: "计算：人像 AE 增益" },
-    { id: "normalCwr", label: "CWR(Normal)", source: "计算：Normal CWR" },
-    { id: "backCwr", label: "CWR(BackTar)", source: "计算：BackTar CWR" },
-    { id: "cwr", label: "CWR(FLinkTar)", source: "计算：FLinkTar CWR" },
-    { id: "delta", label: "∆CWR", source: "CWR(new) - CWR(old)" },
-    { id: "ev", label: "ΔEV", source: "log₂(CWR_new / CWR_old)" },
+    { id: "aeGain", label: "AEGain(new)", source: "=FLinkTar_new / BackTar_new" },
+    { id: "normalCwr", label: "CWR(Normal)", source: "Normal_old (Normal_new)" },
+    { id: "backCwr", label: "CWR(BackTar)", source: "BackTar_old (BackTar_new)" },
+    { id: "cwr", label: "CWR(FLinkTar)", source: "FLinkTar_old (FLinkTar_new)" },
+    { id: "delta", label: "∆CWR", source: "=CWR_new - CWR_old" },
+    { id: "ev", label: "ΔEV", source: "=log2(CWR_new / CWR_old)" },
   ],
   normal: [
-    { id: "normalCwr", label: "CWR(Normal)", source: "计算：空景 CWR" },
-    { id: "delta", label: "∆CWR", source: "CWR(new) - CWR(old)" },
-    { id: "ev", label: "ΔEV", source: "log₂(CWR_new / CWR_old)" },
+    { id: "normalCwr", label: "CWR(Normal)", source: "Normal_old (Normal_new)" },
+    { id: "delta", label: "∆CWR", source: "=CWR_new - CWR_old" },
+    { id: "ev", label: "ΔEV", source: "=log2(CWR_new / CWR_old)" },
   ],
 };
 
-export function ColumnSettingsWindow() {
+export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: ColumnSettingsSchema }) {
   const tone = new URLSearchParams(window.location.search).get("mode") === "tone";
-  const keys = tone ? SETTINGS_KEYS.tone : SETTINGS_KEYS.isp6s;
-  const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
-  const [scope, setScope] = useState<Scope>("all");
-  const [hidden, setHidden] = useState<string[]>(() => readArray(keys.visibility));
-  const [order, setOrder] = useState<string[]>(() => readArray(keys.order));
-  const [custom, setCustom] = useState<UserColumn[]>(() => readCustom(keys.custom));
+  const mode: ColumnMode = tone ? "tone" : "isp6s";
+  const [schema, setSchema] = useState<ColumnSettingsSchema | null>(initialSchema ?? null);
+  const [scope, setScope] = useState<ColumnScope>("all");
+  const [modeSettings, setModeSettings] = useState<ImageTableModeColumns>(() => readLegacyColumnMode(mode));
+  const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pending, setPending] = useState<UserColumn | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<EditableField>("label");
+  const [draft, setDraft] = useState({ label: "", source: "" });
+  const listRef = useRef<HTMLDivElement>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const { hidden, order, custom, edits, deleted } = modeSettings[scope];
+  const updateScope = (update: (current: ImageTableScopeColumns) => ImageTableScopeColumns) => {
+    setModeSettings((current) => ({ ...current, [scope]: update(current[scope]) }));
+  };
 
   useEffect(() => {
+    let active = true;
+    void loadState().then((state) => {
+      if (active) setModeSettings(state.image_table_columns
+        ? normalizeColumnMode(state.image_table_columns[mode]) : readLegacyColumnMode(mode));
+    }).catch((error) => {
+      if (active) setSaveError(`读取列设置失败：${String(error)}`);
+    }).finally(() => { if (active) setReady(true); });
+    return () => { active = false; };
+  }, [mode]);
+
+  useEffect(() => {
+    if (initialSchema) return;
     let active = true;
     void getIsp6sSchema().then((result) => { if (active) setSchema(result); })
       .catch((error) => console.warn("load image table columns", error));
     return () => { active = false; };
-  }, []);
+  }, [initialSchema]);
 
   const defaultRows = useMemo(() => {
     if (!schema) return [] as ColumnRow[];
@@ -90,14 +114,72 @@ export function ColumnSettingsWindow() {
   const rows = useMemo(() => {
     const scopedCustom = custom.filter((column) => column.scope === scope)
       .map((column) => ({ id: `custom:${column.id}`, label: column.label, source: column.source, custom: column }));
-    const values: ColumnRow[] = [...defaultRows, ...scopedCustom];
+    const values: ColumnRow[] = [...defaultRows.filter((row) => !deleted.includes(row.id))
+      .map((row) => ({ ...row, label: edits[row.id]?.label ?? row.label, source: edits[row.id]?.source ?? row.source })),
+      ...scopedCustom, ...(pending?.scope === scope ? [{ id: `custom:${pending.id}`, label: pending.label, source: pending.source, custom: pending }] : [])];
     const positions = new Map(order.map((id, index) => [id, index]));
     return values.sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER));
-  }, [custom, defaultRows, order, scope]);
+  }, [custom, defaultRows, deleted, edits, order, pending, scope]);
 
-  useEffect(() => { writeArray(keys.visibility, hidden); }, [hidden, keys.visibility]);
-  useEffect(() => { writeArray(keys.order, order); }, [keys.order, order]);
-  useEffect(() => { writeCustom(keys.custom, custom); }, [custom, keys.custom]);
+  useLayoutEffect(() => {
+    if (pending?.scope === scope && listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [pending?.id, scope]);
+
+  const saveEdit = (row: ColumnRow) => {
+    const label = draft.label.trim();
+    const source = draft.source.trim();
+    if (!label || !source) return;
+    const originalSource = row.source.replaceAll("\u001d", " / ");
+    const savedSource = source === originalSource ? row.source : source;
+    if (pending && pending.id === row.custom?.id) {
+      updateScope((current) => ({ ...current, custom: [...current.custom, { ...pending, label, source: savedSource }] }));
+      setPending(null);
+    } else if (row.custom) {
+      updateScope((current) => ({ ...current, custom: current.custom.map((column) => column.id === row.custom?.id
+        ? { ...column, label, source: savedSource } : column) }));
+    } else {
+      const original = defaultRows.find((column) => column.id === row.id);
+      if (!original) return;
+      updateScope((current) => {
+        const next = { ...current.edits };
+        const edit = {
+          ...(label !== original.label ? { label } : {}),
+          ...(savedSource !== original.source ? { source: savedSource } : {}),
+        };
+        if (Object.keys(edit).length > 0) next[row.id] = edit;
+        else delete next[row.id];
+        return { ...current, edits: next };
+      });
+    }
+    setEditingId(null);
+  };
+
+  const deleteRow = (row: ColumnRow) => {
+    if (pending?.id === row.custom?.id) setPending(null);
+    updateScope((current) => ({
+      ...current,
+      custom: row.custom ? current.custom.filter((column) => column.id !== row.custom?.id) : current.custom,
+      deleted: row.custom ? current.deleted : [...new Set([...current.deleted, row.id])],
+      hidden: current.hidden.filter((id) => id !== row.id),
+      order: current.order.filter((id) => id !== row.id),
+    }));
+    if (editingId === row.id) setEditingId(null);
+  };
+
+  const moveToTop = (id: string) => {
+    updateScope((current) => ({ ...current, order: [id, ...rows.map((row) => row.id).filter((item) => item !== id)] }));
+  };
+
+  const startEditing = (row: ColumnRow, field: EditableField) => {
+    if (pending?.id !== row.custom?.id) setPending(null);
+    if (editingId !== row.id) {
+      setDraft({ label: row.label, source: row.source.replaceAll("\u001d", " / ") });
+    }
+    setEditingId(row.id);
+    setEditingField(field);
+  };
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
@@ -105,82 +187,129 @@ export function ColumnSettingsWindow() {
     const to = rows.findIndex((row) => row.id === over.id);
     if (from < 0 || to < 0) return;
     const moved = arrayMove(rows.map((row) => row.id), from, to);
-    setOrder((current) => {
+    updateScope((scopeSettings) => {
       const present = new Set(moved);
-      const next = [...current];
+      const next = [...scopeSettings.order];
       for (const id of moved) if (!next.includes(id)) next.push(id);
       let offset = 0;
-      return next.map((id) => present.has(id) ? moved[offset++] : id);
+      return { ...scopeSettings, order: next.map((id) => present.has(id) ? moved[offset++] : id) };
     });
+  };
+
+  const complete = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveImageTableMode(mode, modeSettings, readLegacyColumnMode(mode === "isp6s" ? "tone" : "isp6s"));
+      await flushStateNow();
+      await emit(COLUMN_SETTINGS_SAVED_EVENT, { mode, settings: modeSettings });
+      await getCurrentWindow().close();
+    } catch (error) {
+      setSaveError(`保存列设置失败：${String(error)}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="column-settings-window flex h-full min-h-0 flex-col" style={{ color: "var(--colorNeutralForeground1)" }}>
-      <header className="column-settings-header flex shrink-0 items-center justify-between gap-4 border-b px-7 py-5">
+      <header className="column-settings-header flex shrink-0 items-center gap-8 border-b px-7 py-3">
         <h1 className="text-base font-semibold">表格列设置</h1>
-        <Button appearance="primary" onClick={() => void getCurrentWindow().close()}>完成</Button>
+        {!tone && <TabList selectedValue={scope} onTabSelect={(_, data) => {
+          setPending(null);
+          setEditingId(null);
+          setScope(data.value as ColumnScope);
+        }}>
+          <Tab value="all" disabled={!ready}>All</Tab><Tab value="face" disabled={!ready}>Face</Tab><Tab value="normal" disabled={!ready}>Normal</Tab>
+        </TabList>}
       </header>
       <div className="flex min-h-0 flex-1 flex-col px-7 pb-6">
-        <TabList className="shrink-0 pt-3" selectedValue={scope} onTabSelect={(_, data) => setScope(data.value as Scope)}>
-          <Tab value="all">all</Tab><Tab value="face">face</Tab><Tab value="normal">normal</Tab>
-        </TabList>
-        <div className="column-settings-grid grid shrink-0 items-center gap-4 border-b px-4 py-3 text-xs font-semibold" style={{ color: "var(--colorNeutralForeground2)" }}>
-          <span>列标题名称</span><span>数据来源</span><span className="text-center">排序</span><span className="text-center">显示</span>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto py-2 pr-1">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" aria-busy={!ready} style={{ pointerEvents: ready ? undefined : "none" }}>
+          <div className="column-settings-grid column-settings-table-header sticky top-0 z-10 grid items-center gap-4 border-b px-4 py-3 text-xs font-semibold" style={{ color: "var(--colorNeutralForeground2)" }}>
+            <span>列标题名称</span><span>关键字或公式</span><span className="column-settings-control-cell">操作</span><span className="column-settings-control-cell">排序</span><span className="column-settings-control-cell">显示</span>
+          </div>
+          <DndContext sensors={sensors} modifiers={[verticalOnly]} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={rows.map((row) => row.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-2.5">
+              <div className="flex flex-col gap-2.5 py-2">
                 {rows.map((row) => <SortableColumnRow key={row.id} row={row} visible={!hidden.includes(row.id)}
-                  onVisibilityChange={(visible) => setHidden((current) => visible ? current.filter((id) => id !== row.id) : [...new Set([...current, row.id])])}
-                  onCustomChange={(patch) => setCustom((current) => current.map((column) => column.id === row.custom?.id ? { ...column, ...patch } : column))}
-                  onDelete={() => { setCustom((current) => current.filter((column) => column.id !== row.custom?.id)); setHidden((current) => current.filter((id) => id !== row.id)); setOrder((current) => current.filter((id) => id !== row.id)); }} />)}
+                  onVisibilityChange={(visible) => updateScope((current) => ({ ...current, hidden: visible
+                    ? current.hidden.filter((id) => id !== row.id) : [...new Set([...current.hidden, row.id])] }))}
+                  editing={editingId === row.id} editingField={editingField} draft={draft} onDraftChange={setDraft}
+                  onEdit={(field) => startEditing(row, field)} onMoveToTop={() => moveToTop(row.id)} atTop={rows[0]?.id === row.id}
+                  onSave={() => saveEdit(row)} onCancel={() => { if (pending?.id === row.custom?.id) setPending(null); setEditingId(null); }} onDelete={() => deleteRow(row)} />)}
               </div>
             </SortableContext>
           </DndContext>
         </div>
-        <div className="shrink-0 border-t pt-4" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-          <Button icon={<Add24Regular />} onClick={() => setCustom((current) => [...current, { id: crypto.randomUUID(), label: "新列", source: "", scope }])}>添加表格列</Button>
+        {saveError && <p role="alert" className="shrink-0 py-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{saveError}</p>}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t pt-4" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+          <div className="flex min-w-0 items-center gap-2">
+            <Button icon={<Add24Regular />} disabled={!ready || saving} onClick={() => {
+              const id = crypto.randomUUID();
+              setPending({ id, label: "新列", source: "", scope });
+              setDraft({ label: "新列", source: "" });
+              setEditingId(`custom:${id}`);
+              setEditingField("label");
+            }}>添加表格列</Button>
+            {deleted.length > 0 && <Button appearance="subtle" icon={<ArrowReset24Regular />} disabled={!ready || saving}
+              onClick={() => updateScope((current) => ({ ...current, deleted: [] }))}>恢复已删除列</Button>}
+          </div>
+          <Button appearance="primary" icon={<Checkmark24Regular />} disabled={!ready || saving || editingId !== null} onClick={() => void complete()}>{saving ? "保存中" : "完成"}</Button>
         </div>
       </div>
     </div>
   );
 }
 
-function SortableColumnRow({ row, visible, onVisibilityChange, onCustomChange, onDelete }: {
+function SortableColumnRow({ row, visible, editing, editingField, draft, atTop, onVisibilityChange, onDraftChange, onEdit, onMoveToTop, onSave, onCancel, onDelete }: {
   row: ColumnRow;
   visible: boolean;
+  editing: boolean;
+  editingField: EditableField;
+  draft: { label: string; source: string };
+  atTop: boolean;
   onVisibilityChange: (visible: boolean) => void;
-  onCustomChange: (patch: Partial<UserColumn>) => void;
+  onDraftChange: (draft: { label: string; source: string }) => void;
+  onEdit: (field: EditableField) => void;
+  onMoveToTop: () => void;
+  onSave: () => void;
+  onCancel: () => void;
   onDelete: () => void;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: row.id });
   return (
-    <div ref={setNodeRef} className={`column-settings-row column-settings-grid grid min-h-[74px] items-center gap-4 rounded-md border px-4 py-2.5${isDragging ? " is-dragging" : ""}`}
+    <div ref={setNodeRef} className={`column-settings-row column-settings-grid grid min-h-[60px] items-center gap-4 rounded-md border px-4 py-2${isDragging ? " is-dragging" : ""}`}
       style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 2 : undefined, position: "relative", boxShadow: isDragging ? "var(--shadow8)" : undefined }}>
       <div className="min-w-0">
-        {row.custom ? <Input size="small" className="w-full" value={row.custom.label} aria-label="列标题名称" onChange={(_, data) => onCustomChange({ label: data.value })} />
-          : <span className="block truncate text-sm font-semibold" title={row.label}>{row.label}</span>}
+        {editing && editingField === "label" ? <Input autoFocus size="small" className="w-full" value={draft.label} aria-label="列标题名称"
+          onChange={(_, data) => onDraftChange({ ...draft, label: data.value })}
+          onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} />
+          : <button type="button" className="column-settings-editable block w-full truncate rounded px-2 py-1 text-left text-sm font-semibold" title={`编辑列标题：${row.label}`} onClick={() => onEdit("label")}>{editing ? draft.label : row.label}</button>}
       </div>
-      <div className="flex min-w-0 items-center gap-2">
-        {row.custom ? <div className="min-w-0 flex-1"><span className="block text-xs font-semibold">自定义字段</span><Input size="small" className="mt-1 w-full" value={row.custom.source} aria-label="关键字或公式" placeholder="TOML 关键字或 = 公式" onChange={(_, data) => onCustomChange({ source: data.value })} /></div>
-          : <div className="min-w-0" title={row.source}><span className="block text-xs font-semibold">{row.id.startsWith("extra:") ? "TOML 字段" : "计算结果"}</span><span className="block min-w-0 break-all text-xs leading-5" style={{ color: "var(--colorNeutralForeground2)" }}>{row.source.replaceAll("\u001d", " / ")}</span></div>}
-        {row.custom && <Button appearance="subtle" size="small" icon={<Delete24Regular />} aria-label={`删除 ${row.label}`} title="删除列" onClick={onDelete} />}
+      <div className="min-w-0">
+        {editing && editingField === "source" ? <Input autoFocus size="small" className="w-full" value={draft.source} aria-label="关键字或公式" placeholder="TOML 关键字或 = 公式"
+          onChange={(_, data) => onDraftChange({ ...draft, source: data.value })}
+          onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} />
+          : <button type="button" className="column-settings-editable block w-full min-w-0 break-all rounded px-2 py-1 text-left text-xs leading-5" style={{ color: "var(--colorNeutralForeground2)" }} title={`编辑关键字或公式：${row.source}`} onClick={() => onEdit("source")}>{(editing ? draft.source : row.source).replaceAll("\u001d", " / ") || "-"}</button>}
       </div>
-      <button ref={setActivatorNodeRef} type="button" {...attributes} {...listeners} title="按住拖拽调整顺序" aria-label={`拖动 ${row.label} 调整顺序`}
-        className="column-settings-handle flex h-9 w-9 cursor-grab items-center justify-center rounded-md active:cursor-grabbing" style={{ color: "var(--colorNeutralForeground2)", touchAction: "none" }}>
-        <ReOrderDotsVertical24Regular className="h-5 w-5" />
-      </button>
-      <Switch className="justify-self-center" checked={visible} aria-label={`显示 ${row.label}`} onChange={(_, data) => onVisibilityChange(data.checked)} />
+      <div className="column-settings-control-cell gap-1">
+        {editing ? <>
+          <Button appearance="subtle" size="small" icon={<Checkmark24Regular />} aria-label={`保存 ${row.label}`} title="保存" disabled={!draft.label.trim() || !draft.source.trim()} onClick={onSave} />
+          <Button appearance="subtle" size="small" icon={<Dismiss24Regular />} aria-label={`取消编辑 ${row.label}`} title="取消" onClick={onCancel} />
+        </> : <>
+          <Button appearance="subtle" size="small" icon={<ArrowUp24Regular />} aria-label={`置顶 ${row.label}`} title="移至顶部" disabled={atTop} onClick={onMoveToTop} />
+          <Button appearance="subtle" size="small" icon={<Delete24Regular />} aria-label={`删除 ${row.label}`} title="删除列" onClick={onDelete} />
+        </>}
+      </div>
+      <div className="column-settings-control-cell">
+        <button ref={setActivatorNodeRef} type="button" {...attributes} {...listeners} title="按住拖拽调整顺序" aria-label={`拖动 ${row.label} 调整顺序`}
+          className="column-settings-handle flex h-9 w-9 cursor-grab items-center justify-center rounded-md active:cursor-grabbing" style={{ color: "var(--colorNeutralForeground2)", touchAction: "none" }}>
+          <ReOrderDotsVertical24Regular className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="column-settings-control-cell">
+        <Switch className="column-settings-visibility" checked={visible} aria-label={`显示 ${row.label}`} onChange={(_, data) => onVisibilityChange(data.checked)} />
+      </div>
     </div>
   );
 }
-
-function readArray(key: string): string[] {
-  try { const value: unknown = JSON.parse(localStorage.getItem(key) ?? "[]"); return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; } catch { return []; }
-}
-function writeArray(key: string, value: string[]) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable. */ } }
-function readCustom(key: string): UserColumn[] {
-  try { const value: unknown = JSON.parse(localStorage.getItem(key) ?? "[]"); return Array.isArray(value) ? value.filter((item): item is UserColumn => Boolean(item) && typeof item.id === "string" && typeof item.label === "string" && typeof item.source === "string" && ["all", "face", "normal"].includes(item.scope)) : []; } catch { return []; }
-}
-function writeCustom(key: string, value: UserColumn[]) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable. */ } }

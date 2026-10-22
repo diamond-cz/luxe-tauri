@@ -9,7 +9,25 @@
 }
 
 .column-settings-grid {
-  grid-template-columns: minmax(140px, 1.1fr) minmax(220px, 2fr) 40px 64px;
+  grid-template-columns: minmax(125px, 1fr) minmax(200px, 1.7fr) 68px 40px 56px;
+}
+
+.column-settings-table-header {
+  background: var(--colorNeutralBackground1);
+  border-color: var(--colorNeutralStroke2);
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+}
+
+.column-settings-control-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.column-settings-visibility {
+  padding: 0;
 }
 
 .column-settings-row {
@@ -34,6 +52,25 @@ html.dark .column-settings-row:hover {
 .column-settings-row.is-dragging {
   border-color: var(--colorBrandStroke1);
   background: var(--colorNeutralBackground2);
+}
+
+.column-settings-editable {
+  cursor: text;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.column-settings-editable:hover {
+  color: var(--colorBrandForeground1) !important;
+  background: var(--colorNeutralBackground3);
+}
+
+.column-settings-editable:active {
+  background: var(--colorNeutralBackground4);
+}
+
+.column-settings-editable:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1);
+  outline-offset: 1px;
 }
 
 .column-settings-handle:hover,

@@ -20,8 +20,46 @@ pub struct StateRoot {
     pub mtk:              Mtk,
     #[serde(default)]
     pub isp6s_ae_visual:  Isp6sAeVisual,
+    #[serde(default)]
+    pub image_table_columns: Option<ImageTableColumns>,
 }
 fn default_last_route() -> String { "/home".into() }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageTableColumns {
+    #[serde(default)] pub isp6s: ImageTableModeColumns,
+    #[serde(default)] pub tone: ImageTableModeColumns,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageTableModeColumns {
+    #[serde(default)] pub all: ImageTableScopeColumns,
+    #[serde(default)] pub face: ImageTableScopeColumns,
+    #[serde(default)] pub normal: ImageTableScopeColumns,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageTableScopeColumns {
+    #[serde(default)] pub order: Vec<String>,
+    #[serde(default)] pub hidden: Vec<String>,
+    #[serde(default)] pub deleted: Vec<String>,
+    #[serde(default)] pub edits: BTreeMap<String, ImageTableColumnEdit>,
+    #[serde(default)] pub custom: Vec<ImageTableCustomColumn>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImageTableColumnEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTableCustomColumn {
+    pub id: String,
+    pub label: String,
+    pub source: String,
+    pub scope: String,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MainWindow {
@@ -231,5 +269,43 @@ mod preview_mode_tests {
         let restored: Isp6sAeVisual = serde_json::from_str(&serde_json::to_string(&selected).unwrap()).unwrap();
         assert_eq!(restored.tone_preview_mode, "param_map");
         assert_eq!(restored.preview_mode, "chart_map");
+    }
+}
+
+#[cfg(test)]
+mod image_table_column_tests {
+    use super::{ImageTableColumnEdit, ImageTableColumns, ImageTableCustomColumn, StateRoot};
+
+    #[test]
+    fn column_tabs_round_trip_independently_in_toml() {
+        let mut state = StateRoot::default();
+        let mut columns = ImageTableColumns::default();
+        columns.isp6s.all.hidden.push("ev".into());
+        columns.isp6s.face.order = vec!["cwr".into(), "ev".into()];
+        columns.isp6s.face.edits.insert("ev".into(), ImageTableColumnEdit {
+            label: Some("Face EV".into()), source: None,
+        });
+        columns.isp6s.normal.custom.push(ImageTableCustomColumn {
+            id: "custom-1".into(), label: "Normal value".into(),
+            source: "AE_TAG_REALBVX1000".into(), scope: "normal".into(),
+        });
+        state.image_table_columns = Some(columns);
+
+        let text = toml::to_string_pretty(&state).unwrap();
+        let restored: StateRoot = toml::from_str(&text).unwrap();
+        let saved = restored.image_table_columns.unwrap().isp6s;
+        assert_eq!(saved.all.hidden, vec!["ev"]);
+        assert!(saved.face.hidden.is_empty());
+        assert_eq!(saved.face.order, vec!["cwr", "ev"]);
+        assert_eq!(saved.face.edits["ev"].label.as_deref(), Some("Face EV"));
+        assert_eq!(saved.normal.custom[0].scope, "normal");
+        assert!(saved.all.custom.is_empty());
+    }
+
+    #[test]
+    fn older_state_has_no_column_settings_to_allow_migration() {
+        let old = toml::to_string_pretty(&StateRoot::default()).unwrap();
+        let restored: StateRoot = toml::from_str(&old).unwrap();
+        assert!(restored.image_table_columns.is_none());
     }
 }

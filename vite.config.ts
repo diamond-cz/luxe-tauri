@@ -59,6 +59,10 @@ export default defineConfig({
     minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        columnSettings: path.resolve(__dirname, "column-settings.html"),
+      },
       output: {
         manualChunks,
       },

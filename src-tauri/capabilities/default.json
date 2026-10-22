@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the LUXE main window",
-  "windows": ["main", "column-settings"],
+  "windows": ["main", "column-settings-isp6s", "column-settings-tone"],
   "permissions": [
     "core:default",
     "core:window:default",

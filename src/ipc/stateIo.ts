@@ -3,6 +3,7 @@ import type {
   AvailRect,
   SavedGeom,
   StateRoot,
+  ImageTableModeColumns,
   TargetGeom,
 } from "@/types/ipc";
 
@@ -16,6 +17,13 @@ let stateWrites: Promise<void> = Promise.resolve();
 export const saveStateSection = (section: string, value: unknown) => {
   const pending = stateWrites.catch(() => {}).then(() =>
     call<void>("save_state_section", { section, value }));
+  stateWrites = pending;
+  return pending;
+};
+
+export const saveImageTableMode = (mode: "isp6s" | "tone", value: ImageTableModeColumns, legacyOther: ImageTableModeColumns) => {
+  const pending = stateWrites.catch(() => {}).then(() =>
+    call<void>("save_image_table_mode", { mode, value, legacyOther }));
   stateWrites = pending;
   return pending;
 };

@@ -78,6 +78,26 @@ export interface StateRoot {
   homepage:        Homepage;
   mtk:             Mtk;
   isp6s_ae_visual: Isp6sAeVisual;
+  image_table_columns?: ImageTableColumns | null;
+}
+
+export interface ImageTableScopeColumns {
+  order: string[];
+  hidden: string[];
+  deleted: string[];
+  edits: Record<string, { label?: string; source?: string }>;
+  custom: Array<{ id: string; label: string; source: string; scope: "all" | "face" | "normal" }>;
+}
+
+export interface ImageTableModeColumns {
+  all: ImageTableScopeColumns;
+  face: ImageTableScopeColumns;
+  normal: ImageTableScopeColumns;
+}
+
+export interface ImageTableColumns {
+  isp6s: ImageTableModeColumns;
+  tone: ImageTableModeColumns;
 }
 
 export interface SavedGeom {

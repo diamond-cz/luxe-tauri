@@ -19,21 +19,29 @@ import {
   Settings24Regular,
 } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { emit, listen } from "@tauri-apps/api/event";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
 import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
+import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
+import type { ImageTableModeColumns } from "@/types/ipc";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { LceChart } from "./LceChart";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
-import { customImageColumnText, imageColumnSourceKeys, readUserImageColumns, type UserImageTableColumn } from "./imageTableCustomColumns";
+import { customImageColumnText, imageColumnSourceKeys } from "./imageTableCustomColumns";
+import { COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
+import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
+import { columnSettingsPlacement } from "./columnSettingsPlacement";
+import { useSettingsStore } from "@/stores/settingsStore";
 import type { ScrollPosition } from "../workspaceSession";
 
 /** 空景筛选图标：线条树叶和右下角保护标记。 */
@@ -60,7 +68,10 @@ type ImageTableColumn = {
   id: string;
   kind: ImageTableColumnKind;
   label: string;
+  originalLabel?: string;
   key?: string;
+  originalKey?: string;
+  sourceOverride?: boolean;
   scope?: "all" | "face" | "normal";
   align: "left" | "center";
 };
@@ -123,12 +134,6 @@ const IMAGE_TABLE_PREFETCH_DELAY_MS = 90;
 const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
 const IMAGE_TABLE_PREFETCH_PAGES = 3;
 const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
-const IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:image-table-column-order";
-const TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY = "luxe:isp6s:tone-image-table-column-order";
-const IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY = "luxe:isp6s:image-table-column-visibility";
-const TONE_IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY = "luxe:isp6s:tone-image-table-column-visibility";
-const IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY = "luxe:isp6s:image-table-custom-columns";
-const TONE_IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY = "luxe:isp6s:tone-image-table-custom-columns";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
 const IMAGE_TABLE_GLOBAL_CACHE_LIMIT = 4096;
@@ -1113,17 +1118,29 @@ export function ImageTab({
   );
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   const faceFdyKey = schema.Image?.FDY ?? "AE_TAG_FLT_FDY";
-  const customColumnsStorageKey = toneMode ? TONE_IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY : IMAGE_TABLE_CUSTOM_COLUMNS_STORAGE_KEY;
-  const [userColumns, setUserColumns] = useState<UserImageTableColumn[]>(() => readUserImageColumns(customColumnsStorageKey));
+  const columnMode: ColumnMode = toneMode ? "tone" : "isp6s";
+  const [modeSettings, setModeSettings] = useState<ImageTableModeColumns>(() => readLegacyColumnMode(columnMode));
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === customColumnsStorageKey) setUserColumns(readUserImageColumns(customColumnsStorageKey));
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [customColumnsStorageKey]);
+    let active = true;
+    let updates = 0;
+    let unlisten: (() => void) | undefined;
+    void listen<ColumnSettingsSaved>(COLUMN_SETTINGS_SAVED_EVENT, ({ payload }) => {
+      if (active && payload.mode === columnMode) {
+        updates += 1;
+        setModeSettings(normalizeColumnMode(payload.settings));
+      }
+    }).then((stop) => { if (active) unlisten = stop; else stop(); })
+      .catch((error) => console.warn("listen image table columns", error));
+    void loadState().then((state) => {
+      if (active && updates === 0) setModeSettings(state.image_table_columns
+        ? normalizeColumnMode(state.image_table_columns[columnMode]) : readLegacyColumnMode(columnMode));
+    }).catch((error) => console.warn("load image table columns", error));
+    return () => { active = false; unlisten?.(); };
+  }, [columnMode]);
+  const allCustomColumns = useMemo(() => Object.values(modeSettings).flatMap((settings) => settings.custom), [modeSettings]);
   const tableColumns = useMemo<ImageTableColumn[]>(
-    () => [
+    () => {
+      return [
       { id: "idx", kind: "idx", label: "idx", align: "center" },
       { id: "thumbnail", kind: "thumbnail", label: "Thumbnail", align: "center" },
       { id: "name", kind: "name", label: "FileName", align: "left" },
@@ -1142,41 +1159,27 @@ export function ImageTab({
         key,
         align: toneMode || index < 2 ? "center" as const : "left" as const,
       })),
-      ...userColumns.filter((column) => column.source.trim()).map((column) => ({
+      ...allCustomColumns.filter((column) => column.source.trim()).map((column) => ({
         id: `custom:${column.id}`, kind: "extra" as const, label: column.label || "新列",
         key: column.source.trim(), scope: column.scope, align: "center" as const,
       })),
-    ],
-    [extraCols, toneMode, userColumns],
+      ];
+    },
+    [allCustomColumns, extraCols, toneMode],
   );
-  const columnOrderStorageKey = toneMode ? TONE_IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY : IMAGE_TABLE_COLUMN_ORDER_STORAGE_KEY;
-  const columnVisibilityStorageKey = toneMode ? TONE_IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY : IMAGE_TABLE_COLUMN_VISIBILITY_STORAGE_KEY;
-  const [columnOrder, setColumnOrder] = useState<string[]>(() => readImageTableColumnOrder(columnOrderStorageKey));
-  const [hiddenColumnIds, setHiddenColumnIds] = useState<string[]>(() => readStringArray(columnVisibilityStorageKey));
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === columnVisibilityStorageKey) setHiddenColumnIds(readStringArray(columnVisibilityStorageKey));
-      if (event.key === columnOrderStorageKey) setColumnOrder(readImageTableColumnOrder(columnOrderStorageKey));
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [columnOrderStorageKey, columnVisibilityStorageKey]);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const columnDragRef = useRef<ImageTableColumnDragState | null>(null);
   const suppressColumnClickRef = useRef(false);
-  const orderedColumns = useMemo(
-    () => mergeImageTableColumnOrder(
-      columnOrder,
-      tableColumns.map((column) => column.id),
-    ).map((id) => tableColumns.find((column) => column.id === id))
-      .filter((column): column is ImageTableColumn => Boolean(column)),
-    [columnOrder, tableColumns],
-  );
+  const columnEditSourceKeys = (["all", "face", "normal"] as const).flatMap((scope) =>
+    Object.values(modeSettings[scope].edits).flatMap((edit) => edit.source ? imageColumnSourceKeys(edit.source) : []));
+  const columnEditSourceSignature = columnEditSourceKeys.join("\u001f");
   const imageTomlKeys = useMemo(
-    () => toneMode ? [...new Set([...expandImageColumnKeys(extraCols), ...userColumns.flatMap((column) => imageColumnSourceKeys(column.source))])]
-      : [...new Set([...expandImageColumnKeys(extraCols), ...userColumns.flatMap((column) => imageColumnSourceKeys(column.source)), faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
+    () => toneMode ? [...new Set([...expandImageColumnKeys(extraCols), ...allCustomColumns.flatMap((column) => imageColumnSourceKeys(column.source)),
+      ...columnEditSourceKeys])]
+      : [...new Set([...expandImageColumnKeys(extraCols), ...allCustomColumns.flatMap((column) => imageColumnSourceKeys(column.source)),
+        ...columnEditSourceKeys, faceBvKey, ...FACE_LINK_TARGET_IMAGE_KEYS])]
       .filter((key) => key.length > 0),
-    [extraCols, faceBvKey, toneMode, userColumns],
+    [allCustomColumns, columnEditSourceSignature, extraCols, faceBvKey, toneMode],
   );
   const imageTomlKeySignature = useMemo(
     () => imageTomlKeys.join("\u001f"),
@@ -1238,10 +1241,31 @@ export function ImageTab({
   const [sortLoading, setSortLoading] = useState(false);
   const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
   const openColumnSettingsWindow = async () => {
-    const existing = await WebviewWindow.getByLabel("column-settings");
-    if (existing) { await existing.show(); await existing.setFocus(); return; }
-    const url = `${window.location.origin}${window.location.pathname}?window=column-settings${toneMode ? "&mode=tone" : ""}`;
-    new WebviewWindow("column-settings", { url, title: "LUXE Column Settings", width: 920, height: 720, minWidth: 680, minHeight: 500, center: true, resizable: true });
+    const label = toneMode ? "column-settings-tone" : "column-settings-isp6s";
+    const [existing, monitor] = await Promise.all([
+      WebviewWindow.getByLabel(label),
+      currentMonitor().catch(() => null),
+    ]);
+    const placement = monitor ? columnSettingsPlacement(monitor) : null;
+    if (existing) {
+      if (placement && monitor) {
+        await existing.setPosition(new PhysicalPosition(
+          Math.round(placement.x * monitor.scaleFactor),
+          Math.round(placement.y * monitor.scaleFactor),
+        ));
+      }
+      await existing.show();
+      await existing.setFocus();
+      return;
+    }
+    prepareColumnSettingsBootstrap(toneMode ? "tone" : "isp6s", schema, useSettingsStore.getState().settings.theme);
+    const url = new URL("/column-settings.html", window.location.href);
+    url.searchParams.set("mode", toneMode ? "tone" : "isp6s");
+    const child = new WebviewWindow(label, {
+      url: url.toString(), title: "LUXE Column Settings", resizable: true,
+      ...(placement ?? { width: 920, height: 720, minWidth: 680, minHeight: 500, center: true }),
+    });
+    void child.once("tauri://error", (event) => console.error("open column settings", event.payload));
   };
   const [showScene, setShowScene] = useState(true);
   const [showPortrait, setShowPortrait] = useState(true);
@@ -1411,25 +1435,39 @@ export function ImageTab({
     || (canFilterKinds && activeKindFilter === "scene");
   const portraitOnly = (Boolean(classifiedKinds) && hasPortrait && !hasScene && !hasNa)
     || (canFilterKinds && activeKindFilter === "portrait");
+  const columnScope: ColumnScope = toneMode ? "all" : sceneOnly ? "normal" : portraitOnly ? "face" : "all";
+  const activeColumnSettings = modeSettings[columnScope];
+  const orderedColumns = useMemo(() => {
+    const scoped = tableColumns.filter((column) => !column.scope || column.scope === columnScope).map((column) => {
+      const edit = activeColumnSettings.edits[column.id];
+      if (!edit) return column;
+      return { ...column, label: edit.label ?? column.label, originalLabel: column.label,
+        key: edit.source ?? column.key, originalKey: column.key,
+        sourceOverride: edit.source !== undefined };
+    });
+    return mergeImageTableColumnOrder(activeColumnSettings.order, scoped.map((column) => column.id))
+      .map((id) => scoped.find((column) => column.id === id))
+      .filter((column): column is ImageTableColumn => Boolean(column));
+  }, [activeColumnSettings.edits, activeColumnSettings.order, columnScope, tableColumns]);
   const displayedColumns = useMemo(() => {
     const kind = sceneOnly ? "scene" : portraitOnly ? "portrait" : undefined;
     const mapping = kind && !toneMode ? imageTableMapping(schema, kind) : null;
     return orderedColumns.filter((column) => {
-      if (hiddenColumnIds.includes(column.id)) return false;
+      if (activeColumnSettings.hidden.includes(column.id) || activeColumnSettings.deleted.includes(column.id)) return false;
       if (column.kind === "extra") {
-        if (column.id.startsWith("custom:")) {
-          return column.scope === "all" || column.scope === (sceneOnly ? "normal" : portraitOnly ? "face" : "all");
-        }
-        if (mapping) return Object.values(mapping).includes(column.key ?? "");
-        return !sceneOnly || (column.label !== "FaceSt" && column.label !== "1sSt");
+        if (column.id.startsWith("custom:")) return true;
+        if (mapping) return Object.values(mapping).includes(column.originalKey ?? column.key ?? "");
+        return !sceneOnly || ((column.originalLabel ?? column.label) !== "FaceSt"
+          && (column.originalLabel ?? column.label) !== "1sSt");
       }
       return !sceneOnly || (column.kind !== "aeGain" && column.kind !== "backCwr" && column.kind !== "cwr");
     }).map((column) => {
       if (!mapping || column.kind !== "extra" || column.id.startsWith("custom:")) return column;
-      const label = Object.entries(mapping).find(([, key]) => key === column.key)?.[0];
+      const label = Object.entries(mapping).find(([, key]) => key === (column.originalKey ?? column.key))?.[0];
+      if (activeColumnSettings.edits[column.id]?.label) return column;
       return label === undefined || label === column.label ? column : { ...column, label };
     });
-  }, [hiddenColumnIds, orderedColumns, portraitOnly, sceneOnly, schema, toneMode]);
+  }, [activeColumnSettings.deleted, activeColumnSettings.edits, activeColumnSettings.hidden, orderedColumns, portraitOnly, sceneOnly, schema, toneMode]);
 
   useEffect(() => {
     if (toneMode) return;
@@ -1581,20 +1619,6 @@ export function ImageTab({
     writeImageTableSortControlsEnabled(sortControlsEnabled);
   }, [sortControlsEnabled]);
 
-  useEffect(() => {
-    const nextOrder = mergeImageTableColumnOrder(
-      columnOrder,
-      tableColumns.map((column) => column.id),
-    );
-    if (!areImageTableColumnOrdersEqual(columnOrder, nextOrder)) {
-      setColumnOrder(nextOrder);
-    }
-  }, [columnOrder, tableColumns]);
-
-  useEffect(() => {
-    writeImageTableColumnOrder(columnOrderStorageKey, columnOrder);
-  }, [columnOrder, columnOrderStorageKey]);
-
   useEffect(() => () => {
     cancelImageTableColumnDrag();
   }, []);
@@ -1684,12 +1708,12 @@ export function ImageTab({
 
   useEffect(() => {
     if (!sortControlsEnabled || !sortState) return;
-    const stillSortable = extraCols.some(([, key]) => key === sortState.key)
-      || userColumns.some((column) => column.source.trim() === sortState.key);
+    const stillSortable = displayedColumns.some((column) => column.kind === "extra"
+      && column.key === sortState.key);
     if (!stillSortable) {
       setSortState(null);
     }
-  }, [extraCols, sortControlsEnabled, sortState, userColumns]);
+  }, [displayedColumns, sortControlsEnabled, sortState]);
 
   useEffect(() => {
     const requestId = sortRequestRef.current + 1;
@@ -1906,17 +1930,21 @@ export function ImageTab({
   function swapImageTableColumns(firstId: string, secondId: string) {
     if (firstId === secondId || firstId === "idx" || secondId === "idx"
       || firstId === "thumbnail" || secondId === "thumbnail") return;
-    setColumnOrder((current) => {
-      const next = mergeImageTableColumnOrder(
-        current,
-        tableColumns.map((column) => column.id),
-      );
-      const firstIndex = next.indexOf(firstId);
-      const secondIndex = next.indexOf(secondId);
-      if (firstIndex < 0 || secondIndex < 0) return current;
-      [next[firstIndex], next[secondIndex]] = [next[secondIndex], next[firstIndex]];
-      return next;
-    });
+    const nextOrder = orderedColumns.map((column) => column.id);
+    const firstIndex = nextOrder.indexOf(firstId);
+    const secondIndex = nextOrder.indexOf(secondId);
+    if (firstIndex < 0 || secondIndex < 0) return;
+    [nextOrder[firstIndex], nextOrder[secondIndex]] = [nextOrder[secondIndex], nextOrder[firstIndex]];
+    const nextModeSettings = { ...modeSettings,
+      [columnScope]: { ...activeColumnSettings, order: nextOrder },
+    };
+    setModeSettings(nextModeSettings);
+    void (async () => {
+      await saveImageTableMode(columnMode, nextModeSettings,
+        readLegacyColumnMode(columnMode === "isp6s" ? "tone" : "isp6s"));
+      await flushStateNow();
+      await emit(COLUMN_SETTINGS_SAVED_EVENT, { mode: columnMode, settings: nextModeSettings });
+    })().catch((error) => console.warn("save image table column order", error));
   }
 
   function startImageTableColumnDrag(columnId: string) {
@@ -2223,7 +2251,7 @@ export function ImageTab({
                 : column.kind === "thumbnail"
                   ? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH
                   : column.kind === "name"
-                    ? 160
+                    ? 80
                     : 52;
               return (
                 <Th
@@ -2267,11 +2295,11 @@ export function ImageTab({
                       </button>
                     </span>
                   ) : column.kind === "name" ? (
-                    <div className="flex w-full min-w-0 items-center justify-center gap-1">
+                    <div className="flex w-full min-w-0 items-center justify-between gap-1">
+                      <span className="min-w-0 truncate text-left font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>
                       <button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90" title="表格列设置" aria-label="表格列设置" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void openColumnSettingsWindow(); }}>
                         <Settings24Regular className="h-4 w-4" />
                       </button>
-                      <span className="min-w-0 truncate font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>
                     </div>
                   ) : column.kind !== "extra" ? (
                     column.label
@@ -2347,6 +2375,10 @@ export function ImageTab({
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
+                           : column.sourceOverride
+                             ? !toneMode && column.kind === "extra"
+                               && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])
+                               ? "-" : imageTableColumnText(column, data, target, sceneOnly)
                            : column.kind === "aeGain"
                              ? target?.aeGain ?? "-"
                            : column.kind === "normalCwr"
@@ -2363,9 +2395,9 @@ export function ImageTab({
                                    <span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
                                    <span>|</span>
                                    <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
-                               : !toneMode && column.kind === "extra"
+                                 : !toneMode && column.kind === "extra"
                                  && !column.id.startsWith("custom:")
-                                 && !isImageTableColumnMapped(schema, column.key ?? "", classifiedKinds?.[e.toml_path])
+                                 && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])
                                  ? "-" : imageTableColumnText(column, data, target, sceneOnly)}
                    </Td>
                  ))}
@@ -2700,10 +2732,14 @@ function imageTableColumnText(
   target: ReturnType<typeof imageFaceTargetValues> | null | undefined,
   sceneOnly: boolean,
 ): string {
+  if (column.sourceOverride) return customImageColumnText(column.key ?? "", (key) =>
+    imageTableFormulaAlias(key, target, sceneOnly) ?? tomlLookup(data, key));
   if (column.kind === "extra") {
     if (column.id.startsWith("custom:")) {
-      return customImageColumnText(column.key ?? "", (key) => tomlLookup(data, key));
+      return customImageColumnText(column.key ?? "", (key) =>
+        imageTableFormulaAlias(key, target, sceneOnly) ?? tomlLookup(data, key));
     }
+    const sourceLabel = column.originalLabel ?? column.label;
     const keys = (column.key ?? "").split("").filter(Boolean);
     const fallbackKeys: Record<string, string[]> = {
       LV: ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"],
@@ -2713,15 +2749,15 @@ function imageTableColumnText(
       Target: ["SW_LCE_FinalTarget"],
       AEGain: ["SW_LCE_AEGain"],
     };
-    const resolvedKeys = keys.length > 0 ? keys : (fallbackKeys[column.label] ?? []);
-    const fallback = fallbackKeys[column.label] ?? [];
+    const resolvedKeys = keys.length > 0 ? keys : (fallbackKeys[sourceLabel] ?? []);
+    const fallback = fallbackKeys[sourceLabel] ?? [];
     if (resolvedKeys.length === 1 && tomlLookup(data, resolvedKeys[0]) === "-" && fallback.length > 0) {
       return tomlLookup(data, fallback[0]);
     }
     if (resolvedKeys.length > 1) {
-      return formatLcePreviewInfoValue({ label: column.label, toml_keys: resolvedKeys }, data);
+      return formatLcePreviewInfoValue({ label: sourceLabel, toml_keys: resolvedKeys }, data);
     }
-    if (resolvedKeys.length === 1 && column.label === "AEGain") {
+    if (resolvedKeys.length === 1 && sourceLabel === "AEGain") {
       return formatLcePreviewInfoValue({ label: "AEGain", toml_key: resolvedKeys[0] }, data);
     }
     if (resolvedKeys.length === 1) return tomlLookup(data, resolvedKeys[0]);
@@ -2738,6 +2774,24 @@ function imageTableColumnText(
   return "-";
 }
 
+function imageTableFormulaAlias(
+  key: string,
+  target: ReturnType<typeof imageFaceTargetValues> | null | undefined,
+  sceneOnly: boolean,
+): string | null {
+  const pairs: Record<string, string | undefined> = {
+    Normal: target?.normalCwr,
+    BackTar: target?.backCwr,
+    FLinkTar: target?.cwr,
+    CWR: sceneOnly ? target?.normalCwr : target?.cwr,
+    AEGain: target?.aeGain,
+  };
+  const match = /^(Normal|BackTar|FLinkTar|CWR|AEGain)_(old|new)$/.exec(key);
+  if (!match) return null;
+  const pair = /^([^()]*)\(([^()]*)\)$/.exec(pairs[match[1]] ?? "");
+  return pair?.[match[2] === "old" ? 1 : 2] || "-";
+}
+
 function expandImageColumnKeys(columns: ReadonlyArray<ReadonlyArray<string>>): string[] {
   return [...new Set(columns.flatMap(([, key]) => key.split("").filter(Boolean)))];
 }
@@ -2752,31 +2806,6 @@ function estimateImageColumnTextWidth(value: string): number {
     return Math.ceil(imageColumnMeasureContext.measureText(value || "-").width + 20);
   }
   return Math.ceil((value || "-").length * 8 + 20);
-}
-
-function readImageTableColumnOrder(storageKey: string): string[] {
-  try {
-    const stored = window.localStorage.getItem(storageKey);
-    if (!stored) return [];
-    const parsed: unknown = JSON.parse(stored);
-    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
-      ? parsed
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function readStringArray(storageKey: string): string[] {
-  try { const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]"); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; } catch { return []; }
-}
-
-function writeImageTableColumnOrder(storageKey: string, order: string[]) {
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(order));
-  } catch {
-    // Ignore storage failures; the in-memory order still works for this mount.
-  }
 }
 
 function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string[] {
@@ -2803,10 +2832,6 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
       ...next.filter((id) => id !== "idx" && id !== "thumbnail" && id !== "name")];
   }
   return next;
-}
-
-function areImageTableColumnOrdersEqual(first: string[], second: string[]): boolean {
-  return first.length === second.length && first.every((id, index) => id === second[index]);
 }
 
 function readImageTableSortControlsEnabled(): boolean {

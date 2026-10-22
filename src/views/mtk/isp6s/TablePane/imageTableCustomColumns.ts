@@ -5,6 +5,24 @@ export type UserImageTableColumn = {
   scope: "all" | "face" | "normal";
 };
 
+export type ImageTableColumnOverride = { label?: string; source?: string };
+export type ImageTableColumnOverrides = Record<string, ImageTableColumnOverride>;
+
+export function readImageTableColumnOverrides(key: string): ImageTableColumnOverrides {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, ImageTableColumnOverride] => {
+      const edit = entry[1] as ImageTableColumnOverride | null;
+      if (!edit || typeof edit !== "object") return false;
+      return (edit.label === undefined || typeof edit.label === "string")
+        && (edit.source === undefined || typeof edit.source === "string");
+    }));
+  } catch {
+    return {};
+  }
+}
+
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.]*/;
 const NUMBER = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/;
 const FUNCTIONS: Record<string, (values: number[]) => number> = {
