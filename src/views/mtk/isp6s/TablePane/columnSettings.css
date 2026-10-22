@@ -83,3 +83,22 @@ html.dark .column-settings-row:hover {
   outline: 2px solid var(--colorBrandStroke1);
   outline-offset: 1px;
 }
+
+.column-settings-pin {
+  color: var(--colorNeutralForeground3) !important;
+  transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.column-settings-pin:hover,
+.column-settings-pin:focus-visible {
+  color: var(--colorBrandForeground1) !important;
+  background: var(--colorNeutralBackground3) !important;
+}
+
+.column-settings-pin:active {
+  transform: scale(0.9);
+}
+
+.column-settings-pin.is-pinned {
+  color: var(--colorBrandForeground1) !important;
+}

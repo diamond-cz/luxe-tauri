@@ -83,6 +83,7 @@ export interface StateRoot {
 
 export interface ImageTableScopeColumns {
   order: string[];
+  pinned: string[];
   hidden: string[];
   deleted: string[];
   edits: Record<string, { label?: string; source?: string }>;

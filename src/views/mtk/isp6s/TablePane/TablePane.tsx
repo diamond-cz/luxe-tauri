@@ -38,7 +38,7 @@ import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
 import { customImageColumnText, imageColumnSourceKeys } from "./imageTableCustomColumns";
-import { COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
+import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
 import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
 import { columnSettingsPlacement } from "./columnSettingsPlacement";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -1123,19 +1123,35 @@ export function ImageTab({
   useEffect(() => {
     let active = true;
     let updates = 0;
-    let unlisten: (() => void) | undefined;
+    const unlisten: Array<() => void> = [];
     void listen<ColumnSettingsSaved>(COLUMN_SETTINGS_SAVED_EVENT, ({ payload }) => {
       if (active && payload.mode === columnMode) {
         updates += 1;
         setModeSettings(normalizeColumnMode(payload.settings));
       }
-    }).then((stop) => { if (active) unlisten = stop; else stop(); })
+    }).then((stop) => { if (active) unlisten.push(stop); else stop(); })
       .catch((error) => console.warn("listen image table columns", error));
+    void listen<ColumnSettingsSaved>(COLUMN_SETTINGS_PREVIEW_EVENT, ({ payload }) => {
+      if (active && payload.mode === columnMode) {
+        updates += 1;
+        setModeSettings(normalizeColumnMode(payload.settings));
+      }
+    }).then((stop) => { if (active) unlisten.push(stop); else stop(); })
+      .catch((error) => console.warn("listen image table columns preview", error));
+    void listen<{ mode: ColumnMode }>(COLUMN_SETTINGS_CANCEL_EVENT, ({ payload }) => {
+      if (!active || payload.mode !== columnMode) return;
+      updates += 1;
+      void loadState().then((state) => {
+        if (active) setModeSettings(state.image_table_columns
+          ? normalizeColumnMode(state.image_table_columns[columnMode]) : readLegacyColumnMode(columnMode));
+      }).catch((error) => console.warn("restore image table columns", error));
+    }).then((stop) => { if (active) unlisten.push(stop); else stop(); })
+      .catch((error) => console.warn("listen image table columns cancel", error));
     void loadState().then((state) => {
       if (active && updates === 0) setModeSettings(state.image_table_columns
         ? normalizeColumnMode(state.image_table_columns[columnMode]) : readLegacyColumnMode(columnMode));
     }).catch((error) => console.warn("load image table columns", error));
-    return () => { active = false; unlisten?.(); };
+    return () => { active = false; unlisten.forEach((stop) => stop()); };
   }, [columnMode]);
   const allCustomColumns = useMemo(() => Object.values(modeSettings).flatMap((settings) => settings.custom), [modeSettings]);
   const tableColumns = useMemo<ImageTableColumn[]>(
@@ -1445,10 +1461,16 @@ export function ImageTab({
         key: edit.source ?? column.key, originalKey: column.key,
         sourceOverride: edit.source !== undefined };
     });
-    return mergeImageTableColumnOrder(activeColumnSettings.order, scoped.map((column) => column.id))
+    const merged = mergeImageTableColumnOrder(activeColumnSettings.order, scoped.map((column) => column.id));
+    const fixed = merged.filter((id) => id === "idx" || id === "thumbnail" || id === "name");
+    const fixedSet = new Set<string>(fixed);
+    const pinned = activeColumnSettings.pinned
+      .filter((id, index) => merged.includes(id) && !fixedSet.has(id) && activeColumnSettings.pinned.indexOf(id) === index);
+    const pinnedSet = new Set(pinned);
+    return [...fixed, ...pinned, ...merged.filter((id) => !fixedSet.has(id) && !pinnedSet.has(id))]
       .map((id) => scoped.find((column) => column.id === id))
       .filter((column): column is ImageTableColumn => Boolean(column));
-  }, [activeColumnSettings.edits, activeColumnSettings.order, columnScope, tableColumns]);
+  }, [activeColumnSettings.edits, activeColumnSettings.order, activeColumnSettings.pinned, columnScope, tableColumns]);
   const displayedColumns = useMemo(() => {
     const kind = sceneOnly ? "scene" : portraitOnly ? "portrait" : undefined;
     const mapping = kind && !toneMode ? imageTableMapping(schema, kind) : null;

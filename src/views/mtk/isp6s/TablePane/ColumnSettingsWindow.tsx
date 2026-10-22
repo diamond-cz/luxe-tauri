@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Switch, Tab, TabList } from "@fluentui/react-components";
-import { Add24Regular, ArrowReset24Regular, ArrowUp24Regular, Checkmark24Regular, Delete24Regular, Dismiss24Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
+import { Add24Regular, ArrowReset24Regular, Checkmark24Regular, Delete24Regular, Dismiss24Regular, Pin24Filled, Pin24Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -10,7 +10,7 @@ import { getIsp6sSchema } from "@/ipc/cppParser";
 import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
 import type { ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
 import type { ColumnSettingsSchema } from "./columnSettingsBootstrap";
-import { COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
+import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
 import "./columnSettings.css";
 
 type EditableField = "label" | "source";
@@ -57,8 +57,9 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
   const [editingField, setEditingField] = useState<EditableField>("label");
   const [draft, setDraft] = useState({ label: "", source: "" });
   const listRef = useRef<HTMLDivElement>(null);
+  const committedRef = useRef(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const { hidden, order, custom, edits, deleted } = modeSettings[scope];
+  const { hidden, order, pinned, custom, edits, deleted } = modeSettings[scope];
   const updateScope = (update: (current: ImageTableScopeColumns) => ImageTableScopeColumns) => {
     setModeSettings((current) => ({ ...current, [scope]: update(current[scope]) }));
   };
@@ -72,6 +73,31 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
       if (active) setSaveError(`读取列设置失败：${String(error)}`);
     }).finally(() => { if (active) setReady(true); });
     return () => { active = false; };
+  }, [mode]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void emit(COLUMN_SETTINGS_PREVIEW_EVENT, { mode, settings: modeSettings })
+      .catch((error) => console.warn("preview image table columns", error));
+  }, [mode, modeSettings, ready]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      event.preventDefault();
+      if (!active) return;
+      if (!committedRef.current) {
+        try {
+          await emit(COLUMN_SETTINGS_CANCEL_EVENT, { mode });
+        } catch (error) {
+          console.warn("cancel image table columns preview", error);
+        }
+      }
+      await getCurrentWindow().destroy();
+    }).then((stop) => { if (active) unlisten = stop; else stop(); })
+      .catch((error) => console.warn("listen column settings close", error));
+    return () => { active = false; unlisten?.(); };
   }, [mode]);
 
   useEffect(() => {
@@ -117,9 +143,8 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
     const values: ColumnRow[] = [...defaultRows.filter((row) => !deleted.includes(row.id))
       .map((row) => ({ ...row, label: edits[row.id]?.label ?? row.label, source: edits[row.id]?.source ?? row.source })),
       ...scopedCustom, ...(pending?.scope === scope ? [{ id: `custom:${pending.id}`, label: pending.label, source: pending.source, custom: pending }] : [])];
-    const positions = new Map(order.map((id, index) => [id, index]));
-    return values.sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER));
-  }, [custom, defaultRows, deleted, edits, order, pending, scope]);
+    return orderedSettingsRows(values, modeSettings[scope]);
+  }, [custom, defaultRows, deleted, edits, order, pending, pinned, scope]);
 
   useLayoutEffect(() => {
     if (pending?.scope === scope && listRef.current) {
@@ -162,14 +187,21 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
       ...current,
       custom: row.custom ? current.custom.filter((column) => column.id !== row.custom?.id) : current.custom,
       deleted: row.custom ? current.deleted : [...new Set([...current.deleted, row.id])],
+      pinned: current.pinned.filter((id) => id !== row.id),
       hidden: current.hidden.filter((id) => id !== row.id),
       order: current.order.filter((id) => id !== row.id),
     }));
     if (editingId === row.id) setEditingId(null);
   };
 
-  const moveToTop = (id: string) => {
-    updateScope((current) => ({ ...current, order: [id, ...rows.map((row) => row.id).filter((item) => item !== id)] }));
+  const togglePinned = (id: string) => {
+    updateScope((current) => {
+      const nextPinned = current.pinned.includes(id)
+        ? current.pinned.filter((item) => item !== id)
+        : [...current.pinned, id];
+      const pinnedSet = new Set(nextPinned);
+      return { ...current, pinned: nextPinned, order: rows.map((row) => row.id).filter((item) => !pinnedSet.has(item)) };
+    });
   };
 
   const startEditing = (row: ColumnRow, field: EditableField) => {
@@ -188,11 +220,16 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
     if (from < 0 || to < 0) return;
     const moved = arrayMove(rows.map((row) => row.id), from, to);
     updateScope((scopeSettings) => {
-      const present = new Set(moved);
-      const next = [...scopeSettings.order];
-      for (const id of moved) if (!next.includes(id)) next.push(id);
-      let offset = 0;
-      return { ...scopeSettings, order: next.map((id) => present.has(id) ? moved[offset++] : id) };
+      const pinnedSet = new Set(scopeSettings.pinned);
+      if (pinnedSet.has(String(active.id)) !== pinnedSet.has(String(over.id))) {
+        if (pinnedSet.has(String(active.id))) pinnedSet.delete(String(active.id));
+        else pinnedSet.add(String(active.id));
+      }
+      return {
+        ...scopeSettings,
+        pinned: moved.filter((id) => pinnedSet.has(id)),
+        order: moved.filter((id) => !pinnedSet.has(id)),
+      };
     });
   };
 
@@ -203,9 +240,13 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
       await saveImageTableMode(mode, modeSettings, readLegacyColumnMode(mode === "isp6s" ? "tone" : "isp6s"));
       await flushStateNow();
       await emit(COLUMN_SETTINGS_SAVED_EVENT, { mode, settings: modeSettings });
+      committedRef.current = true;
       await getCurrentWindow().close();
     } catch (error) {
-      setSaveError(`保存列设置失败：${String(error)}`);
+      const message = String(error);
+      setSaveError(message.includes("not found")
+        ? "当前窗口连接的是旧版 Tauri 宿主，请完全退出并重新运行 npm run tauri:dev 后再保存。"
+        : `保存列设置失败：${message}`);
     } finally {
       setSaving(false);
     }
@@ -235,7 +276,7 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
                   onVisibilityChange={(visible) => updateScope((current) => ({ ...current, hidden: visible
                     ? current.hidden.filter((id) => id !== row.id) : [...new Set([...current.hidden, row.id])] }))}
                   editing={editingId === row.id} editingField={editingField} draft={draft} onDraftChange={setDraft}
-                  onEdit={(field) => startEditing(row, field)} onMoveToTop={() => moveToTop(row.id)} atTop={rows[0]?.id === row.id}
+                  onEdit={(field) => startEditing(row, field)} onPinToggle={() => togglePinned(row.id)} pinned={pinned.includes(row.id)}
                   onSave={() => saveEdit(row)} onCancel={() => { if (pending?.id === row.custom?.id) setPending(null); setEditingId(null); }} onDelete={() => deleteRow(row)} />)}
               </div>
             </SortableContext>
@@ -261,17 +302,17 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
   );
 }
 
-function SortableColumnRow({ row, visible, editing, editingField, draft, atTop, onVisibilityChange, onDraftChange, onEdit, onMoveToTop, onSave, onCancel, onDelete }: {
+function SortableColumnRow({ row, visible, editing, editingField, draft, pinned, onVisibilityChange, onDraftChange, onEdit, onPinToggle, onSave, onCancel, onDelete }: {
   row: ColumnRow;
   visible: boolean;
   editing: boolean;
   editingField: EditableField;
   draft: { label: string; source: string };
-  atTop: boolean;
+  pinned: boolean;
   onVisibilityChange: (visible: boolean) => void;
   onDraftChange: (draft: { label: string; source: string }) => void;
   onEdit: (field: EditableField) => void;
-  onMoveToTop: () => void;
+  onPinToggle: () => void;
   onSave: () => void;
   onCancel: () => void;
   onDelete: () => void;
@@ -297,7 +338,7 @@ function SortableColumnRow({ row, visible, editing, editingField, draft, atTop, 
           <Button appearance="subtle" size="small" icon={<Checkmark24Regular />} aria-label={`保存 ${row.label}`} title="保存" disabled={!draft.label.trim() || !draft.source.trim()} onClick={onSave} />
           <Button appearance="subtle" size="small" icon={<Dismiss24Regular />} aria-label={`取消编辑 ${row.label}`} title="取消" onClick={onCancel} />
         </> : <>
-          <Button appearance="subtle" size="small" icon={<ArrowUp24Regular />} aria-label={`置顶 ${row.label}`} title="移至顶部" disabled={atTop} onClick={onMoveToTop} />
+          <Button appearance="subtle" size="small" className={`column-settings-pin${pinned ? " is-pinned" : ""}`} icon={pinned ? <Pin24Filled /> : <Pin24Regular />} aria-label={pinned ? `取消置顶 ${row.label}` : `置顶 ${row.label}`} title={pinned ? "取消置顶" : "置顶"} onClick={onPinToggle} />
           <Button appearance="subtle" size="small" icon={<Delete24Regular />} aria-label={`删除 ${row.label}`} title="删除列" onClick={onDelete} />
         </>}
       </div>

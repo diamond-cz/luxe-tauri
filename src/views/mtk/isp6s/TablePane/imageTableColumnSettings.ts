@@ -3,14 +3,29 @@ import type { ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc"
 export type ColumnScope = "all" | "face" | "normal";
 export type ColumnMode = "isp6s" | "tone";
 export const COLUMN_SETTINGS_SAVED_EVENT = "luxe:image-table-columns-saved";
+export const COLUMN_SETTINGS_PREVIEW_EVENT = "luxe:image-table-columns-preview";
+export const COLUMN_SETTINGS_CANCEL_EVENT = "luxe:image-table-columns-cancel";
 
 export type ColumnSettingsSaved = { mode: ColumnMode; settings: ImageTableModeColumns };
+
+export function orderedSettingsRows<T extends { id: string }>(rows: T[], settings: ImageTableScopeColumns): T[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const pinned = settings.pinned.filter((id, index) => byId.has(id) && settings.pinned.indexOf(id) === index);
+  const pinnedSet = new Set(pinned);
+  const positions = new Map(settings.order.map((id, index) => [id, index]));
+  return [
+    ...pinned.map((id) => byId.get(id)!),
+    ...rows.filter((row) => !pinnedSet.has(row.id))
+      .sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER)),
+  ];
+}
 
 export function normalizeColumnMode(value: ImageTableModeColumns | undefined | null): ImageTableModeColumns {
   const normalizeScope = (scope: ColumnScope): ImageTableScopeColumns => {
     const saved = value?.[scope];
     return {
       order: Array.isArray(saved?.order) ? saved.order : [],
+      pinned: Array.isArray(saved?.pinned) ? saved.pinned : [],
       hidden: Array.isArray(saved?.hidden) ? saved.hidden : [],
       deleted: Array.isArray(saved?.deleted) ? saved.deleted : [],
       edits: saved?.edits && typeof saved.edits === "object" ? saved.edits : {},
@@ -37,12 +52,13 @@ export function readLegacyColumnMode(mode: ColumnMode): ImageTableModeColumns {
     && typeof column.source === "string" && ["all", "face", "normal"].includes(column.scope)) : [];
   const shared = {
     order: strings(read("column-order")),
+    pinned: strings(read("pinned-columns")),
     hidden: strings(read("column-visibility")),
     deleted: strings(read("deleted-columns")),
     edits,
   };
   const scopeSettings = (scope: ColumnScope): ImageTableScopeColumns => ({
-    ...shared, order: [...shared.order], hidden: [...shared.hidden], deleted: [...shared.deleted],
+    ...shared, order: [...shared.order], pinned: [...shared.pinned], hidden: [...shared.hidden], deleted: [...shared.deleted],
     edits: Object.fromEntries(Object.entries(shared.edits).map(([id, edit]) => [id, { ...edit }])),
     custom: custom.filter((column) => column.scope === scope).map((column) => ({ ...column })),
   });

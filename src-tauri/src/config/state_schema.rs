@@ -41,6 +41,7 @@ pub struct ImageTableModeColumns {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageTableScopeColumns {
     #[serde(default)] pub order: Vec<String>,
+    #[serde(default)] pub pinned: Vec<String>,
     #[serde(default)] pub hidden: Vec<String>,
     #[serde(default)] pub deleted: Vec<String>,
     #[serde(default)] pub edits: BTreeMap<String, ImageTableColumnEdit>,
@@ -281,6 +282,7 @@ mod image_table_column_tests {
         let mut state = StateRoot::default();
         let mut columns = ImageTableColumns::default();
         columns.isp6s.all.hidden.push("ev".into());
+        columns.isp6s.all.pinned = vec!["cwr".into(), "ev".into()];
         columns.isp6s.face.order = vec!["cwr".into(), "ev".into()];
         columns.isp6s.face.edits.insert("ev".into(), ImageTableColumnEdit {
             label: Some("Face EV".into()), source: None,
@@ -295,6 +297,7 @@ mod image_table_column_tests {
         let restored: StateRoot = toml::from_str(&text).unwrap();
         let saved = restored.image_table_columns.unwrap().isp6s;
         assert_eq!(saved.all.hidden, vec!["ev"]);
+        assert_eq!(saved.all.pinned, vec!["cwr", "ev"]);
         assert!(saved.face.hidden.is_empty());
         assert_eq!(saved.face.order, vec!["cwr", "ev"]);
         assert_eq!(saved.face.edits["ev"].label.as_deref(), Some("Face EV"));

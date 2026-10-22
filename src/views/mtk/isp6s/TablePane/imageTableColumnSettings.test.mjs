@@ -7,7 +7,7 @@ const source = readFileSync(new URL("./imageTableColumnSettings.ts", import.meta
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { normalizeColumnMode, readLegacyColumnMode } = await import(
+const { normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
 
@@ -24,6 +24,7 @@ test("legacy table settings become independent tab snapshots", () => {
   globalThis.localStorage = { getItem: (key) => store.get(key) ?? null };
   const settings = readLegacyColumnMode("isp6s");
   assert.deepEqual(settings.all.hidden, ["ev"]);
+  assert.deepEqual(settings.all.pinned, []);
   assert.equal(settings.face.custom[0].id, "face-1");
   assert.equal(settings.normal.custom[0].id, "normal-1");
   assert.equal(settings.all.custom.length, 0);
@@ -45,4 +46,16 @@ test("saved tab settings discard custom columns assigned to another tab", () => 
   });
   assert.deepEqual(settings.face.custom.map((column) => column.id), ["face-1"]);
   assert.deepEqual(settings.normal.hidden, []);
+});
+
+test("pin order follows click order and remaining rows keep drag order", () => {
+  const rows = ["a", "b", "c", "d"].map((id) => ({ id }));
+  const settings = {
+    order: ["d", "c", "b", "a"],
+    pinned: ["b", "d"],
+    hidden: [], deleted: [], edits: {}, custom: [],
+  };
+  assert.deepEqual(orderedSettingsRows(rows, settings).map((row) => row.id), ["b", "d", "c", "a"]);
+  settings.pinned = ["d"];
+  assert.deepEqual(orderedSettingsRows(rows, settings).map((row) => row.id), ["d", "c", "b", "a"]);
 });
