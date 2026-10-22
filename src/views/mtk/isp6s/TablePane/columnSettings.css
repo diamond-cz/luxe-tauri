@@ -105,10 +105,8 @@ html.dark .column-settings-row:hover {
 
 .column-settings-history-anchor {
   width: 100%;
-  gap: 2px;
 }
 
-.column-settings-history-toggle,
 .column-settings-history-action {
   display: inline-flex;
   width: 28px;
@@ -120,10 +118,39 @@ html.dark .column-settings-row:hover {
   color: var(--colorNeutralForeground2);
 }
 
+.column-settings-history-toggle {
+  min-width: 26px;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  color: var(--colorNeutralForeground2);
+  transition: background-color 140ms ease, transform 100ms ease;
+}
+
 .column-settings-history-toggle:hover,
+.column-settings-history-toggle:focus-visible {
+  background: var(--colorNeutralBackground1Hover) !important;
+  color: var(--colorNeutralForeground1) !important;
+}
+
+.column-settings-history-toggle:active {
+  background: var(--colorNeutralBackground1Pressed) !important;
+  transform: scale(0.92);
+}
+
 .column-settings-history-action:hover,
 .column-settings-history-item:hover {
   background: var(--colorNeutralBackground2);
+}
+
+.column-settings-help {
+  border-color: var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground2);
+  color: var(--colorNeutralForeground2);
+}
+
+.column-settings-help code {
+  color: var(--colorBrandForeground1);
 }
 
 .column-settings-history-list {

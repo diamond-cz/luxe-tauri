@@ -635,7 +635,7 @@ const HS_BRIGHT_AREA_SOURCE_CONFIG: HsAreaSourceConfig = {
   rowCountPath: HS_BRIGHT_AREA_ROW_COUNT_PATH,
   columnCountPath: HS_BRIGHT_AREA_COLUMN_COUNT_PATH,
 };
-const HS_MIDDLE_B2M_KEY = "AE_TAG_DRV6_B2M";
+const HS_MIDDLE_CORR_B2M_KEY = "AE_TAG_DRV6_CORR_B2M";
 const HS_MIDDLE_AREA_ROW_HEADER_PATH = "[0][3][1][33]" as const;
 const HS_MIDDLE_AREA_COLUMN_HEADER_PATH = "[0][3][1][35]" as const;
 const HS_MIDDLE_AREA_VALUE_PATH = "[0][3][1][36]" as const;
@@ -978,7 +978,7 @@ export function ChartMapMode({
       entries.map((entry) => entry.toml_path),
       [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY,
         ...FACE_PROB_KEYS, FACE_FLT_FDSZ_KEY, FACE_FBT_FDDR_KEY, FACE_FLT_FDDR_KEY,
-        HS_BRIGHT_EVD_KEY, HS_MIDDLE_B2M_KEY, "AE_TAG_DRV6_B2D"],
+        HS_BRIGHT_EVD_KEY, HS_MIDDLE_CORR_B2M_KEY, "AE_TAG_DRV6_B2D"],
     ).then((rows) => {
       if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, rows, failed: false });
     }).catch(() => {
@@ -1029,7 +1029,7 @@ export function ChartMapMode({
       const bv = parseFiniteNumber(readTomlValue(data, heatmapBvKey));
       if (!Number.isFinite(bv)) continue;
       for (const [tone, key] of [
-        ["BT", HS_BRIGHT_EVD_KEY], ["MT", HS_MIDDLE_B2M_KEY], ["DT", "AE_TAG_DRV6_B2D"],
+        ["BT", HS_BRIGHT_EVD_KEY], ["MT", HS_MIDDLE_CORR_B2M_KEY], ["DT", "AE_TAG_DRV6_B2D"],
       ] as const) {
         const axis = parseFiniteNumber(readTomlValue(data, key));
         if (Number.isFinite(axis)) points[tone].push({ path: entry.toml_path, bv, axis });
@@ -1306,8 +1306,8 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, "AE_TAG_DRV6_B2D"),
     [tomlData],
   );
-  const b2mValue = useMemo(
-    () => readTomlValue(tomlData, HS_MIDDLE_B2M_KEY),
+  const corrB2mValue = useMemo(
+    () => readTomlValue(tomlData, HS_MIDDLE_CORR_B2M_KEY),
     [tomlData],
   );
   const evdValue = useMemo(
@@ -1318,10 +1318,10 @@ export function ChartMapMode({
     const bv = parseFiniteNumber(imageBvValue);
     return {
       BT: currentHsBrightAreaSource ? interpolateHsAreaSource(currentHsBrightAreaSource, bv, parseFiniteNumber(evdValue)) : NaN,
-      MT: currentHsMiddleAreaSource ? interpolateHsAreaSource(currentHsMiddleAreaSource, bv, parseFiniteNumber(b2mValue)) : NaN,
+      MT: currentHsMiddleAreaSource ? interpolateHsAreaSource(currentHsMiddleAreaSource, bv, parseFiniteNumber(corrB2mValue)) : NaN,
       DT: currentHsDarkAreaSource ? interpolateHsAreaSource(currentHsDarkAreaSource, bv, parseFiniteNumber(b2dValue)) : NaN,
     };
-  }, [b2dValue, b2mValue, currentHsBrightAreaSource, currentHsDarkAreaSource, currentHsMiddleAreaSource, evdValue, imageBvValue]);
+  }, [b2dValue, corrB2mValue, currentHsBrightAreaSource, currentHsDarkAreaSource, currentHsMiddleAreaSource, evdValue, imageBvValue]);
   const baseHsWeightWetValues = useMemo<Partial<Record<HsWeightToneId, number>>>(() => {
     const bv = parseFiniteNumber(imageBvValue);
     const b2d = parseFiniteNumber(b2dValue);
@@ -1978,11 +1978,11 @@ export function ChartMapMode({
           heatmapKey={HS_AREA_HEATMAP_KEYS.MT}
           source={currentHsMiddleAreaSource}
           bvValue={imageBvValue}
-          axisValue={b2mValue}
-          axisLabel="B2M"
+          axisValue={corrB2mValue}
+          axisLabel="Corr_B2M"
           thdLabel="MT_THD"
           thdValue={middleInput?.thd ?? null}
-          cornerLabel={"BV\\B2M"}
+          cornerLabel={"BV\\Corr_B2M"}
           sourceJumpLabel="HS.Middle Area"
           sourcePaths={[...HS_MIDDLE_AREA_SOURCE_PATHS]}
           sourceDraftText={sourceDraftText}
@@ -2927,7 +2927,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
     const hsTerms = HS_TARGET_INPUTS.map((input) => {
       const source = input.id === "BT" ? hsBright : input.id === "MT" ? hsMiddle : hsDark;
       const axis = input.id === "BT" ? value(HS_BRIGHT_EVD_KEY)
-        : input.id === "MT" ? value(HS_MIDDLE_B2M_KEY) : b2d;
+        : input.id === "MT" ? value(HS_MIDDLE_CORR_B2M_KEY) : b2d;
       const thd = source ? interpolateHsAreaSource(source, bv, axis) : NaN;
       const y = value(input.yKey);
       const target = Number.isFinite(hsCwv) && Number.isFinite(thd) && Number.isFinite(y) && y !== 0

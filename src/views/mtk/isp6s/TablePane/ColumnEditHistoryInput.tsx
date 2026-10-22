@@ -1,14 +1,14 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Input } from "@fluentui/react-components";
+import { Button, Input } from "@fluentui/react-components";
 import { ChevronDown20Regular, Dismiss20Regular, Heart20Filled, Heart20Regular } from "@fluentui/react-icons";
-import { favoritesFirst, readColumnEditHistory, writeColumnEditHistory, type ColumnEditField, type ColumnEditHistoryItem } from "./columnEditHistory";
+import { favoritesFirst, readColumnEditHistory, writeColumnEditHistory, type ColumnEditHistoryKey, type ColumnEditHistoryItem } from "./columnEditHistory";
 
-export function ColumnEditHistoryInput({ field, value, ariaLabel, onChange, onSave, onCancel }: {
-  field: ColumnEditField; value: string; ariaLabel: string;
+export function ColumnEditHistoryInput({ historyKey, value, ariaLabel, onChange, onSave, onCancel }: {
+  historyKey: ColumnEditHistoryKey; value: string; ariaLabel: string;
   onChange: (value: string) => void; onSave: () => void; onCancel: () => void;
 }) {
-  const [history, setHistory] = useState(() => readColumnEditHistory(field));
+  const [history, setHistory] = useState(() => readColumnEditHistory(historyKey));
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0, width: 0, maxHeight: 220 });
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -16,7 +16,7 @@ export function ColumnEditHistoryInput({ field, value, ariaLabel, onChange, onSa
   const updateHistory = (next: ColumnEditHistoryItem[]) => {
     const sorted = favoritesFirst(next);
     setHistory(sorted);
-    writeColumnEditHistory(field, sorted);
+    writeColumnEditHistory(historyKey, sorted);
   };
 
   useLayoutEffect(() => {
@@ -45,17 +45,15 @@ export function ColumnEditHistoryInput({ field, value, ariaLabel, onChange, onSa
     };
   }, [open]);
 
-  return <div ref={anchorRef} className="column-settings-history-anchor flex min-w-0 items-center">
-    <Input autoFocus size="small" className="min-w-0 flex-1" value={value} aria-label={ariaLabel}
+  return <div ref={anchorRef} className="column-settings-history-anchor min-w-0">
+    <Input autoFocus size="small" className="w-full min-w-0" value={value} aria-label={ariaLabel}
       onChange={(_, data) => onChange(data.value)}
       onKeyDown={(event) => {
         if (event.key === "Enter") { setOpen(false); onSave(); }
         if (event.key === "Escape") { if (open) setOpen(false); else onCancel(); }
-      }} />
-    <button type="button" className="column-settings-history-toggle" title={`${ariaLabel}历史`} aria-label={`${ariaLabel}历史`}
-      aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-      <ChevronDown20Regular aria-hidden="true" />
-    </button>
+      }} contentAfter={<Button appearance="subtle" size="small" className="column-settings-history-toggle"
+        icon={<ChevronDown20Regular aria-hidden="true" />} title={`${ariaLabel}历史`} aria-label={`${ariaLabel}历史`}
+        aria-expanded={open} onClick={() => setOpen((current) => !current)} />} />
     {open && createPortal(<div ref={popupRef} className="column-settings-history-list" role="group"
       aria-label={`${ariaLabel}历史`} style={{ left: position.left, top: position.top,
         width: position.width, maxHeight: position.maxHeight }}>

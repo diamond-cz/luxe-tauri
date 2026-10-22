@@ -37,8 +37,8 @@ import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { ImageSplitMode } from "../ImagePane/ImageSplitMode";
 import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } from "./imageTableClassification";
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
-import { customImageColumnText, imageColumnSourceKeys } from "./imageTableCustomColumns";
-import { deltaEv, formatDeltaEv, metricDirection, parseMetricResult, selectImageTableEv } from "./imageTableMetrics";
+import { customImageColumnText, imageColumnSourceKeys, isAeGainPairSource } from "./imageTableCustomColumns";
+import { deltaEv, formatCwrEvTriplet, formatDeltaEv, isCwrDeltaFormula, isCwrEvFormula, metricDirection, parseMetricPair, parseMetricResult, selectImageTableEv } from "./imageTableMetrics";
 import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, columnScopeForThumbnail, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
 import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
 import { columnSettingsPlacement } from "./columnSettingsPlacement";
@@ -226,7 +226,7 @@ const FACE_LINK_TARGET_IMAGE_KEYS = [
   "AE_TAG_NS_FINAL_TARGET", "AE_TAG_MTV6_MAINT_Y",
   "AE_TAG_MTV6_MAINT_MID_INTRATIO", "AE_TAG_DRV6_CORR_MIDRATIO",
   "AE_TAG_HSV6_BT_Final_Y", "AE_TAG_HSV6_MT_Final_Y", "AE_TAG_HSV6_DT_Final_Y",
-  "AE_TAG_DRV6_B2D", "AE_TAG_DRV6_B2M", "AE_TAG_DRV6_MIDRATIO", "AE_TAG_HS_EVD",
+  "AE_TAG_DRV6_B2D", "AE_TAG_DRV6_B2M", "AE_TAG_DRV6_CORR_B2M", "AE_TAG_DRV6_MIDRATIO", "AE_TAG_HS_EVD",
   "AE_TAG_NS_STS_CDF", "AE_TAG_NS_EVD",
   "NS_OE_THD", "AE_TAG_NS_NORMAL_FINAL_THD", "NS_Y", "AE_TAG_NS_NORMAL_Y",
   "NS_BrightTone_THD", "AE_TAG_NS_BT_FINAL_THD", "NS_BrightTone_Y", "AE_TAG_NS_BT_Y",
@@ -276,6 +276,7 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
   const normalDelta = normalExif !== null && normalCalculated !== null ? normalCalculated - normalExif : null;
   const evPair = deltaEv(linkExif, linkCalculated);
   const normalEv = deltaEv(normalExif, normalCalculated);
+  const backEv = deltaEv(backExif, backCalculated);
   return {
     aeGain: formatFaceTargetPair(faceTargetRatio(linkExif, backExif), faceTargetRatio(linkCalculated, backCalculated)),
     normalCwr: formatFaceTargetPair(normalExif, normalCalculated),
@@ -288,6 +289,7 @@ function imageFaceTargetValues(target: ReturnType<FaceLinkTargetCalculator> | nu
     ev: formatDeltaEv(evPair),
     evPair,
     normalEv,
+    backEv,
   };
 }
 
@@ -2156,8 +2158,11 @@ export function ImageTab({
 
 
   const colSpan = displayedColumns.length;
-  const evOverrideColumn = displayedColumns.find((column) => column.kind === "ev" && column.sourceOverride);
-  const deltaOverrideColumn = displayedColumns.find((column) => column.kind === "delta" && column.sourceOverride);
+  const evOverrideColumn = displayedColumns.find((column) => column.kind === "ev"
+    && column.sourceOverride && !isCwrEvFormula(column.key ?? ""));
+  const deltaOverrideColumn = displayedColumns.find((column) => column.kind === "delta"
+    && column.sourceOverride && !isCwrDeltaFormula(column.key ?? ""));
+  const aeGainColumn = displayedColumns.find((column) => column.kind === "aeGain");
   const topPadding = visible.start * IMAGE_TABLE_ROW_HEIGHT;
   const bottomPadding = Math.max(0, (sortedRows.length - visible.end) * IMAGE_TABLE_ROW_HEIGHT);
   const nameColumnWidth = useMemo(() => entries.reduce(
@@ -2365,11 +2370,13 @@ export function ImageTab({
             const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
             const target = visibleFaceValues[e.toml_path];
             const rowIsScene = sceneOnly || classifiedKinds?.[e.toml_path] === "scene";
-            const rowEv = selectImageTableEv(sceneOnly, classifiedKinds?.[e.toml_path],
-              target?.normalEv ?? null, target?.evPair ?? null);
-            const evOverrideText = evOverrideColumn ? imageTableColumnText(evOverrideColumn, data, target, rowIsScene) : null;
-            const displayedEv = evOverrideText === null ? rowEv : parseMetricResult(evOverrideText);
-            const deltaOverrideText = deltaOverrideColumn ? imageTableColumnText(deltaOverrideColumn, data, target, rowIsScene) : null;
+            const evOverrideValue = evOverrideColumn
+              ? parseMetricResult(imageTableColumnText(evOverrideColumn, data, target, rowIsScene)) : null;
+            const deltaOverrideText = deltaOverrideColumn
+              ? imageTableColumnText(deltaOverrideColumn, data, target, rowIsScene) : null;
+            const aeGainText = aeGainColumn
+              ? imageTableColumnText(aeGainColumn, data, target, rowIsScene) : null;
+            const aeGainPair = parseMetricPair(aeGainText ?? "");
             const baseBackground = i % 2 === 0 ? "var(--colorNeutralBackground1)"
               : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))";
             const rowBackground = heatmapSelected ? "var(--colorPaletteGreenBackground1)" : baseBackground;
@@ -2416,16 +2423,28 @@ export function ImageTab({
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
                            ? e.name
+                           : column.kind === "ev" && (!column.sourceOverride || isCwrEvFormula(column.key ?? ""))
+                             ? <>{([target?.normalEv ?? null, target?.backEv ?? null, target?.evPair ?? null] as const)
+                               .map((value, index) => <span key={index}>
+                                 {index > 0 && <span>|</span>}
+                                 <span style={metricDirectionStyle(value, 0.005)}>{formatDeltaEv(value)}</span>
+                               </span>)}</>
                            : column.kind === "ev"
-                             ? <span style={metricDirectionStyle(displayedEv, 0.005)}>{formatDeltaEv(displayedEv)}</span>
-                           : column.kind === "delta" && deltaOverrideText !== null
-                             ? <span style={faceTargetDeltaStyle(parseMetricResult(deltaOverrideText))}>{deltaOverrideText}</span>
-                           : column.sourceOverride
+                             ? <span style={metricDirectionStyle(evOverrideValue, 0.005)}>
+                                 {formatDeltaEv(evOverrideValue)}
+                               </span>
+                           : column.kind === "delta" && column.sourceOverride && !isCwrDeltaFormula(column.key ?? "")
+                             ? <span style={faceTargetDeltaStyle(parseMetricResult(deltaOverrideText ?? "-"))}>
+                                 {deltaOverrideText}
+                               </span>
+                           : column.kind === "aeGain"
+                             ? aeGainPair
+                               ? <>{aeGainPair.first}(<span style={metricDirectionStyle(aeGainPair.difference, 0.05)}>{aeGainPair.second}</span>)</>
+                               : aeGainText ?? "-"
+                           : column.sourceOverride && !(column.kind === "delta" && isCwrDeltaFormula(column.key ?? ""))
                              ? !toneMode && column.kind === "extra"
                                && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])
                                ? "-" : imageTableColumnText(column, data, target, rowIsScene)
-                           : column.kind === "aeGain"
-                             ? target?.aeGain ?? "-"
                            : column.kind === "normalCwr"
                              ? target?.normalCwr ?? "-"
                            : column.kind === "backCwr"
@@ -2777,6 +2796,15 @@ function imageTableColumnText(
   target: ReturnType<typeof imageFaceTargetValues> | null | undefined,
   sceneOnly: boolean,
 ): string {
+  if (column.kind === "aeGain" && (!column.sourceOverride || isAeGainPairSource(column.key ?? ""))) {
+    return target?.aeGain ?? "-";
+  }
+  if (column.kind === "ev" && (!column.sourceOverride || isCwrEvFormula(column.key ?? ""))) {
+    return formatCwrEvTriplet(target?.normalEv ?? null, target?.backEv ?? null, target?.evPair ?? null);
+  }
+  if (column.kind === "delta" && (!column.sourceOverride || isCwrDeltaFormula(column.key ?? ""))) {
+    return sceneOnly ? formatFaceTargetDelta(target?.normalDelta ?? null) : target?.delta ?? "-";
+  }
   if (column.sourceOverride) return customImageColumnText(column.key ?? "", (key) =>
     imageTableFormulaAlias(key, target, sceneOnly) ?? tomlLookup(data, key));
   if (column.kind === "extra") {

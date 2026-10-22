@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { loadState } from "@/ipc/stateIo";
+import { bootstrapI18n } from "@/locales/i18n";
+import { localeAt } from "@/locales";
 import { pickTheme } from "@/theme/fluent-tokens";
 import { ColumnSettingsWindow } from "@/views/mtk/isp6s/TablePane/ColumnSettingsWindow";
 import { consumeColumnSettingsBootstrap } from "@/views/mtk/isp6s/TablePane/columnSettingsBootstrap";
@@ -23,10 +25,13 @@ applyThemeClass(initialTheme);
 function ColumnSettingsApp() {
   const [theme, setTheme] = useState(initialTheme);
   useEffect(() => {
-    if (bootstrap) return;
     let active = true;
-    void loadState().then((state) => { if (active) setTheme(state.settings.theme); })
-      .catch((error) => console.warn("load column settings theme", error));
+    void loadState().then((state) => {
+      if (!active) return;
+      if (!bootstrap) setTheme(state.settings.theme);
+      void bootstrapI18n(localeAt(state.settings.language))
+        .catch((error) => console.warn("load column settings translations", error));
+    }).catch((error) => console.warn("load column settings preferences", error));
     return () => { active = false; };
   }, []);
   useEffect(() => { applyThemeClass(theme); }, [theme]);
