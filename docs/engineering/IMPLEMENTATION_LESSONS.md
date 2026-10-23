@@ -26,6 +26,24 @@
 
 ## 已沉淀经验
 
+### 2026-10-23：本地状态文档统一归档
+
+**亮点**
+
+- 将 `src-tauri/resources/README.md` 移至 `docs/config/LOCAL_STATE.md`，并更新 `README.md` 与 `docs/README.md` 的链接；实际 `state.toml` 路径不变。
+
+**痛点**
+
+- 原文中的“本目录”依赖文档与状态文件同目录；迁移后已改成明确的 `src-tauri/resources/state.toml`，避免误以为状态文件也迁入 `docs/`。
+
+**闭坑**
+
+- 移动专题文档时检查仓库内引用和相对路径；`src-tauri/tauri.conf.json` 的资源清单未包含此 Markdown 文件，无需更改打包配置。
+
+**验证**
+
+- `rg` 检查文档引用与打包资源清单，`Test-Path` 确认新文件存在且旧文件已移除，`git diff --check` 通过。未运行应用交互测试，因本次仅移动维护文档。
+
 ### 2026-10-23：DP 路径保存被小数分栏比例阻断
 
 **亮点**

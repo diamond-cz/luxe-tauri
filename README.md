@@ -49,7 +49,7 @@ Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁�
 | `src-tauri/tests/`、`scripts/`             | 集成测试与构建/发布脚本       |
 | `docs/`                                   | 功能实现与性能维护文档，见[文档索引](docs/README.md) |
 
-技术栈为 React 18、TypeScript、Vite 6、Fluent UI 9、Tauri 2 和 Rust。开发时状态保存到 `src-tauri/resources/state.toml`，与 `Isp6s.toml` 等可维护配置放在一起；发布版使用程序旁的 `resources/state.toml`，目录不可写时回退到用户配置目录。首次使用自动迁移旧位置的状态文件。状态包含 DP 工具、各页面参数文件、图片目录、当前选中图片和页面；启动时按需检查、加载，不会自动执行 DP。可从应用设置打开实际配置目录，详见 [本地工作状态](src-tauri/resources/README.md)。
+技术栈为 React 18、TypeScript、Vite 6、Fluent UI 9、Tauri 2 和 Rust。开发时状态保存到 `src-tauri/resources/state.toml`，与 `Isp6s.toml` 等可维护配置放在一起；发布版使用程序旁的 `resources/state.toml`，目录不可写时回退到用户配置目录。首次使用自动迁移旧位置的状态文件。状态包含 DP 工具、各页面参数文件、图片目录、当前选中图片和页面；启动时按需检查、加载，不会自动执行 DP。可从应用设置打开实际配置目录，详见 [本地工作状态](docs/config/LOCAL_STATE.md)。
 
 新增预览、详情面板、缓存、观察器或后台任务前，先阅读 [CPU 与内存性能维护约定](docs/performance/MEMORY_RECOVERY.md)。Face 表格与热力图实现见[功能维护说明](docs/features/FACE_TABLE_HEATMAP.md)。提交 PR 时说明影响范围和验证命令，UI 改动附截图。
 
