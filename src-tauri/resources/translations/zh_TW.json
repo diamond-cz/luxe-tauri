@@ -1,4 +1,10 @@
 {
+  "update_available_version": "發現新版本 v{{version}}",
+  "update_install_now": "立即更新",
+  "update_downloading": "正在下載",
+  "update_installing": "正在安裝",
+  "update_retry": "重新檢查",
+  "update_download_progress": "更新下載進度",
   "column_source_invalid": "無法辨識關鍵字或公式，已還原原始來源。",
   "column_source_unverified": "語法辨識成功，已採用 {{source}}；{{keys}} 未在設定中宣告，實際數值取決於圖片 TOML。",
   "column_source_formula_ok": "辨識成功：已採用公式 {{source}}",

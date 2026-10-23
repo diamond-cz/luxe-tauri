@@ -129,19 +129,25 @@ test("current version has a complete changelog and appears first", () => {
   assert.equal(entries[0].version, version);
   assert.equal(new Set(entries.map((entry) => entry.version)).size, entries.length);
   for (const entry of entries) {
-    for (const section of entry.sections) {
-      assert.ok(["新增", "优化", "修复"].includes(section.title), `Invalid section in ${entry.version}`);
-      for (const item of section.items) assert.doesNotMatch(`${item.title} ${item.desc}`, /\?{2,}|\uFFFD/);
+    assert.ok(entry.items.length > 0, `Missing items in ${entry.version}`);
+    for (const item of entry.items) {
+      assert.deepEqual(Object.keys(item).sort(), ["content", "type"], `Unexpected fields in ${entry.version}`);
+      assert.ok(["新增", "优化", "修复"].includes(item.type), `Invalid type in ${entry.version}`);
+      assert.ok(item.content.trim(), `Empty content in ${entry.version}`);
+      assert.doesNotMatch(item.content, /\?{2,}|\uFFFD/);
     }
+    const expectedLines = entry.items.map((item) => `- [${item.type}] ${item.content}`);
+    const actualLines = releaseNotesFor(entry.version).split("\n").filter((line) => line.startsWith("- ["));
+    assert.deepEqual(actualLines, expectedLines, `Release notes differ for ${entry.version}`);
   }
   const notes = releaseNotesFor(version);
   assert.ok(notes.startsWith(`# LUXE v${version}\n`));
-  assert.ok(notes.includes(entries[0].sections[0].items[0].desc));
 });
 
 test("missing, duplicate or incomplete changelog prevents release notes", () => {
   assert.throws(() => releaseNotesFor(version, []), /Expected one changelog entry/);
-  const entry = { version, date: "2026-10-16", sections: [] };
+  const entry = { version, date: "2026-10-16", items: [] };
   assert.throws(() => releaseNotesFor(version, [entry, entry]), /found 2/);
   assert.throws(() => releaseNotesFor(version, [entry]), /Incomplete changelog/);
+  assert.throws(() => releaseNotesFor(version, [{ ...entry, items: [{ type: "优化", content: " " }] }]), /Incomplete changelog/);
 });

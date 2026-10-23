@@ -1,13 +1,5 @@
 import { useState } from "react";
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-} from "@fluentui/react-components";
+import { Button } from "@fluentui/react-components";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -32,7 +24,6 @@ import { UpdateLogDialog } from "@/components/common/UpdateLogDialog";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 import { openUrl } from "@/ipc/shell";
 import {
-  checkForUpdate,
   CURRENT_VERSION,
   GITHUB_RELEASES_URL,
   GITHUB_REPOSITORY_URL,
@@ -40,6 +31,7 @@ import {
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
 import { installAvailableUpdate } from "@/services/installUpdate";
+import { runUpdateCheck } from "@/services/runUpdateCheck";
 
 interface PlatformCard {
   to: string;
@@ -81,14 +73,11 @@ export function HomeView() {
   const latestVersion = useUpdateStore((s) => s.latestVersion);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
   const downloadTotal = useUpdateStore((s) => s.totalBytes);
-  const setUpdateChecking = useUpdateStore((s) => s.setChecking);
-  const setUpdateResult = useUpdateStore((s) => s.setResult);
   const setUpdateError = useUpdateStore((s) => s.setError);
   const [platformOrder, setPlatformOrder] = useState(
     PLATFORM_CARDS.map((card) => card.to),
   );
   const [updateLogOpen, setUpdateLogOpen] = useState(false);
-  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -130,32 +119,7 @@ export function HomeView() {
 
   const checkUpdate = async () => {
     if (updateBusy) return;
-    const oldUpdate = useUpdateStore.getState().update;
-    if (oldUpdate) await oldUpdate.close().catch(() => {});
-    setUpdateChecking("manual");
-    try {
-      const result = await checkForUpdate();
-      setUpdateResult(result, "manual");
-    } catch (err) {
-      setUpdateError(err, "manual");
-    }
-  };
-
-  const confirmOverwriteUpdate = async () => {
-    if (updateBusy) return;
-    setOverwriteConfirmOpen(false);
-    const oldUpdate = useUpdateStore.getState().update;
-    if (oldUpdate) await oldUpdate.close().catch(() => {});
-    setUpdateChecking("manual");
-    try {
-      const result = await checkForUpdate();
-      setUpdateResult(result, "manual");
-      if (result.status === "available") {
-        await installAvailableUpdate();
-      }
-    } catch (err) {
-      setUpdateError(err, "manual");
-    }
+    await runUpdateCheck("manual");
   };
 
   return (
@@ -308,16 +272,6 @@ export function HomeView() {
               >
                 近期更新
               </Button>
-              <Button
-                className="shrink-0 whitespace-nowrap transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
-                appearance="secondary"
-                icon={<ArrowDownload24Regular />}
-                onClick={() => setOverwriteConfirmOpen(true)}
-                disabled={updateBusy}
-                style={{ background: "var(--colorNeutralBackground1)" }}
-              >
-                覆盖更新
-              </Button>
             </div>
 
             {updateStatus === "downloading" && (
@@ -341,61 +295,6 @@ export function HomeView() {
         />
       )}
 
-      <Dialog
-        open={overwriteConfirmOpen}
-        modalType="modal"
-        onOpenChange={(_, data) => {
-          if (!data.open) setOverwriteConfirmOpen(false);
-        }}
-      >
-        <DialogSurface
-          style={{
-            maxWidth: 520,
-            padding: 0,
-            overflow: "hidden",
-            borderRadius: 14,
-            background: "var(--colorNeutralBackground1)",
-            border: "1px solid var(--colorNeutralStroke2)",
-          }}
-        >
-          <DialogBody>
-            <DialogTitle
-              style={{
-                padding: "20px 24px",
-                borderBottom: "1px solid var(--colorNeutralStroke2)",
-                color: "var(--colorNeutralForeground1)",
-                fontSize: 20,
-                fontWeight: 600,
-              }}
-            >
-              确认覆盖更新
-            </DialogTitle>
-            <DialogContent
-              style={{
-                margin: 0,
-                padding: "20px 24px",
-                color: "var(--colorNeutralForeground2)",
-                lineHeight: 1.6,
-              }}
-            >
-              将检查并下载 GitHub 上的最新版本，安装后替换当前版本并重新启动应用。是否继续？
-            </DialogContent>
-            <DialogActions
-              style={{
-                padding: "14px 24px 18px",
-                borderTop: "1px solid var(--colorNeutralStroke2)",
-              }}
-            >
-              <Button appearance="secondary" onClick={() => setOverwriteConfirmOpen(false)} style={{ minWidth: 88 }}>
-                取消
-              </Button>
-              <Button appearance="primary" icon={<ArrowDownload24Regular />} onClick={() => void confirmOverwriteUpdate()} style={{ minWidth: 132, whiteSpace: "nowrap" }}>
-                覆盖更新
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,10 @@
 {
+  "update_available_version": "Доступна версия v{{version}}",
+  "update_install_now": "Обновить сейчас",
+  "update_downloading": "Загрузка",
+  "update_installing": "Установка",
+  "update_retry": "Проверить снова",
+  "update_download_progress": "Ход загрузки обновления",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",
   "column_source_formula_ok": "Recognized formula: {{source}}",

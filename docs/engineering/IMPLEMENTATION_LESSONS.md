@@ -455,3 +455,67 @@
 
 - npm run typecheck、npm run build、Node 列设置测试、npm run release:test 与 cargo test --manifest-path src-tauri/Cargo.toml --lib 已通过。
 - 完整 npm run rust:test 因正在运行的 src-tauri/target/debug/luxe-tauri.exe 被系统占用而未通过；未执行 Tauri 窗口人工验收。
+
+### 2026-10-23：标题栏更新预览与进度同步
+
+**亮点**
+
+- `src/data/changelog.json` 继续作为开发者维护版本内容的唯一文件；发布脚本将其写入 `latest.json`，`src/services/updateNotes.ts` 将本地条目或远端说明整理为标题栏预览。
+- `src/components/shell/TitleBar.tsx` 的预览可直接调用 `installAvailableUpdate()`；标题栏与 `src/views/HomeView.tsx` 读取同一 `updateStore` 进度，手动检查统一走 `runUpdateCheck()`。
+
+**痛点**
+
+- 旧预览只截取更新说明前四行，按钮会跳转主页；远端新版本的内容不一定存在于已安装包的本地 JSON，需要读取 updater 返回的发布说明。
+- 手动重查若在关闭旧 updater 句柄后才标记 `checking`，同时点击两个入口可能发起重复检查。
+
+**闭坑**
+
+- 下一版发布前在 `src/data/changelog.json` 新增对应版本条目，并运行 `npm run release:test`；不得另建标题栏专用说明文件。
+- 更新检查先切换共享状态再关闭旧句柄；下载与安装必须继续通过 Tauri updater 执行，不能绕过签名校验。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`npm run release:test` 均通过；`git diff --check` 通过。
+- `npm run tauri:dev` 启动了 Vite，但 Rust 无法替换被现有 `luxe-tauri.exe` 占用的调试可执行文件，命令以错误码 1 退出；未在真实 Tauri 窗口完成悬浮、按钮焦点和下载进度人工验收，也未执行实际更新安装。
+
+### 2026-10-23：更新记录改为逐条内容
+
+**亮点**
+
+- `src/data/changelog.json` 的 14 个版本、53 条记录改为每条只维护 `type` 和 `content`；`UpdateNoteList` 让标题栏与近期更新弹窗共用类别标签和正文排版。
+- `scripts/release-notes.mjs` 直接生成逐条带类别的发布说明，远端更新预览通过 `src/services/updateNotes.ts` 读取；旧版分组发布说明仍可解析。
+
+**痛点**
+
+- 旧格式的 `sections/title/desc` 使一条更新要维护多个标题层级；发布脚本、测试和两个界面都依赖该结构，迁移时必须一起更新。
+- 编辑期间近期更新弹窗出现了新的未提交布局改动；保留该布局并接入新列表组件。
+
+**闭坑**
+
+- 新版本在 `changelog.json` 顶部新增版本对象；每条 `items` 只写 `type` 和完整的 `content`，类别限定为新增、优化、修复。
+- 修改记录格式时运行 `npm run release:test`，核对 `latest.json` 中每条内容与应用内显示的数据一致。
+
+**验证**
+
+- 已核对迁移前后均为 14 个版本、53 条记录；`npm run typecheck`、`npm run build`、`npm run release:test`、`git diff --check` 均通过。
+- 本次未在 Tauri 窗口中人工检查更新弹窗及标题栏预览，也未执行真实安装更新。
+
+### 2026-10-23：近期更新列表与覆盖入口清理
+
+**亮点**
+
+- `src/components/common/UpdateLogDialog.tsx` 按版本展示无卡片列表，复用 `UpdateNoteList` 显示每条记录的类别标签和正文；所有版本在弹窗内直接滚动查看。
+- `src/views/HomeView.tsx` 移除“覆盖更新”按钮、确认弹窗与对应处理函数，保留正常的检查和安装入口。
+
+**痛点**
+
+- 旧弹窗按分类嵌套卡片和标题，与逐条维护的 `type`、`content` 数据格式不一致；覆盖更新还维护了独立确认状态。
+
+**闭坑**
+
+- 更新列表与标题栏预览统一使用 `UpdateNoteList`；移除入口时同时删除相关状态、处理函数和确认弹窗，并搜索残留引用。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；`rg` 搜索未发现“覆盖更新”相关代码残留。
+- 未在 Tauri 窗口实测弹窗滚动、深浅主题和窄窗口布局。

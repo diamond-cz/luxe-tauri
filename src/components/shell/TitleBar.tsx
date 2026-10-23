@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Button } from "@fluentui/react-components";
+import { useTranslation } from "react-i18next";
 import {
   Pin24Regular,
   Pin24Filled,
@@ -13,6 +15,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fetchPoetry } from "@/ipc/shell";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
+import { getUpdateNotes } from "@/services/updateNotes";
+import { installAvailableUpdate } from "@/services/installUpdate";
+import { runUpdateCheck } from "@/services/runUpdateCheck";
+import { UpdateNoteList } from "@/components/common/UpdateNoteList";
 
 /**
  * Frameless title bar — replaces the OS-drawn title bar (`decorations: false`).
@@ -145,69 +151,95 @@ export function TitleBar({ sideNavVisible, onToggleSideNav }: TitleBarProps) {
 }
 
 function AvailableUpdateButton() {
-  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const status = useUpdateStore((state) => state.status);
   const version = useUpdateStore((state) => state.latestVersion);
   const notes = useUpdateStore((state) => state.notes);
+  const error = useUpdateStore((state) => state.message);
   const downloaded = useUpdateStore((state) => state.downloadedBytes);
   const total = useUpdateStore((state) => state.totalBytes);
   const update = useUpdateStore((state) => state.update);
-  const visible = Boolean(version && update && ["available", "downloading", "installing"].includes(status));
-  const noteLines = (notes ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*(?:#{1,6}\s*|[-*]\s*)/, "").trim())
-    .filter((line) => line && !/^v?\d+\.\d+\.\d+$/.test(line))
-    .slice(0, 4);
-  if (!visible) return null;
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+  const visible = Boolean(version && (update || status === "error") &&
+    ["available", "downloading", "installing", "error"].includes(status));
+  if (!visible || !version) return null;
 
-  const busy = status !== "available";
+  const items = getUpdateNotes(version, notes);
+  const percent = total ? Math.min(100, Math.floor(downloaded / total * 100)) : null;
+  const busy = status === "downloading" || status === "installing";
   const label = status === "downloading"
-    ? `下载中 ${total ? `${Math.min(100, Math.floor(downloaded / total * 100))}%` : `${(downloaded / 1048576).toFixed(1)} MB`}`
-    : status === "installing" ? "正在安装" : "立即更新";
+    ? t("update_downloading")
+    : status === "installing" ? t("update_installing")
+      : status === "error" ? t("update_retry") : t("update_install_now");
 
   return (
-    <div className="group relative flex h-full items-stretch">
+    <div
+      ref={rootRef}
+      className="relative flex h-full items-stretch"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+      }}
+    >
       <button
         type="button"
-        aria-label={`发现新版本 v${version}`}
-        aria-haspopup="true"
-        onClick={() => navigate("/home")}
+        aria-label={t("update_available_version", { version })}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
         className="flex h-full w-11 items-center justify-center transition-colors hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
         style={{ color: "var(--colorPaletteGreenForeground1)" }}
       >
         <ArrowCircleUp24Regular className="h-5 w-5" />
       </button>
       <div
-        className="invisible absolute right-1 top-full z-50 w-[min(21rem,calc(100vw-1rem))] pt-2 opacity-0 transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        className={`${open ? "visible opacity-100" : "invisible opacity-0"} absolute right-1 top-full z-50 w-[min(23rem,calc(100vw-1rem))] pt-2 transition duration-150`}
       >
         <div
-          className="overflow-hidden rounded-xl border shadow-xl"
+          role="dialog"
+          aria-label={t("update_available_version", { version })}
+          className="overflow-hidden rounded-lg border shadow-xl"
           style={{ background: "var(--colorNeutralBackground1)", borderColor: "var(--colorNeutralStroke2)" }}
         >
-          <div className="px-4 pt-4 text-sm font-semibold" style={{ color: "var(--colorNeutralForeground1)" }}>
-            发现新版本 v{version}
+          <div className="border-b px-4 py-3 text-sm font-semibold" style={{ color: "var(--colorNeutralForeground1)", borderColor: "var(--colorNeutralStroke2)" }}>
+            {t("update_available_version", { version })}
           </div>
-          {noteLines.length > 0 && (
-            <ul className="mx-4 mt-3 max-h-36 space-y-2 overflow-y-auto border-t pt-3" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-              {noteLines.map((line, index) => (
-                <li key={`${index}-${line}`} className="flex gap-2 text-xs leading-5" style={{ color: "var(--colorNeutralForeground2)" }}>
-                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full" style={{ background: "var(--colorBrandBackground)" }} />
-                  <span className="line-clamp-2">{line}</span>
-                </li>
-              ))}
-            </ul>
+          {items.length > 0 && (
+            <div className="max-h-64 overflow-y-auto px-4 py-3">
+              <UpdateNoteList items={items} compact />
+            </div>
           )}
-          <div className="mt-3 flex justify-end px-4 pb-4">
-            <button
-              type="button"
-              title={label}
+          <div className="border-t px-4 py-3" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+            {status === "downloading" && (
+              <div className="mb-3" aria-live="polite">
+                <div className="mb-1 flex justify-between text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+                  <span>{t("update_downloading")}</span>
+                  <span className="tabular-nums">{percent === null ? `${(downloaded / 1048576).toFixed(1)} MB` : `${percent}%`}</span>
+                </div>
+                <progress className="block h-1.5 w-full" value={percent === null ? undefined : downloaded} max={total ?? undefined} aria-label={t("update_download_progress")} style={{ accentColor: "var(--colorBrandBackground)" }} />
+              </div>
+            )}
+            {status === "error" && <p className="mb-2 break-words text-xs" role="alert" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</p>}
+            <Button
+              appearance="primary"
+              size="small"
               disabled={busy}
-              onClick={() => navigate("/home")}
-              className="rounded px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-default disabled:opacity-60"
-              style={{ background: "var(--colorBrandBackground)" }}
+              onClick={() => void (status === "error" ? runUpdateCheck("manual") : installAvailableUpdate())}
+              className="w-full"
             >
-              前往更新
-            </button>
+              {label}
+            </Button>
           </div>
         </div>
       </div>

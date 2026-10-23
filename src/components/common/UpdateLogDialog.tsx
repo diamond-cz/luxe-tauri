@@ -1,17 +1,15 @@
 import UPDATE_LOGS from "@/data/changelog.json";
+import { UpdateNoteList } from "@/components/common/UpdateNoteList";
 import {
   Button,
   Dialog,
   DialogSurface,
 } from "@fluentui/react-components";
 import {
-  ArrowDownload24Regular,
-  ChevronDown24Regular,
   Dismiss24Regular,
   Open24Regular,
   Sparkle24Regular,
 } from "@fluentui/react-icons";
-import { useState } from "react";
 
 import {
   CURRENT_VERSION,
@@ -25,32 +23,11 @@ interface Props {
   onOpenRelease: (url: string) => void;
 }
 
-const SECTION_TONES: Record<string, { bg: string; border: string; fg: string }> = {
-  新增: {
-    bg: "rgba(45, 123, 244, 0.12)",
-    border: "rgba(45, 123, 244, 0.28)",
-    fg: "#2D7BF4",
-  },
-  优化: {
-    bg: "rgba(149, 88, 193, 0.12)",
-    border: "rgba(149, 88, 193, 0.3)",
-    fg: "#9558C1",
-  },
-  修复: {
-    bg: "rgba(232, 58, 58, 0.1)",
-    border: "rgba(232, 58, 58, 0.24)",
-    fg: "#D13438",
-  },
-};
-
 function releaseUrlFor(version: string) {
   return `${GITHUB_REPOSITORY_URL}/releases/tag/v${version}`;
 }
 
 export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
-  const [showAll, setShowAll] = useState(false);
-  const visibleLogs = showAll ? UPDATE_LOGS : UPDATE_LOGS.slice(0, 3);
-
   return (
     <Dialog
       open={open}
@@ -69,7 +46,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
           height: "min(760px, calc(100vh - 32px))",
           maxHeight: "calc(100vh - 32px)",
           padding: 0,
-          borderRadius: 18,
+          borderRadius: 8,
           overflow: "hidden",
           background: "var(--colorNeutralBackground1)",
           borderColor: "var(--colorNeutralStroke2)",
@@ -81,7 +58,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
             style={{ borderColor: "var(--colorNeutralStroke2)" }}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "var(--colorBrandBackground2)", color: "var(--colorBrandForeground1)" }}>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md" style={{ background: "var(--colorBrandBackground2)", color: "var(--colorBrandForeground1)" }}>
                 <Sparkle24Regular className="h-6 w-6" />
               </span>
               <div className="min-w-0">
@@ -89,7 +66,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                 className="text-xl font-bold"
                 style={{ color: "var(--colorNeutralForeground1)" }}
               >
-                更新记录
+                近期更新
               </h2>
               <div
                 className="mt-1 truncate text-xs"
@@ -109,42 +86,29 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
           </header>
 
           <div
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-7 sm:py-6"
-            style={{ background: "var(--colorNeutralBackground2)" }}
+            className="min-h-0 flex-1 overflow-y-auto px-5 py-2 sm:px-7"
+            style={{ background: "var(--colorNeutralBackground1)" }}
           >
-            <div className="flex flex-col gap-3">
-              {visibleLogs.map((entry) => {
+            <div>
+              {UPDATE_LOGS.map((entry) => {
                 const isCurrent = entry.version === CURRENT_VERSION;
 
                 return (
                   <article
                     key={entry.version}
-                    className="rounded-xl border px-4 py-3 shadow-sm sm:px-5"
-                    style={{
-                      background: "var(--colorNeutralBackground1)",
-                      borderColor: "var(--colorNeutralStroke2)",
-                    }}
+                    className="border-b py-5 last:border-b-0"
+                    style={{ borderColor: "var(--colorNeutralStroke2)" }}
                   >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span
-                          className="rounded-full border px-2.5 py-1 text-xs font-semibold"
-                          style={{
-                            background: isCurrent
-                              ? "var(--colorBrandBackground2)"
-                              : "var(--colorNeutralBackground3)",
-                            borderColor: isCurrent
-                              ? "var(--colorBrandStroke1)"
-                              : "var(--colorNeutralStroke2)",
-                            color: isCurrent
-                              ? "var(--colorBrandForeground1)"
-                              : "var(--colorNeutralForeground2)",
-                          }}
+                          className="text-base font-semibold tabular-nums"
+                          style={{ color: "var(--colorNeutralForeground1)" }}
                         >
                           v{entry.version}
                         </span>
                         <time
-                          className="text-xs font-semibold"
+                          className="text-xs"
                           dateTime={entry.date}
                           style={{ color: "var(--colorNeutralForeground4)" }}
                         >
@@ -152,9 +116,8 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                         </time>
                         {isCurrent && (
                           <span
-                            className="rounded-full px-2 py-0.5 text-xs font-semibold"
+                            className="text-xs"
                             style={{
-                              background: "var(--colorPaletteGreenBackground2)",
                               color: "var(--colorPaletteGreenForeground1)",
                             }}
                           >
@@ -164,72 +127,20 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                       </div>
 
                       <Button
-                        appearance="secondary"
+                        appearance="subtle"
                         size="small"
-                        icon={isCurrent ? <ArrowDownload24Regular /> : <Open24Regular />}
+                        icon={<Open24Regular />}
+                        iconPosition="after"
                         onClick={() => onOpenRelease(releaseUrlFor(entry.version))}
                       >
-                        {isCurrent ? "下载此版本" : "查看版本"}
+                        查看版本
                       </Button>
                     </div>
 
-                    <div className="mt-4 flex flex-col gap-4">
-                      {entry.sections.map((section) => {
-                        const tone = SECTION_TONES[section.title] ?? SECTION_TONES.优化;
-
-                        return (
-                          <section key={`${entry.version}-${section.title}`}>
-                            <h3>
-                              <span
-                                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-semibold"
-                                style={{
-                                  background: tone.bg,
-                                  borderColor: tone.border,
-                                  color: tone.fg,
-                                }}
-                              >
-                                <span
-                                  aria-hidden
-                                  className="h-1.5 w-1.5 rounded-full"
-                                  style={{ background: tone.fg }}
-                                />
-                                {section.title}
-                              </span>
-                            </h3>
-                            <ul
-                              className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6"
-                              style={{ color: "var(--colorNeutralForeground2)" }}
-                            >
-                              {section.items.map((item) => (
-                                <li key={`${entry.version}-${section.title}-${item.title}`}>
-                                  <span
-                                    className="font-semibold"
-                                    style={{ color: "var(--colorNeutralForeground1)" }}
-                                  >
-                                    {item.title}
-                                  </span>
-                                  ：{item.desc}
-                                </li>
-                              ))}
-                            </ul>
-                          </section>
-                        );
-                      })}
-                    </div>
+                    <div className="mt-3"><UpdateNoteList items={entry.items} /></div>
                   </article>
                 );
               })}
-              {!showAll && UPDATE_LOGS.length > 3 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAll(true)}
-                  className="flex items-center gap-2 self-start rounded-lg px-2 py-2 text-sm transition-colors hover:bg-black/[0.04]"
-                  style={{ color: "var(--colorNeutralForeground3)" }}
-                >
-                  <ChevronDown24Regular className="h-4 w-4" />
-                  还有 {UPDATE_LOGS.length - 3} 个更早版本
-                </button>
-              )}
             </div>
           </div>
 

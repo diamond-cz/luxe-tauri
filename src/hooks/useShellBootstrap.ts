@@ -22,8 +22,7 @@ import { useShortcutStore } from "@/stores/shortcutStore";
 import { useMtkStore } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { usePoetryStore } from "@/stores/poetryStore";
-import { useUpdateStore } from "@/stores/updateStore";
-import { checkForUpdate } from "@/services/updateCheck";
+import { runUpdateCheck } from "@/services/runUpdateCheck";
 import { trimMemory } from "@/ipc/memory";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
@@ -194,12 +193,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
 
       /* 8. Startup checks only notify. Installation requires a user action. */
       if (root.settings.auto_update) {
-        const updateStore = useUpdateStore.getState();
-        updateStore.setChecking("startup");
-        checkForUpdate()
+        runUpdateCheck("startup")
           .then((result) => {
-            useUpdateStore.getState().setResult(result, "startup");
-            if (result.status === "available" && root.settings.update_notify) {
+            if (result?.status === "available" && root.settings.update_notify) {
               try {
                 sendNotification({
                   title: "LUXE 有新版本",
@@ -207,9 +203,6 @@ export function useShellBootstrap(handlers: ShellHandlers) {
                 });
               } catch {/* notifications optional */}
             }
-          })
-          .catch((err) => {
-            useUpdateStore.getState().setError(err, "startup");
           });
       }
     })().catch((err) => {

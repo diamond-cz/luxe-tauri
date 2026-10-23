@@ -112,7 +112,13 @@ git push origin vX.Y.Z
 3. 使用 `tauri bundle` 生成 NSIS/MSI，检查产物版本、架构和签名文件，生成更新清单及 SHA-256 校验清单。
 4. 将五项产物存入 Actions artifact（保留 14 天），再上传 Draft Release；确认资产名称、数量和大小后公开。
 
-Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256SUMS.txt`。NSIS 用于应用内更新；MSI 用于手动/企业分发。应用内更新日志、更新清单和 Release 说明统一读取 `src/data/changelog.json`，发版前须新增对应版本记录。
+Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256SUMS.txt`。NSIS 用于应用内更新；MSI 用于手动/企业分发。应用内更新日志、标题栏更新预览、更新清单和 Release 说明统一读取 `src/data/changelog.json`，发版前须新增对应版本记录。标题栏与主页“关于”共用下载和安装状态，可从预览中直接更新。
+
+更新内容按版本维护 `version`、`date`、`items`；每条 `items` 只需填写类别 `type`（新增、优化、修复）和一句话 `content`。例如：
+
+```json
+{ "type": "修复", "content": "修复图片列表切换页面后丢失滚动位置的问题。" }
+```
 
 ### 更新行为与失败恢复
 
