@@ -1,4 +1,5 @@
 {
+  "home_current_version": "Phiên bản hiện tại v{{version}}",
   "update_available_version": "Đã có phiên bản v{{version}}",
   "update_install_now": "Cập nhật ngay",
   "update_downloading": "Đang tải xuống",

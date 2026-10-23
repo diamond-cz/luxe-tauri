@@ -24,7 +24,7 @@ export default function App() {
   const theme    = pickTheme(themeKey);
 
   return (
-    <FluentProvider theme={theme} className="h-full">
+    <FluentProvider theme={theme} className="h-full" applyStylesToPortals={false}>
       <ErrorBoundary>
         <MemoryRouter initialEntries={["/home"]}>
           <ShellRoot />

@@ -32,14 +32,18 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
-                let _ = win.unminimize();
-            }
-        }))
+    let builder = tauri::Builder::default();
+    // A stale dev instance must not make a new `tauri dev` exit and stop its Vite server.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.show();
+            let _ = win.set_focus();
+            let _ = win.unminimize();
+        }
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -86,6 +90,19 @@ pub fn run() {
             // System tray.
             if let Err(err) = tray::install(handle) {
                 tracing::warn!(%err, "tray install failed");
+            }
+
+            #[cfg(debug_assertions)]
+            if let Some(win) = handle.get_webview_window("main") {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    if matches!(win.is_visible(), Ok(false)) {
+                        tracing::error!(url = ?win.url(), "development window did not finish frontend bootstrap");
+                        if let Err(err) = win.show() {
+                            tracing::error!(%err, "failed to reveal development window");
+                        }
+                    }
+                });
             }
 
             Ok(())

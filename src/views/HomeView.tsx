@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@fluentui/react-components";
+import { Button, Tooltip } from "@fluentui/react-components";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -204,34 +204,47 @@ export function HomeView() {
             }}
           >
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div className="min-w-0">
-              <div className="text-2xl font-semibold"
-                   style={{ color: "var(--colorNeutralForeground1)" }}>
-                LUXE
+              <div className="min-w-0">
+                <div className="text-2xl font-semibold"
+                     style={{ color: "var(--colorNeutralForeground1)" }}>
+                  LUXE
+                </div>
+                <div className="mt-1 flex items-center gap-1 text-sm" style={{ color: "var(--colorNeutralForeground3)" }}>
+                  <span>版本</span>
+                  <Tooltip content={t("home_current_version", { version: CURRENT_VERSION })} relationship="description" positioning="above">
+                    <span
+                      tabIndex={0}
+                      className="inline-flex min-h-6 items-center rounded px-1.5 font-mono font-semibold tabular-nums text-[var(--colorNeutralForeground2)] transition-all duration-150 hover:-translate-y-px hover:bg-[var(--colorBrandBackground2)] hover:text-[var(--colorBrandForeground1)] focus-visible:bg-[var(--colorBrandBackground2)] focus-visible:text-[var(--colorBrandForeground1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--colorBrandForeground1)] motion-reduce:transform-none motion-reduce:transition-none"
+                    >
+                      v{CURRENT_VERSION}
+                    </span>
+                  </Tooltip>
+                </div>
               </div>
-              <div className="mt-1 text-sm"
-                   style={{ color: "var(--colorNeutralForeground3)" }}>
-                版本 v{CURRENT_VERSION}
-              </div>
-              <div className="mt-2 flex items-center gap-2 text-sm"
-                   style={{ color: updateStatus === "error" ? "var(--colorPaletteRedForeground1)" : updateStatus === "ok" ? "var(--colorPaletteGreenForeground1)" : "var(--colorNeutralForeground2)" }}>
-                {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" ? <span aria-hidden>✦</span> : null}
-                {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
+
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Button
+                  appearance="primary"
+                  icon={updateStatus === "available"
+                    ? <ArrowDownload24Regular />
+                    : <ArrowSync24Regular className={updateStatus === "checking" ? "animate-spin motion-reduce:animate-none" : undefined} />}
+                  disabled={updateBusy}
+                  onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
+                >
+                  {primaryUpdateLabel}
+                </Button>
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <Button
-                appearance="primary"
-                icon={updateStatus === "available"
-                  ? <ArrowDownload24Regular />
-                  : <ArrowSync24Regular className={updateStatus === "checking" ? "animate-spin motion-reduce:animate-none" : undefined} />}
-                disabled={updateBusy}
-                onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
-              >
-                {primaryUpdateLabel}
-              </Button>
-            </div>
+            <div
+              className="flex min-w-0 items-center gap-2 border-t pt-3 text-sm"
+              style={{
+                borderColor: "var(--colorNeutralStroke2)",
+                color: updateStatus === "error" ? "var(--colorPaletteRedForeground1)" : updateStatus === "ok" ? "var(--colorPaletteGreenForeground1)" : "var(--colorNeutralForeground2)",
+              }}
+            >
+              {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" ? <span aria-hidden>✦</span> : null}
+              {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
             </div>
 
             <div

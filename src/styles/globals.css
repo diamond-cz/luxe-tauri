@@ -197,11 +197,11 @@ body {
 }
 
 .luxe-update-log-backdrop {
-  background: rgba(28, 34, 45, 0.62) !important;
-  backdrop-filter: blur(8px);
+  background: rgba(28, 34, 45, 0.28) !important;
+  backdrop-filter: none;
 }
 html.light .luxe-update-log-backdrop {
-  background: rgba(67, 76, 92, 0.54) !important;
+  background: rgba(67, 76, 92, 0.22) !important;
 }
 
 .luxe-update-log-surface {

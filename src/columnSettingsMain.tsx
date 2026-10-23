@@ -36,7 +36,7 @@ function ColumnSettingsApp() {
   }, []);
   useEffect(() => { applyThemeClass(theme); }, [theme]);
 
-  return <FluentProvider id="column-settings-theme-root" theme={pickTheme(theme)} className="h-full">
+  return <FluentProvider id="column-settings-theme-root" theme={pickTheme(theme)} className="h-full" applyStylesToPortals={false}>
     <ErrorBoundary><ColumnSettingsWindow initialSchema={bootstrap?.schema} /></ErrorBoundary>
   </FluentProvider>;
 }

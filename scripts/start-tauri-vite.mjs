@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { setInterval } from "node:timers";
 import { pathToFileURL } from "node:url";
 
-const DEV_URL = "http://localhost:1420";
+export const DEV_URL = "http://127.0.0.1:1420";
 const PROJECT_MARKER = /<script type="module" src="\/src\/main\.tsx(?:\?[^\"]*)?"><\/script>/;
 
 function isConnectionRefused(error) {

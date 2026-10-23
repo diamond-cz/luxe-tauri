@@ -1,4 +1,5 @@
 {
+  "home_current_version": "Version actuelle v{{version}}",
   "update_available_version": "Version v{{version}} disponible",
   "update_install_now": "Mettre à jour",
   "update_downloading": "Téléchargement",

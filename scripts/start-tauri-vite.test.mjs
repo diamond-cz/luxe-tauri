@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { probeDevServer } from "./start-tauri-vite.mjs";
+import { DEV_URL, probeDevServer } from "./start-tauri-vite.mjs";
+
+test("Tauri and Vite use the same IPv4 loopback address", () => {
+  const config = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  const viteConfig = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
+  assert.equal(config.build.devUrl, DEV_URL);
+  assert.equal(new URL(DEV_URL).hostname, "127.0.0.1");
+  assert.match(viteConfig, /host: host \|\| "127\.0\.0\.1"/);
+});
 
 async function withServer(handler, run) {
   const server = createServer(handler);

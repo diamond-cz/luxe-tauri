@@ -41,8 +41,8 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
         backdrop={{ className: "luxe-update-log-backdrop" }}
         className="luxe-update-log-surface"
         style={{
-          width: "min(720px, calc(100vw - 32px))",
-          maxWidth: 720,
+          width: "min(640px, calc(100vw - 32px))",
+          maxWidth: 640,
           height: "min(760px, calc(100vh - 32px))",
           maxHeight: "calc(100vh - 32px)",
           padding: 0,

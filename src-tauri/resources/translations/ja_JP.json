@@ -1,4 +1,5 @@
 {
+  "home_current_version": "現在のバージョン v{{version}}",
   "update_available_version": "新しいバージョン v{{version}} が利用可能です",
   "update_install_now": "今すぐ更新",
   "update_downloading": "ダウンロード中",

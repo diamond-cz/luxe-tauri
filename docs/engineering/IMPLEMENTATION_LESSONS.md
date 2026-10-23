@@ -519,3 +519,108 @@
 
 - `npm run typecheck`、`npm run build`、`git diff --check` 通过；`rg` 搜索未发现“覆盖更新”相关代码残留。
 - 未在 Tauri 窗口实测弹窗滚动、深浅主题和窄窗口布局。
+
+### 2026-10-23：更新状态分隔与弹窗背景透出
+
+**亮点**
+
+- `src/views/HomeView.tsx` 将检查结果移到独立通栏区域，上下均由主题边框分隔；`src/components/common/UpdateLogDialog.tsx` 将近期更新弹窗宽度限制为 640px。
+- `src/styles/globals.css` 降低更新弹窗遮罩不透明度并去掉模糊，打开时仍可辨认后方主界面。
+
+**痛点**
+
+- 原检查结果放在版本信息容器内，无法用通栏边框对齐下方操作区；原遮罩在浅色模式下不透明度为 0.54 且模糊 8px。
+
+**闭坑**
+
+- 需要全宽分隔线时，将状态行放在卡片主行之外；弹窗遮罩使用局部 `.luxe-update-log-backdrop` 样式，避免影响其他对话框。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；未在新构建的 Tauri 窗口中实测弹窗透明度和窄窗口布局。
+
+### 2026-10-23：主页版本号提示
+
+**亮点**
+
+- `src/views/HomeView.tsx` 将“关于”区域的版本号单独以等宽数字样式显示，悬浮和键盘聚焦时提供轻微位移、主题色高亮与 Fluent 提示。
+- `src-tauri/resources/translations/` 的 16 份语言资源统一提供含版本号的“当前版本”提示。
+
+**痛点**
+
+- 原版本号与“版本”标签共用一段灰色文字，缺少可辨识的层级和当前版本提示。
+
+**闭坑**
+
+- 数字版本使用 `CURRENT_VERSION` 单一来源；提示文案通过 i18n 插值，不在视图中拼接固定语言字符串。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；16 份翻译 JSON 均可解析且包含插值键。
+- 未在新构建的 Tauri 窗口中实测悬浮动画、提示位置及键盘焦点。
+
+### 2026-10-23：开发窗口白屏与单实例启动
+
+**亮点**
+
+- `src-tauri/src/lib.rs` 仅在正式构建启用单实例插件；开发构建再次启动时可以保留新进程及其 Vite 服务。
+
+**痛点**
+
+- 已运行的开发进程仍持有旧 WebView；再次执行 `tauri dev` 时，新进程被单实例插件结束，CLI 随之退出，旧窗口无法从此前的页面加载失败中恢复。
+- 现有 `luxe-tauri.exe` 占用调试可执行文件，完整 `npm run rust:test` 无法替换该文件；全仓库 `cargo fmt --check` 报告了大量既有格式差异。
+
+**闭坑**
+
+- 开发白屏先检查 `localhost:1420`、旧 `luxe-tauri.exe` 和 Vite 模块响应；修改 Rust 后先正常关闭旧开发进程，再启动新构建，避免 Windows 文件占用。
+- 多个开发实例会访问同一份本地状态，调试完成后关闭多余窗口；正式构建仍保持单实例。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`npm run rust:test`、`git diff --check` 通过；Rust 测试有 2 项按原设置忽略。
+- `npm run tauri:dev` 已成功编译，Vite 的入口和主页模块均返回 HTTP 200；第二次启动时两个开发实例均保持运行，未被单实例回调退出。未目视核对窗口画面。
+- 首次运行 `npm run rust:test` 时旧进程占用 `target/debug/luxe-tauri.exe`；旧进程退出后重跑通过。`cargo fmt --check` 报告既有全仓库格式差异，未执行全仓库格式化。
+
+### 2026-10-23：开发地址 IPv4/IPv6 对齐与白屏排查
+
+**亮点**
+
+- `src-tauri/tauri.conf.json`、`vite.config.ts` 与 `scripts/start-tauri-vite.mjs` 统一使用 `127.0.0.1:1420`；`scripts/start-tauri-vite.test.mjs` 检查三处地址契约。
+- `index.html` 在 React 首次渲染前显示加载状态；`src-tauri/src/lib.rs` 在开发窗口持续隐藏时记录当前 URL 并显示窗口，便于定位启动失败。
+
+**痛点**
+
+- 旧配置以 `localhost` 连接，但实测 Vite 只在 `[::1]:1420` 响应，`127.0.0.1:1420` 拒绝连接；此前仅检查 `localhost` 的 HTTP 200，不能证明 WebView2 选择的地址可用。
+- WebView2 共享用户数据目录时曾报 `0x800700AA` 资源占用；该错误发生于调试端口实验，不能直接归为原白屏根因。
+
+**闭坑**
+
+- 开发白屏时分别检查 `127.0.0.1:1420`、`[::1]:1420` 与 Tauri 的 `devUrl`，并以同一显式地址配置 Vite 监听和启动探测。
+- Rust 侧的开发兜底日志只用于暴露未完成的前端启动；不可将 HTTP 200 或编译通过视为 WebView 画面验收。
+
+**验证**
+
+- `node --test scripts/start-tauri-vite.test.mjs`（4 项通过）、`npm run typecheck`、`npm run build`、`cargo test --manifest-path src-tauri/Cargo.toml --lib`（13 项通过、1 项忽略）及 `git diff --check` 通过；修改后 `http://127.0.0.1:1420` 返回 HTTP 200。
+- `npm run tauri:dev` 编译并启动了调试进程；当时未能读取 WebView 画面，后续确认白屏仍存在，根因见下条。
+
+### 2026-10-23：Fluent Tooltip 门户覆盖主界面
+
+**亮点**
+
+- `src/App.tsx` 与 `src/columnSettingsMain.tsx` 的根 `FluentProvider` 设置 `applyStylesToPortals={false}`，让 Tooltip、Dialog 等门户继承主题变量，但不复制根容器的 `h-full` 与背景样式。
+- `index.html` 引用现有的 `src/assets/luxe-logo.png` 作为网页图标，消除开发服务器的 `/favicon.ico` 404。
+
+**痛点**
+
+- FluentProvider 默认将根节点完整类名复制到 `body` 下的 `data-portal-node`。版本号 Tooltip 打开时，门户同时获得 `h-full`、白色主题背景和 `z-index: 1000000`，以 796×624 的白色层覆盖了实际已渲染的首页。
+- React Router future flag、React DevTools 和 Tauri 热重载 callback 提示均未导致此次白屏；仅凭控制台消息无法定位覆盖层。
+
+**闭坑**
+
+- 根 FluentProvider 使用填满窗口的布局类时，必须检查门户是否继承该类；白屏但无渲染异常时，先对比 `#root.innerText`、`document.elementsFromPoint()` 和 `[data-portal-node]` 的尺寸及背景。
+- 不要将开发地址可达或构建通过当作界面可见的证明；需要检查实际 WebView DOM 与覆盖层。
+
+**验证**
+
+- 在现有 Tauri 开发窗口临时采样：修复前 `#root` 已含完整首页内容，Tooltip 门户为 796×624、白色背景且位于最上层；修复后门户为 796×0、透明背景，窗口中心重新命中首页按钮。采样代码与本地监听器已移除。
+- `npm run typecheck`、`npm run build` 通过；构建后的 `dist/index.html` 引用了打包后的 PNG 图标。未在全新启动的 Tauri 进程中目视验收。
