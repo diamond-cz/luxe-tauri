@@ -227,4 +227,25 @@ mod image_table_mode_tests {
         assert!(columns.isp6s.normal.hidden.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[tokio::test]
+    async fn fractional_splitter_does_not_block_dp_path_persistence() {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("luxe-dp-path-{}-{nonce}", std::process::id()));
+        let preferred = dir.join("resources/state.toml");
+        let fallback = dir.join("user/state.toml");
+        let store = Arc::new(StateStore::load_paths(preferred.clone(), fallback.clone()).unwrap());
+        let mut mtk = serde_json::to_value(store.snapshot().mtk).unwrap();
+        mtk["outer_splitter"] = serde_json::json!([40.25, 59.75]);
+        mtk["inner_splitter"] = serde_json::json!([32.2005007422, 67.7994992578]);
+        mtk["debug_parser_path"] = serde_json::json!(r"D:\tools\DPParser.exe");
+
+        store.patch_section("mtk", mtk).await.unwrap();
+        store.flush_now().await.unwrap();
+        let restored = StateStore::load_paths(preferred, fallback).unwrap().snapshot();
+        assert_eq!(restored.mtk.outer_splitter, vec![40.25, 59.75]);
+        assert_eq!(restored.mtk.inner_splitter, vec![32.2005007422, 67.7994992578]);
+        assert_eq!(restored.mtk.debug_parser_path.as_deref(), Some(r"D:\tools\DPParser.exe"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

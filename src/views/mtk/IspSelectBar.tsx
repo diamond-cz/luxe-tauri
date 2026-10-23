@@ -9,6 +9,7 @@ import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { ToastKind } from "@/components/common/Toast";
 import { ISP_LIST, ISP_TABS, type IspId, type IspTab } from "./ispTabs";
 import { resolveDroppedPath } from "@/ipc/shell";
+import { isDebugParserExecutable } from "./debugParserPath";
 
 interface Props {
   isp: IspId;
@@ -139,7 +140,7 @@ export function IspSelectBar({
           void (async () => {
             const path = await resolveDropCandidate(payload.paths, slot === "cpp"
               ? (item) => matchExt(item, CPP_EXTS)
-              : isDebugParserPath);
+              : isDebugParserExecutable);
             if (!path) return;
             if (slot === "cpp") onCppPathChange(path);
             else onDebugParserPathChange(path);
@@ -292,7 +293,7 @@ export function IspSelectBar({
                         filters: [{ name: "DebugParser.exe", extensions: ["exe"] }],
                       });
                       if (typeof picked !== "string") return;
-                      if (!isDebugParserPath(picked)) {
+                      if (!isDebugParserExecutable(picked)) {
                         onToast({ kind: "error", title: "请选择 DebugParser.exe" });
                         return;
                       }
@@ -586,11 +587,7 @@ function classifyCppDrop(paths: string[]): "ok" | "bad" {
   return paths.some((path) => matchExt(path, CPP_EXTS) || isShortcutPath(path)) ? "ok" : "bad";
 }
 
-function isDebugParserPath(path: string): boolean {
-  return path.split(/[\\/]/).pop()?.toLowerCase() === "debugparser.exe";
-}
-
 function classifyPickerDrop(slot: Exclude<PickerSlot, null>, paths: string[]): "ok" | "bad" {
   if (slot === "cpp") return classifyCppDrop(paths);
-  return paths.some((path) => isDebugParserPath(path) || isShortcutPath(path)) ? "ok" : "bad";
+  return paths.some((path) => isDebugParserExecutable(path) || isShortcutPath(path)) ? "ok" : "bad";
 }

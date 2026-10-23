@@ -18,6 +18,7 @@ import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab, type WorkspaceSession } from "./workspaceSession";
+import { isDebugParserExecutable } from "../debugParserPath";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -141,7 +142,7 @@ export function Isp6sAeVisual({
       onNotice({ kind: "info", title: "请先导入 DP 解析工具 DebugParser.exe" });
       const picked = await openDialog({ multiple: false, filters: [{ name: "DebugParser.exe", extensions: ["exe"] }] });
       if (typeof picked !== "string") return;
-      if (picked.split(/[\\/]/).pop()?.toLowerCase() !== "debugparser.exe") {
+      if (!isDebugParserExecutable(picked)) {
         onNotice({ kind: "error", title: "请选择 DebugParser.exe" });
         return;
       }

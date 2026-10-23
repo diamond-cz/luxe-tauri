@@ -38,6 +38,7 @@ interface MtkState {
   imports:  Record<string, ImportState>;
   imageDir: Record<string, ImageDirState>;
 
+  hydrate: (value: Mtk) => void;
   setCurrentIsp:  (idx: number) => void;
   setCurrentTab:  (idx: number) => void;
   setOuterSplit:  (sizes: number[]) => void;
@@ -56,6 +57,16 @@ export const useMtkStore = create<MtkState>()(
     imports:  {},
     imageDir: {},
 
+    hydrate: (value) => set((s) => {
+      s.mtk = value;
+      s.debugParserPath = value.debug_parser_path ?? null;
+      s.imports = Object.fromEntries(Object.entries(value.cpp_paths ?? {}).map(([key, filePath]) => [
+        key, { ...DEFAULT_IMPORT, filePath },
+      ]));
+      if (value.cpp_path && !s.imports["ISP6S|0"]) {
+        s.imports["ISP6S|0"] = { ...DEFAULT_IMPORT, filePath: value.cpp_path };
+      }
+    }),
     setCurrentIsp:  (idx) => set((s) => { s.mtk.current_isp = idx; s.mtk.current_tab = 0; }),
     setCurrentTab:  (idx) => set((s) => { s.mtk.current_tab = idx; }),
     setOuterSplit:  (sizes) => set((s) => { s.mtk.outer_splitter = sizes; }),
@@ -77,6 +88,12 @@ export const useMtkStore = create<MtkState>()(
       const key = `${isp}|${tabIdx}`;
       s.imageDir[key] = { ...(s.imageDir[key] ?? DEFAULT_IMAGE_DIR), ...patch };
       const image = s.imageDir[key];
+      if (image.dir && image.status === "scanning") {
+        s.mtk.image_workspaces ??= {};
+        if (s.mtk.image_workspaces[key]?.dir !== image.dir) {
+          s.mtk.image_workspaces[key] = { dir: image.dir, selected_image: null };
+        }
+      }
       if (image.dir && (image.status === "done" || (image.status === "loading" && image.entries[image.current]))) {
         s.mtk.image_workspaces ??= {};
         const selected = image.entries[image.current]?.jpg_path ?? null;

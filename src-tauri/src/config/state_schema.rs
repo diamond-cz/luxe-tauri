@@ -1,7 +1,7 @@
 //! `state.toml` schema. Field names mirror hiz.toml so a future import script is
 //! a straight-through copy.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -139,8 +139,10 @@ impl Default for Homepage {
 pub struct Mtk {
     #[serde(default = "default_current_isp")] pub current_isp:    u32,   // ISP46=0, ISP6S=1, ISP7S=2 — default 1
     #[serde(default)]                         pub current_tab:    u32,
-    #[serde(default)]                         pub outer_splitter: Vec<u32>,
-    #[serde(default)]                         pub inner_splitter: Vec<u32>,
+    #[serde(default, deserialize_with = "deserialize_splitter_sizes")]
+    pub outer_splitter: Vec<f64>,
+    #[serde(default, deserialize_with = "deserialize_splitter_sizes")]
+    pub inner_splitter: Vec<f64>,
     #[serde(default)]                         pub cpp_path: Option<String>,
     #[serde(default)]                         pub cpp_paths: BTreeMap<String, String>,
     #[serde(default)]                         pub debug_parser_path: Option<String>,
@@ -153,6 +155,39 @@ pub struct ImageWorkspace {
     #[serde(default)] pub selected_image: Option<String>,
 }
 fn default_current_isp() -> u32 { 1 }
+
+fn deserialize_splitter_sizes<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Size {
+        Integer(u32),
+        Fraction(f64),
+    }
+
+    Vec::<Size>::deserialize(deserializer).map(|sizes| {
+        sizes.into_iter().map(|size| match size {
+            Size::Integer(value) => f64::from(value),
+            Size::Fraction(value) => value,
+        }).collect()
+    })
+}
+
+#[cfg(test)]
+mod mtk_splitter_tests {
+    use super::StateRoot;
+
+    #[test]
+    fn legacy_integer_ratios_remain_readable() {
+        let old: StateRoot = toml::from_str(
+            "[mtk]\nouter_splitter = [40, 60]\ninner_splitter = [16, 84]\n",
+        ).unwrap();
+        assert_eq!(old.mtk.outer_splitter, vec![40.0, 60.0]);
+        assert_eq!(old.mtk.inner_splitter, vec![16.0, 84.0]);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Isp6sAeVisual {

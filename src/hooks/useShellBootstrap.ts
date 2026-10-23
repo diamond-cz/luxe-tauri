@@ -72,7 +72,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       setMainWindow(root.main_window);
       setSettings(root.settings);
       setShortcuts(root.shortcuts);
-      useMtkStore.setState((s) => { s.mtk = root.mtk; });
+      useMtkStore.getState().hydrate(root.mtk);
       // The backend already debounces disk writes. Submit path changes now,
       // even when the user leaves MTK or exits before a UI timer could fire.
       unlisteners.push(useMtkStore.subscribe((next, previous) => {
