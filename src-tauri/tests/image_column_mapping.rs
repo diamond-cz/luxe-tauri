@@ -43,8 +43,9 @@ fn b2d_b2m_columns_are_exposed_in_the_frontend_schema() {
     assert_eq!(json["image_table"]["scene"]["B2M"], "AE_TAG_DRV6_B2M");
     assert!(json["image_table"]["portrait"].get("B2D").is_none());
     assert!(json["image_table"]["portrait"].get("B2M").is_none());
-    let columns: Vec<_> = schema.image.keys().map(String::as_str).collect();
-    assert!(columns.ends_with(&["FdMinCWR", "B2D", "B2M"]));
+    let scene = schema.image_table.scene.as_ref().unwrap();
+    let columns: Vec<_> = scene.keys().map(String::as_str).collect();
+    assert!(columns.windows(2).any(|pair| pair == ["B2D", "B2M"]));
 }
 
 #[test]
