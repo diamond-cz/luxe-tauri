@@ -1,4 +1,4 @@
-import type { ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
+import type { ImageTableColorThresholds, ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
 
 export type ColumnScope = "all" | "face" | "normal";
 export type ColumnMode = "isp6s" | "tone";
@@ -8,9 +8,24 @@ export const COLUMN_SETTINGS_CANCEL_EVENT = "luxe:image-table-columns-cancel";
 export const COLUMN_SETTINGS_SCOPE_EVENT = "luxe:image-table-columns-scope";
 
 export type ColumnSettingsSaved = { mode: ColumnMode; settings: ImageTableModeColumns };
+export const DEFAULT_COLOR_THRESHOLDS: ImageTableColorThresholds = { ae_gain: 0.05, ev: 0.005, delta: 5 };
+
+export function normalizeColorThresholds(value: Partial<ImageTableColorThresholds> | undefined): ImageTableColorThresholds {
+  const valid = (candidate: number | undefined, fallback: number) =>
+    typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0 ? candidate : fallback;
+  return {
+    ae_gain: valid(value?.ae_gain, DEFAULT_COLOR_THRESHOLDS.ae_gain),
+    ev: valid(value?.ev, DEFAULT_COLOR_THRESHOLDS.ev),
+    delta: valid(value?.delta, DEFAULT_COLOR_THRESHOLDS.delta),
+  };
+}
 
 export function columnScopeForThumbnail(kind: "mixed" | "portrait" | "scene"): ColumnScope {
   return kind === "scene" ? "normal" : kind === "portrait" ? "face" : "all";
+}
+
+export function collectImageTableCustomColumns(settings: ImageTableModeColumns): ImageTableScopeColumns["custom"] {
+  return [settings.all, settings.face, settings.normal].flatMap((scope) => scope.custom);
 }
 
 export function orderedSettingsRows<T extends { id: string }>(rows: T[], settings: ImageTableScopeColumns): T[] {
@@ -37,7 +52,15 @@ export function normalizeColumnMode(value: ImageTableModeColumns | undefined | n
       custom: Array.isArray(saved?.custom) ? saved.custom.filter((column) => column.scope === scope) : [],
     };
   };
-  return { all: normalizeScope("all"), face: normalizeScope("face"), normal: normalizeScope("normal") };
+  const legacyThresholds = (value as (ImageTableModeColumns & {
+    all?: ImageTableScopeColumns & { color_thresholds?: Partial<ImageTableColorThresholds> };
+  }) | undefined)?.all?.color_thresholds;
+  return {
+    all: normalizeScope("all"),
+    face: normalizeScope("face"),
+    normal: normalizeScope("normal"),
+    color_thresholds: normalizeColorThresholds(value?.color_thresholds ?? legacyThresholds),
+  };
 }
 
 export function readLegacyColumnMode(mode: ColumnMode): ImageTableModeColumns {
@@ -67,5 +90,6 @@ export function readLegacyColumnMode(mode: ColumnMode): ImageTableModeColumns {
     edits: Object.fromEntries(Object.entries(shared.edits).map(([id, edit]) => [id, { ...edit }])),
     custom: custom.filter((column) => column.scope === scope).map((column) => ({ ...column })),
   });
-  return { all: scopeSettings("all"), face: scopeSettings("face"), normal: scopeSettings("normal") };
+  return { all: scopeSettings("all"), face: scopeSettings("face"), normal: scopeSettings("normal"),
+    color_thresholds: { ...DEFAULT_COLOR_THRESHOLDS } };
 }

@@ -68,6 +68,8 @@ export interface Isp6sAeVisual {
   chart_main_t_mid_readout_mode: string;
   chart_map_tab:              string;
   tone_chart_map_tab:         string;
+  image_table_kind_filter:    "all" | "scene" | "portrait";
+  tone_image_table_kind_filter: "all" | "scene" | "portrait";
 }
 
 export interface StateRoot {
@@ -90,10 +92,17 @@ export interface ImageTableScopeColumns {
   custom: Array<{ id: string; label: string; source: string; scope: "all" | "face" | "normal" }>;
 }
 
+export interface ImageTableColorThresholds {
+  ae_gain: number;
+  ev: number;
+  delta: number;
+}
+
 export interface ImageTableModeColumns {
   all: ImageTableScopeColumns;
   face: ImageTableScopeColumns;
   normal: ImageTableScopeColumns;
+  color_thresholds: ImageTableColorThresholds;
 }
 
 export interface ImageTableColumns {

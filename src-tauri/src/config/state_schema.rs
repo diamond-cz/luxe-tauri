@@ -36,6 +36,7 @@ pub struct ImageTableModeColumns {
     #[serde(default)] pub all: ImageTableScopeColumns,
     #[serde(default)] pub face: ImageTableScopeColumns,
     #[serde(default)] pub normal: ImageTableScopeColumns,
+    #[serde(default)] pub color_thresholds: ImageTableColorThresholds,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -46,6 +47,21 @@ pub struct ImageTableScopeColumns {
     #[serde(default)] pub deleted: Vec<String>,
     #[serde(default)] pub edits: BTreeMap<String, ImageTableColumnEdit>,
     #[serde(default)] pub custom: Vec<ImageTableCustomColumn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTableColorThresholds {
+    #[serde(default = "default_ae_gain_threshold")] pub ae_gain: f64,
+    #[serde(default = "default_ev_threshold")] pub ev: f64,
+    #[serde(default = "default_delta_threshold")] pub delta: f64,
+}
+fn default_ae_gain_threshold() -> f64 { 0.05 }
+fn default_ev_threshold() -> f64 { 0.005 }
+fn default_delta_threshold() -> f64 { 5.0 }
+impl Default for ImageTableColorThresholds {
+    fn default() -> Self {
+        Self { ae_gain: default_ae_gain_threshold(), ev: default_ev_threshold(), delta: default_delta_threshold() }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -185,7 +201,12 @@ pub struct Isp6sAeVisual {
     pub chart_map_tab:                                 String,
     #[serde(default = "default_tone_chart_map_tab")]
     pub tone_chart_map_tab:                            String,
+    #[serde(default = "default_image_table_kind_filter")]
+    pub image_table_kind_filter:                        String,
+    #[serde(default = "default_image_table_kind_filter")]
+    pub tone_image_table_kind_filter:                   String,
 }
+fn default_image_table_kind_filter() -> String { "all".into() }
 fn default_true() -> bool { true }
 fn default_split_ratio() -> f32 { 0.7 }
 fn default_image_splitter_ratio() -> f32 { 0.5 }
@@ -240,6 +261,8 @@ impl Default for Isp6sAeVisual {
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
             chart_map_tab: default_chart_map_tab(),
             tone_chart_map_tab: default_tone_chart_map_tab(),
+            image_table_kind_filter: default_image_table_kind_filter(),
+            tone_image_table_kind_filter: default_image_table_kind_filter(),
         }
     }
 }
@@ -262,14 +285,22 @@ mod preview_mode_tests {
     fn tone_preview_mode_defaults_for_older_state_and_round_trips() {
         let mut saved = serde_json::to_value(Isp6sAeVisual::default()).unwrap();
         saved.as_object_mut().unwrap().remove("tone_preview_mode");
+        saved.as_object_mut().unwrap().remove("image_table_kind_filter");
+        saved.as_object_mut().unwrap().remove("tone_image_table_kind_filter");
         let previous: Isp6sAeVisual = serde_json::from_value(saved).unwrap();
         assert_eq!(previous.tone_preview_mode, "chart_map");
+        assert_eq!(previous.image_table_kind_filter, "all");
+        assert_eq!(previous.tone_image_table_kind_filter, "all");
 
         let mut selected = previous;
         selected.tone_preview_mode = "param_map".into();
+        selected.image_table_kind_filter = "portrait".into();
+        selected.tone_image_table_kind_filter = "scene".into();
         let restored: Isp6sAeVisual = serde_json::from_str(&serde_json::to_string(&selected).unwrap()).unwrap();
         assert_eq!(restored.tone_preview_mode, "param_map");
         assert_eq!(restored.preview_mode, "chart_map");
+        assert_eq!(restored.image_table_kind_filter, "portrait");
+        assert_eq!(restored.tone_image_table_kind_filter, "scene");
     }
 }
 
@@ -283,6 +314,8 @@ mod image_table_column_tests {
         let mut columns = ImageTableColumns::default();
         columns.isp6s.all.hidden.push("ev".into());
         columns.isp6s.all.pinned = vec!["cwr".into(), "ev".into()];
+        columns.isp6s.color_thresholds.ev = 0.012;
+        columns.isp6s.color_thresholds.ae_gain = 0.08;
         columns.isp6s.face.order = vec!["cwr".into(), "ev".into()];
         columns.isp6s.face.edits.insert("ev".into(), ImageTableColumnEdit {
             label: Some("Face EV".into()), source: None,
@@ -298,6 +331,9 @@ mod image_table_column_tests {
         let saved = restored.image_table_columns.unwrap().isp6s;
         assert_eq!(saved.all.hidden, vec!["ev"]);
         assert_eq!(saved.all.pinned, vec!["cwr", "ev"]);
+        assert_eq!(saved.color_thresholds.ev, 0.012);
+        assert_eq!(saved.color_thresholds.ae_gain, 0.08);
+        assert_eq!(saved.color_thresholds.delta, 5.0);
         assert!(saved.face.hidden.is_empty());
         assert_eq!(saved.face.order, vec!["cwr", "ev"]);
         assert_eq!(saved.face.edits["ev"].label.as_deref(), Some("Face EV"));

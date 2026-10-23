@@ -28,7 +28,7 @@ import { Panel, PanelGroup } from "react-resizable-panels";
 import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
-import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
+import { flushStateNow, loadState, saveImageTableMode, saveStateSection } from "@/ipc/stateIo";
 import type { Isp6sSchemaRoot } from "@/ipc/cppParser";
 import type { ImageTableModeColumns } from "@/types/ipc";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
@@ -39,10 +39,11 @@ import { classifyImageTableRow, shouldShowImageTableRow, type ImageTableKind } f
 import { imageTableExtraColumns, imageTableMapping, isImageTableColumnMapped } from "./imageTableMapping";
 import { customImageColumnText, imageColumnSourceKeys, isAeGainPairSource } from "./imageTableCustomColumns";
 import { deltaEv, formatCwrEvTriplet, formatDeltaEv, isCwrDeltaFormula, isCwrEvFormula, metricDirection, parseMetricPair, parseMetricResult, selectImageTableEv } from "./imageTableMetrics";
-import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, columnScopeForThumbnail, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
+import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, collectImageTableCustomColumns, columnScopeForThumbnail, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
 import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
 import { columnSettingsPlacement } from "./columnSettingsPlacement";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { ScrollPosition } from "../workspaceSession";
 
 /** 空景筛选图标：线条树叶和右下角保护标记。 */
@@ -254,8 +255,8 @@ function formatFaceTargetDelta(value: number | null): string {
   return value === null ? "-" : `${value >= 0 ? "+" : ""}${value}`;
 }
 
-function faceTargetDeltaStyle(value: number | null): React.CSSProperties | undefined {
-  return metricDirectionStyle(value, 5);
+function faceTargetDeltaStyle(value: number | null, threshold: number): React.CSSProperties | undefined {
+  return metricDirectionStyle(value, threshold);
 }
 
 function metricDirectionStyle(value: number | null, threshold: number): React.CSSProperties | undefined {
@@ -1088,7 +1089,7 @@ export function ImageTab({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const restoreScrollRef = useRef(scrollPosition);
   const preserveRestoredScrollRef = useRef(Boolean(scrollPosition));
-  const previousKindFilterRef = useRef({ showScene: true, showPortrait: true });
+  const previousKindFilterRef = useRef<string | null>(null);
   const scrollPositionChangeRef = useRef(onScrollPositionChange);
   const tableWindowPathsRef = useRef<string[]>([]);
   const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
@@ -1129,6 +1130,18 @@ export function ImageTab({
   const faceBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   const faceFdyKey = schema.Image?.FDY ?? "AE_TAG_FLT_FDY";
   const columnMode: ColumnMode = toneMode ? "tone" : "isp6s";
+  const selectedKindFilter = useIsp6sVisualStore((state) => toneMode
+    ? state.visual.tone_image_table_kind_filter : state.visual.image_table_kind_filter);
+  const setKindFilter = (kind: "all" | "scene" | "portrait") => {
+    const store = useIsp6sVisualStore.getState();
+    store.patch(toneMode ? { tone_image_table_kind_filter: kind } : { image_table_kind_filter: kind });
+    void saveStateSection("isp6s_ae_visual", useIsp6sVisualStore.getState().visual)
+      .catch((error) => console.warn("save image table filter", error));
+  };
+  useEffect(() => () => {
+    void saveStateSection("isp6s_ae_visual", useIsp6sVisualStore.getState().visual)
+      .catch((error) => console.warn("save image table state on leave", error));
+  }, []);
   const [modeSettings, setModeSettings] = useState<ImageTableModeColumns>(() => readLegacyColumnMode(columnMode));
   useEffect(() => {
     let active = true;
@@ -1163,7 +1176,7 @@ export function ImageTab({
     }).catch((error) => console.warn("load image table columns", error));
     return () => { active = false; unlisten.forEach((stop) => stop()); };
   }, [columnMode]);
-  const allCustomColumns = useMemo(() => Object.values(modeSettings).flatMap((settings) => settings.custom), [modeSettings]);
+  const allCustomColumns = useMemo(() => collectImageTableCustomColumns(modeSettings), [modeSettings]);
   const tableColumns = useMemo<ImageTableColumn[]>(
     () => {
       return [
@@ -1296,8 +1309,6 @@ export function ImageTab({
     });
     void child.once("tauri://error", (event) => console.error("open column settings", event.payload));
   };
-  const [showScene, setShowScene] = useState(true);
-  const [showPortrait, setShowPortrait] = useState(true);
   const [imageKinds, setImageKinds] = useState<{
     entries: ImageEntry[];
     keySignature: string;
@@ -1313,11 +1324,6 @@ export function ImageTab({
     widths: Record<string, number>;
   } | null>(null);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    setShowScene(true);
-    setShowPortrait(true);
-  }, [entries, imageDataRevision]);
 
   useEffect(() => {
     if (!faceLinkTargetCalculator || toneMode || entries.length === 0) return;
@@ -1446,8 +1452,7 @@ export function ImageTab({
   const bothKinds = hasScene && hasPortrait;
   const classificationReady = Boolean(classifiedKinds);
   const canFilterKinds = classificationReady && (bothKinds || (hasNa && (hasScene || hasPortrait)));
-  const requestedKindFilter = showScene && !showPortrait ? "scene"
-    : showPortrait && !showScene ? "portrait" : "all";
+  const requestedKindFilter = selectedKindFilter;
   const activeKindFilter = (requestedKindFilter === "scene" && hasScene)
     || (requestedKindFilter === "portrait" && hasPortrait) ? requestedKindFilter : "all";
   const thumbnailHeaderKind = canFilterKinds && activeKindFilter !== "all"
@@ -1466,6 +1471,7 @@ export function ImageTab({
     || (canFilterKinds && activeKindFilter === "portrait");
   const columnScope: ColumnScope = toneMode ? "all" : sceneOnly ? "normal" : portraitOnly ? "face" : "all";
   const activeColumnSettings = modeSettings[columnScope];
+  const colorThresholds = modeSettings.color_thresholds;
   const orderedColumns = useMemo(() => {
     const scoped = tableColumns.filter((column) => !column.scope || column.scope === columnScope).map((column) => {
       const edit = activeColumnSettings.edits[column.id];
@@ -2060,15 +2066,14 @@ export function ImageTab({
 
   useEffect(() => {
     const previous = previousKindFilterRef.current;
-    previousKindFilterRef.current = { showScene, showPortrait };
-    // Effect replay on mount is not a filter change.
-    if (previous.showScene === showScene && previous.showPortrait === showPortrait) return;
+    previousKindFilterRef.current = selectedKindFilter;
+    if (previous === null || previous === selectedKindFilter) return;
     restoreScrollRef.current = null;
     preserveRestoredScrollRef.current = false;
     const el = scrollRef.current;
     if (!el) return;
     setImageTableScrollTop(0);
-  }, [showScene, showPortrait]);
+  }, [selectedKindFilter]);
 
   useEffect(() => {
     const firstPath = selectedHeatmapPaths[0];
@@ -2319,14 +2324,13 @@ export function ImageTab({
                           : `${activeKindFilter !== "all" ? "仅显示" : "只有"}${thumbnailHeaderKind === "scene" ? "空景" : "人像"}图片`}
                         aria-pressed={canFilterKinds ? activeKindFilter !== "all" : undefined}
                         onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => { if (canFilterKinds) { setShowScene(true); setShowPortrait(true); } }}
+                        onClick={() => { if (canFilterKinds) setKindFilter("all"); }}
                         onContextMenu={(event) => {
                           event.preventDefault();
                           if (!canFilterKinds) return;
                           const next = bothKinds ? (activeKindFilter === "scene" ? "portrait" : "scene")
                             : activeKindFilter === "all" ? (hasScene ? "scene" : "portrait") : "all";
-                          setShowScene(next !== "portrait");
-                          setShowPortrait(next !== "scene");
+                          setKindFilter(next);
                         }}
                       >
                         {thumbnailHeaderKind === "scene" ? <SceneLeafProtectIcon />
@@ -2427,19 +2431,19 @@ export function ImageTab({
                              ? <>{([target?.normalEv ?? null, target?.backEv ?? null, target?.evPair ?? null] as const)
                                .map((value, index) => <span key={index}>
                                  {index > 0 && <span>|</span>}
-                                 <span style={metricDirectionStyle(value, 0.005)}>{formatDeltaEv(value)}</span>
+                                 <span style={metricDirectionStyle(value, colorThresholds.ev)}>{formatDeltaEv(value)}</span>
                                </span>)}</>
                            : column.kind === "ev"
-                             ? <span style={metricDirectionStyle(evOverrideValue, 0.005)}>
+                             ? <span style={metricDirectionStyle(evOverrideValue, colorThresholds.ev)}>
                                  {formatDeltaEv(evOverrideValue)}
                                </span>
                            : column.kind === "delta" && column.sourceOverride && !isCwrDeltaFormula(column.key ?? "")
-                             ? <span style={faceTargetDeltaStyle(parseMetricResult(deltaOverrideText ?? "-"))}>
+                             ? <span style={faceTargetDeltaStyle(parseMetricResult(deltaOverrideText ?? "-"), colorThresholds.delta)}>
                                  {deltaOverrideText}
                                </span>
                            : column.kind === "aeGain"
                              ? aeGainPair
-                               ? <>{aeGainPair.first}(<span style={metricDirectionStyle(aeGainPair.difference, 0.05)}>{aeGainPair.second}</span>)</>
+                               ? <>{aeGainPair.first}(<span style={metricDirectionStyle(aeGainPair.difference, colorThresholds.ae_gain)}>{aeGainPair.second}</span>)</>
                                : aeGainText ?? "-"
                            : column.sourceOverride && !(column.kind === "delta" && isCwrDeltaFormula(column.key ?? ""))
                              ? !toneMode && column.kind === "extra"
@@ -2452,13 +2456,13 @@ export function ImageTab({
                            : column.kind === "cwr"
                              ? target?.cwr ?? "-"
                              : column.kind === "delta" && sceneOnly
-                               ? <span style={faceTargetDeltaStyle(target?.normalDelta ?? null)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
+                               ? <span style={faceTargetDeltaStyle(target?.normalDelta ?? null, colorThresholds.delta)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
                              : column.kind === "delta"
-                               ? <><span style={faceTargetDeltaStyle(target?.normalDelta ?? null)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
+                               ? <><span style={faceTargetDeltaStyle(target?.normalDelta ?? null, colorThresholds.delta)}>{formatFaceTargetDelta(target?.normalDelta ?? null)}</span>
                                    <span>|</span>
-                                   <span style={faceTargetDeltaStyle(target?.backDelta ?? null)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
+                                   <span style={faceTargetDeltaStyle(target?.backDelta ?? null, colorThresholds.delta)}>{formatFaceTargetDelta(target?.backDelta ?? null)}</span>
                                    <span>|</span>
-                                   <span style={faceTargetDeltaStyle(target?.linkDelta ?? null)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
+                                   <span style={faceTargetDeltaStyle(target?.linkDelta ?? null, colorThresholds.delta)}>{formatFaceTargetDelta(target?.linkDelta ?? null)}</span></>
                                  : !toneMode && column.kind === "extra"
                                  && !column.id.startsWith("custom:")
                                  && !isImageTableColumnMapped(schema, column.originalKey ?? column.key ?? "", classifiedKinds?.[e.toml_path])

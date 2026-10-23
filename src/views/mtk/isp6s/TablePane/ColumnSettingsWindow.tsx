@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Button, Switch, Tab, TabList } from "@fluentui/react-components";
+import { Button, Input, Switch, Tab, TabList } from "@fluentui/react-components";
 import { Add24Regular, ArrowReset24Regular, Checkmark24Regular, Delete24Regular, Dismiss24Regular, Pin24Filled, Pin24Regular, QuestionCircle20Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -9,7 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { getIsp6sSchema } from "@/ipc/cppParser";
 import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
-import type { ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
+import type { ImageTableColorThresholds, ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
 import type { ColumnSettingsSchema } from "./columnSettingsBootstrap";
 import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
 import { ColumnEditHistoryInput } from "./ColumnEditHistoryInput";
@@ -22,6 +22,12 @@ type UserColumn = ImageTableScopeColumns["custom"][number];
 type ColumnRow = { id: string; label: string; source: string; custom?: UserColumn };
 
 const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 });
+type ThresholdDrafts = Record<keyof ImageTableColorThresholds, string>;
+const thresholdDraftsFrom = (settings: ImageTableModeColumns): ThresholdDrafts => Object.fromEntries(
+  (Object.keys(settings.color_thresholds) as Array<keyof ImageTableColorThresholds>)
+    .map((key) => [key, String(settings.color_thresholds[key])]),
+) as ThresholdDrafts;
+const validThreshold = (value: string): boolean => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
 
 const COMPUTED_COLUMNS: Record<ColumnScope, ColumnRow[]> = {
   all: [
@@ -57,6 +63,7 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
     return !tone && (value === "face" || value === "normal") ? value : "all";
   });
   const [modeSettings, setModeSettings] = useState<ImageTableModeColumns>(() => readLegacyColumnMode(mode));
+  const [thresholdDrafts, setThresholdDrafts] = useState<ThresholdDrafts>(() => thresholdDraftsFrom(readLegacyColumnMode(mode)));
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -91,8 +98,12 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
   useEffect(() => {
     let active = true;
     void loadState().then((state) => {
-      if (active) setModeSettings(state.image_table_columns
-        ? normalizeColumnMode(state.image_table_columns[mode]) : readLegacyColumnMode(mode));
+      if (active) {
+        const settings = state.image_table_columns
+          ? normalizeColumnMode(state.image_table_columns[mode]) : readLegacyColumnMode(mode);
+        setModeSettings(settings);
+        setThresholdDrafts(thresholdDraftsFrom(settings));
+      }
     }).catch((error) => {
       if (active) setSaveError(`读取列设置失败：${String(error)}`);
     }).finally(() => { if (active) setReady(true); });
@@ -303,6 +314,7 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
   };
 
   const complete = async () => {
+    if (Object.values(thresholdDrafts).some((value) => !validThreshold(value))) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -320,6 +332,14 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
       setSaving(false);
     }
   };
+
+  const changeThreshold = (key: keyof ImageTableColorThresholds, value: string) => {
+    setThresholdDrafts((current) => ({ ...current, [key]: value }));
+    if (validThreshold(value)) setModeSettings((current) => ({
+      ...current, color_thresholds: { ...current.color_thresholds, [key]: Number(value) },
+    }));
+  };
+  const thresholdsValid = Object.values(thresholdDrafts).every(validThreshold);
 
   return (
     <div className="column-settings-window flex h-full min-h-0 flex-col" style={{ color: "var(--colorNeutralForeground1)" }}>
@@ -342,13 +362,31 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
                 title={t("column_source_help_button")} aria-expanded={helpOpen} onClick={() => setHelpOpen((open) => !open)} />
             </span><span className="column-settings-control-cell">操作</span><span className="column-settings-control-cell">排序</span><span className="column-settings-control-cell">显示</span>
           </div>
-          {helpOpen && <div className="column-settings-help m-2 rounded-md border px-4 py-3 text-xs leading-6" role="region" aria-label={t("column_source_help_button")}>
-            <strong>{t("column_source_help_title")}</strong>
-            <div>{t("column_source_help_syntax")}</div>
-            <div>{t("column_source_help_validation")}</div>
-            {!tone && <><div>{t("column_source_help_aliases")}</div>
-              <div>{t("column_source_help_metrics")}</div></>}
-            <div>{t("column_source_help_save")}</div>
+          {helpOpen && <div className="column-settings-help m-2 rounded-md border px-4 py-3 text-xs" role="region" aria-label={t("column_source_help_button")}>
+            <strong className="block text-sm" style={{ color: "var(--colorNeutralForeground1)" }}>{t("column_source_help_title")}</strong>
+            <ol className="column-settings-help-list">
+              <li>{t("column_source_help_syntax")}</li>
+              <li>{t("column_source_help_validation")}</li>
+              {!tone && <><li>{t("column_source_help_aliases")}</li>
+                <li>{t("column_source_help_delta")}</li>
+                <li>{t("column_source_help_ev")}</li>
+                <li>{t("column_source_help_ae_gain")}</li>
+                <li>{t("column_source_help_colors")}</li></>}
+              <li>{t("column_source_help_save")}</li>
+            </ol>
+            {!tone && <div className="column-settings-thresholds">
+              {([["ae_gain", "AEGain(new)"], ["ev", "ΔEV"], ["delta", "∆CWR"]] as const).map(([key, label]) => (
+                <label key={key} className="column-settings-threshold-field">
+                  <span>{label} ±</span>
+                  <Input size="small" type="number" min="0" step="any" value={thresholdDrafts[key]}
+                    aria-label={`${label} ${t("column_source_threshold_label")}`}
+                    aria-invalid={!validThreshold(thresholdDrafts[key])}
+                    onChange={(_, data) => changeThreshold(key, data.value)} />
+                </label>
+              ))}
+              {Object.values(thresholdDrafts).some((value) => !validThreshold(value)) &&
+                <span className="column-settings-threshold-error" role="alert">{t("column_source_threshold_invalid")}</span>}
+            </div>}
           </div>}
           <DndContext sensors={sensors} modifiers={[verticalOnly]} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={rows.map((row) => row.id)} strategy={verticalListSortingStrategy}>
@@ -377,7 +415,7 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
             {deleted.length > 0 && <Button appearance="subtle" icon={<ArrowReset24Regular />} disabled={!ready || saving}
               onClick={() => updateScope((current) => ({ ...current, deleted: [] }))}>恢复已删除列</Button>}
           </div>
-          <Button appearance="primary" icon={<Checkmark24Regular />} disabled={!ready || saving || editingId !== null} onClick={() => void complete()}>{saving ? "保存中" : "完成"}</Button>
+          <Button appearance="primary" icon={<Checkmark24Regular />} disabled={!ready || saving || editingId !== null || !thresholdsValid} onClick={() => void complete()}>{saving ? "保存中" : "完成"}</Button>
         </div>
       </div>
     </div>

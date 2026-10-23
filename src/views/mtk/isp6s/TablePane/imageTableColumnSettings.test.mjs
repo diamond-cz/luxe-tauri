@@ -7,7 +7,7 @@ const source = readFileSync(new URL("./imageTableColumnSettings.ts", import.meta
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { columnScopeForThumbnail, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
+const { collectImageTableCustomColumns, columnScopeForThumbnail, normalizeColorThresholds, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
 
@@ -15,6 +15,18 @@ test("settings opens on the visible thumbnail mode", () => {
   assert.equal(columnScopeForThumbnail("mixed"), "all");
   assert.equal(columnScopeForThumbnail("portrait"), "face");
   assert.equal(columnScopeForThumbnail("scene"), "normal");
+});
+
+test("color thresholds use one shared mode value and reject invalid saved values", () => {
+  const settings = normalizeColumnMode({
+    all: { color_thresholds: { ae_gain: 0.08, ev: 0.01, delta: 8 } },
+    face: { color_thresholds: { ae_gain: 0.02, ev: -1, delta: Number.POSITIVE_INFINITY } },
+  });
+  assert.deepEqual(settings.color_thresholds, { ae_gain: 0.08, ev: 0.01, delta: 8 });
+  assert.equal(settings.all.color_thresholds, undefined);
+  assert.equal(settings.face.color_thresholds, undefined);
+  assert.equal(settings.normal.color_thresholds, undefined);
+  assert.deepEqual(normalizeColorThresholds({ ev: 0 }), { ae_gain: 0.05, ev: 0, delta: 5 });
 });
 
 test("legacy table settings become independent tab snapshots", () => {
@@ -52,6 +64,16 @@ test("saved tab settings discard custom columns assigned to another tab", () => 
   });
   assert.deepEqual(settings.face.custom.map((column) => column.id), ["face-1"]);
   assert.deepEqual(settings.normal.hidden, []);
+});
+
+test("custom columns exclude mode-level color thresholds", () => {
+  const settings = normalizeColumnMode({
+    all: { custom: [{ id: "all-1", label: "All", source: "A", scope: "all" }] },
+    face: { custom: [{ id: "face-1", label: "Face", source: "B", scope: "face" }] },
+    normal: { custom: [] },
+    color_thresholds: { ae_gain: 0.05, ev: 0.005, delta: 5 },
+  });
+  assert.deepEqual(collectImageTableCustomColumns(settings).map((column) => column.source), ["A", "B"]);
 });
 
 test("pin order follows click order and remaining rows keep drag order", () => {

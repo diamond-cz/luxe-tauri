@@ -26,6 +26,52 @@
 
 ## 已沉淀经验
 
+### 2026-10-23：图片表格渲染错误修复
+
+**亮点**
+
+- `imageTableColumnSettings.ts` 的 `collectImageTableCustomColumns()` 只读取 `all`、`face`、`normal` 的自定义列；`TablePane.tsx` 使用该入口生成表格列。
+
+**痛点**
+
+- 模式级 `color_thresholds` 加入后，`Object.values(modeSettings)` 不再只包含列配置。旧代码读取阈值对象的 `.custom` 得到 `undefined`，后续访问 `.source` 使图片表格直接渲染失败。
+
+**闭坑**
+
+- 扩展 `ImageTableModeColumns` 时，检查所有整体遍历模式对象的代码；只遍历 `all`、`face`、`normal` 列配置。运行 `imageTableColumnSettings.test.mjs` 中的模式级元数据回归测试。
+
+**验证**
+
+- `node --test src/views/mtk/isp6s/TablePane/imageTableColumnSettings.test.mjs`：6 项通过。
+- `npm run typecheck`、`npm run build`、`git diff --check`：通过。
+- Tauri 窗口中点击图片表格并确认渲染：未验证。
+
+### 2026-10-23：规则简化与图片表格阈值统一
+
+**亮点**
+
+- `.codex/rules/01-人设与开发准则.md` 至 `.codex/rules/08-数据库与状态管理规范.md` 保留断言、示例和违规特征，并将长句改为编号清晰、可直接检查的规则。
+- `ImageTableModeColumns.color_thresholds` 作为每种表格模式的一份共享配置；`All`、`Face`、`Normal` 共用，Tone 继续读取 `All`。
+
+**痛点**
+
+- 原实现把 `color_thresholds` 放在三个 scope 下，与确认的共享阈值要求不一致；旧 Node 测试也仍按每个 tab 分别断言。
+- `cargo test` 未完成：正在运行的 `src-tauri/target/debug/luxe-tauri.exe` 占用文件，导致 Rust 构建无法替换可执行文件。
+
+**闭坑**
+
+- 修改阈值字段时同步检查 `src/types/ipc.ts`、`imageTableColumnSettings.ts`、`ColumnSettingsWindow.tsx`、`TablePane.tsx` 和 `src-tauri/src/config/state_schema.rs`。
+- 规则检查必须确认 `All / Face / Normal` 不各自保存阈值，Tone 只读取 `All`。
+
+**验证**
+
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- `node --test src/views/mtk/isp6s/TablePane/imageTableColumnSettings.test.mjs`：5 项通过。
+- `git diff --check`：通过。
+- `cargo test --manifest-path src-tauri/Cargo.toml state_schema`：未通过，原因是运行中的 `luxe-tauri.exe` 文件占用；之后 `cargo test --manifest-path src-tauri/Cargo.toml --lib` 通过，11 项通过、1 项忽略。
+- Tauri 窗口中的阈值编辑、筛选恢复和重启恢复：未验证。
+
 ### 2026-10-22：AEGain 成对公式与新值局部着色
 
 **亮点**

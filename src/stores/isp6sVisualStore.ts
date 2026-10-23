@@ -30,6 +30,8 @@ const DEFAULT: Isp6sAeVisual = {
   chart_main_t_mid_readout_mode: "value",
   chart_map_tab:              "MainT",
   tone_chart_map_tab:         "LTM",
+  image_table_kind_filter:    "all",
+  tone_image_table_kind_filter: "all",
 };
 
 function withoutRemovedImageInfo(next: Isp6sAeVisual): Isp6sAeVisual {
