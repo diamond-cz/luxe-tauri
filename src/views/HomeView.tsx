@@ -79,7 +79,6 @@ export function HomeView() {
   const poetry = usePoetryStore((s) => s.line);
   const updateStatus = useUpdateStore((s) => s.status);
   const latestVersion = useUpdateStore((s) => s.latestVersion);
-  const updateNotes = useUpdateStore((s) => s.notes);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
   const downloadTotal = useUpdateStore((s) => s.totalBytes);
   const setUpdateChecking = useUpdateStore((s) => s.setChecking);
@@ -255,12 +254,6 @@ export function HomeView() {
                 {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" ? <span aria-hidden>✦</span> : null}
                 {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
               </div>
-              {updateStatus === "available" && updateNotes && (
-                <details className="mt-3 max-w-lg rounded-lg px-3 py-2 text-sm" style={{ background: "var(--colorNeutralBackground1)", color: "var(--colorNeutralForeground2)" }}>
-                  <summary className="cursor-pointer">版本说明</summary>
-                  <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{updateNotes}</p>
-                </details>
-              )}
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
