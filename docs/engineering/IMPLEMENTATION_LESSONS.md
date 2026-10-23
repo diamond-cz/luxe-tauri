@@ -26,6 +26,48 @@
 
 ## 已沉淀经验
 
+### 2026-10-23：列设置颜色阈值归入第七条
+
+**亮点**
+
+- `ColumnSettingsWindow.tsx` 将 `∆CWR`、`ΔEV`、`AEGain(new)` 三个共用阈值依次放入颜色规则；`columnSettings.css` 固定输入宽度、左对齐数字，并在右侧排列 Fluent 上下按钮。
+- `imageTableColumnSettings.ts` 的 `stepThresholdDraft` 根据当前小数位数调整末位，保留显示精度；16 份翻译资源补齐按钮与无效输入提示。
+
+**痛点**
+
+- 原生数字输入框的步长与用户输入精度无关；旧资源未定义无效阈值提示键，输入错误时会显示键名。
+
+**闭坑**
+
+- 修改阈值输入时核对 `validThreshold` 与 `stepThresholdDraft` 接受相同的非负十进制格式，并检查零值减法及小数进位。
+- Tauri 独立窗口中的实际排版和按钮交互仍需人工检查。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`node --test src/views/mtk/isp6s/TablePane/imageTableColumnSettings.test.mjs` 通过；16 份翻译 JSON 已解析并检查相关 key。
+- 未在 Tauri 独立窗口中人工验收。
+
+### 2026-10-23：列设置规则面板分条排版
+
+**亮点**
+
+- `ColumnSettingsWindow.tsx` 将“添加与修改规则”逐条显示；`columnSettings.css` 为每条规则添加编号和语义令牌分隔线，技术字段、公式和数字使用等宽字体与浅色底。
+- `zh_CN.json`、`zh_TW.json`、`en_US.json` 保留原有翻译 key，缩短对应说明；其他语言仍通过现有英文文案显示。
+
+**痛点**
+
+- 原面板只有段间空白，长公式与中文说明混排时不易扫描。翻译资源完整 key 集合已有差异：14 份语言文件缺少关闭窗口相关的 10 个 key，与本次规则面板无关。
+
+**闭坑**
+
+- 修改规则面板时检查 Tone 隐藏 AE 专属条目、深浅主题令牌、长公式换行，以及 16 份资源中的面板 key。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check`：通过。
+- 16 份翻译 JSON 均可解析；完整 key 集合检查发现上述既有差异。
+- Tauri 独立窗口中的视觉布局、主题和滚动交互：未验证。
+
 ### 2026-10-23：图片表格渲染错误修复
 
 **亮点**

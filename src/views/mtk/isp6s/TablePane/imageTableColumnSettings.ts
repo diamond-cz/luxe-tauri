@@ -10,6 +10,17 @@ export const COLUMN_SETTINGS_SCOPE_EVENT = "luxe:image-table-columns-scope";
 export type ColumnSettingsSaved = { mode: ColumnMode; settings: ImageTableModeColumns };
 export const DEFAULT_COLOR_THRESHOLDS: ImageTableColorThresholds = { ae_gain: 0.05, ev: 0.005, delta: 5 };
 
+export function stepThresholdDraft(value: string, direction: -1 | 1): string {
+  const trimmed = value.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(trimmed) || !Number.isFinite(Number(trimmed))) return value;
+  const [whole, fraction = ""] = trimmed.split(".");
+  const next = BigInt(whole + fraction) + BigInt(direction);
+  if (next < 0n) return value;
+  if (!fraction) return next.toString();
+  const digits = next.toString().padStart(fraction.length + 1, "0");
+  return `${digits.slice(0, -fraction.length)}.${digits.slice(-fraction.length)}`;
+}
+
 export function normalizeColorThresholds(value: Partial<ImageTableColorThresholds> | undefined): ImageTableColorThresholds {
   const valid = (candidate: number | undefined, fallback: number) =>
     typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0 ? candidate : fallback;

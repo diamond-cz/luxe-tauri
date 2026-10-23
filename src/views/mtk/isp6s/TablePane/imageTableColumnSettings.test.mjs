@@ -7,7 +7,7 @@ const source = readFileSync(new URL("./imageTableColumnSettings.ts", import.meta
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { collectImageTableCustomColumns, columnScopeForThumbnail, normalizeColorThresholds, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode } = await import(
+const { collectImageTableCustomColumns, columnScopeForThumbnail, normalizeColorThresholds, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode, stepThresholdDraft } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
 
@@ -27,6 +27,16 @@ test("color thresholds use one shared mode value and reject invalid saved values
   assert.equal(settings.face.color_thresholds, undefined);
   assert.equal(settings.normal.color_thresholds, undefined);
   assert.deepEqual(normalizeColorThresholds({ ev: 0 }), { ae_gain: 0.05, ev: 0, delta: 5 });
+});
+
+test("threshold buttons adjust the last displayed digit without going below zero", () => {
+  assert.equal(stepThresholdDraft("5", 1), "6");
+  assert.equal(stepThresholdDraft("0.05", 1), "0.06");
+  assert.equal(stepThresholdDraft("0.005", 1), "0.006");
+  assert.equal(stepThresholdDraft("0.005", -1), "0.004");
+  assert.equal(stepThresholdDraft("9.99", 1), "10.00");
+  assert.equal(stepThresholdDraft("0.000", -1), "0.000");
+  assert.equal(stepThresholdDraft("", 1), "");
 });
 
 test("legacy table settings become independent tab snapshots", () => {

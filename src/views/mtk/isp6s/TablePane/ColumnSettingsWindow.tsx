@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Switch, Tab, TabList } from "@fluentui/react-components";
-import { Add24Regular, ArrowReset24Regular, Checkmark24Regular, Delete24Regular, Dismiss24Regular, Pin24Filled, Pin24Regular, QuestionCircle20Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
+import { Add24Regular, ArrowReset24Regular, Checkmark24Regular, ChevronDown12Regular, ChevronUp12Regular, Delete24Regular, Dismiss24Regular, Pin24Filled, Pin24Regular, QuestionCircle20Regular, ReOrderDotsVertical24Regular } from "@fluentui/react-icons";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -11,7 +11,7 @@ import { getIsp6sSchema } from "@/ipc/cppParser";
 import { flushStateNow, loadState, saveImageTableMode } from "@/ipc/stateIo";
 import type { ImageTableColorThresholds, ImageTableModeColumns, ImageTableScopeColumns } from "@/types/ipc";
 import type { ColumnSettingsSchema } from "./columnSettingsBootstrap";
-import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
+import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, normalizeColumnMode, orderedSettingsRows, readLegacyColumnMode, stepThresholdDraft, type ColumnMode, type ColumnScope } from "./imageTableColumnSettings";
 import { ColumnEditHistoryInput } from "./ColumnEditHistoryInput";
 import { rememberColumnEdit } from "./columnEditHistory";
 import { AE_GAIN_PAIR_SOURCE, recognizeImageColumnSource } from "./imageTableCustomColumns";
@@ -27,7 +27,13 @@ const thresholdDraftsFrom = (settings: ImageTableModeColumns): ThresholdDrafts =
   (Object.keys(settings.color_thresholds) as Array<keyof ImageTableColorThresholds>)
     .map((key) => [key, String(settings.color_thresholds[key])]),
 ) as ThresholdDrafts;
-const validThreshold = (value: string): boolean => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+const validThreshold = (value: string): boolean => /^\d+(?:\.\d+)?$/.test(value.trim()) && Number.isFinite(Number(value));
+const HELP_TECHNICAL_PATTERN = /(=FLinkTar_old \/ BackTar_old\(FLinkTar_new \/ BackTar_new\)|=log2\(CWR_new \/ CWR_old\)|=CWR_new - CWR_old|AE_TAG_REALBVX1000|Normal_old|Normal_new|BackTar_old|BackTar_new|FLinkTar_old|FLinkTar_new|CWR_old|CWR_new|Normal\|BackTar\|FLinkTar|AEGain\(new\)|AE Basic|TOML|[∆Δ]CWR|ΔEV|\b(?:abs|log2|min|max)\b|\b\d+(?:\.\d+)?\b)/g;
+
+function helpRuleText(value: string) {
+  return value.split(HELP_TECHNICAL_PATTERN).map((part, index) =>
+    index % 2 ? <code key={index}>{part}</code> : part);
+}
 
 const COMPUTED_COLUMNS: Record<ColumnScope, ColumnRow[]> = {
   all: [
@@ -365,28 +371,40 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
           {helpOpen && <div className="column-settings-help m-2 rounded-md border px-4 py-3 text-xs" role="region" aria-label={t("column_source_help_button")}>
             <strong className="block text-sm" style={{ color: "var(--colorNeutralForeground1)" }}>{t("column_source_help_title")}</strong>
             <ol className="column-settings-help-list">
-              <li>{t("column_source_help_syntax")}</li>
-              <li>{t("column_source_help_validation")}</li>
-              {!tone && <><li>{t("column_source_help_aliases")}</li>
-                <li>{t("column_source_help_delta")}</li>
-                <li>{t("column_source_help_ev")}</li>
-                <li>{t("column_source_help_ae_gain")}</li>
-                <li>{t("column_source_help_colors")}</li></>}
-              <li>{t("column_source_help_save")}</li>
+              {(["column_source_help_syntax", "column_source_help_validation",
+                ...(!tone ? ["column_source_help_delta", "column_source_help_aliases", "column_source_help_ev",
+                  "column_source_help_ae_gain", "column_source_help_colors"] : []),
+                "column_source_help_save"] as const).map((key) =>
+                <li key={key}>
+                  {helpRuleText(t(key))}
+                  {key === "column_source_help_colors" && <div className="column-settings-thresholds">
+                    {([["delta", "∆CWR"], ["ev", "ΔEV"], ["ae_gain", "AEGain(new)"]] as const).map(([thresholdKey, label]) => (
+                      <div key={thresholdKey} className="column-settings-threshold-field">
+                        <label htmlFor={`column-threshold-${thresholdKey}`}>{label} ±</label>
+                        <Input id={`column-threshold-${thresholdKey}`} className="column-settings-threshold-input"
+                          size="small" type="text" inputMode="decimal"
+                          value={thresholdDrafts[thresholdKey]}
+                          aria-label={`${label} ${t("column_source_threshold_label")}`}
+                          aria-invalid={!validThreshold(thresholdDrafts[thresholdKey])}
+                          onChange={(_, data) => changeThreshold(thresholdKey, data.value)}
+                          contentAfter={<span className="column-settings-threshold-steps">
+                            <Button appearance="subtle" size="small" icon={<ChevronUp12Regular />}
+                              aria-label={`${label} ${t("column_source_threshold_increase")}`}
+                              title={t("column_source_threshold_increase")}
+                              disabled={!validThreshold(thresholdDrafts[thresholdKey])}
+                              onClick={() => changeThreshold(thresholdKey, stepThresholdDraft(thresholdDrafts[thresholdKey], 1))} />
+                            <Button appearance="subtle" size="small" icon={<ChevronDown12Regular />}
+                              aria-label={`${label} ${t("column_source_threshold_decrease")}`}
+                              title={t("column_source_threshold_decrease")}
+                              disabled={!validThreshold(thresholdDrafts[thresholdKey]) || Number(thresholdDrafts[thresholdKey]) === 0}
+                              onClick={() => changeThreshold(thresholdKey, stepThresholdDraft(thresholdDrafts[thresholdKey], -1))} />
+                          </span>} />
+                      </div>
+                    ))}
+                    {!thresholdsValid && <span className="column-settings-threshold-error" role="alert">{t("column_source_threshold_invalid")}</span>}
+                  </div>}
+                </li>)}
             </ol>
-            {!tone && <div className="column-settings-thresholds">
-              {([["ae_gain", "AEGain(new)"], ["ev", "ΔEV"], ["delta", "∆CWR"]] as const).map(([key, label]) => (
-                <label key={key} className="column-settings-threshold-field">
-                  <span>{label} ±</span>
-                  <Input size="small" type="number" min="0" step="any" value={thresholdDrafts[key]}
-                    aria-label={`${label} ${t("column_source_threshold_label")}`}
-                    aria-invalid={!validThreshold(thresholdDrafts[key])}
-                    onChange={(_, data) => changeThreshold(key, data.value)} />
-                </label>
-              ))}
-              {Object.values(thresholdDrafts).some((value) => !validThreshold(value)) &&
-                <span className="column-settings-threshold-error" role="alert">{t("column_source_threshold_invalid")}</span>}
-            </div>}
           </div>}
           <DndContext sensors={sensors} modifiers={[verticalOnly]} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={rows.map((row) => row.id)} strategy={verticalListSortingStrategy}>
