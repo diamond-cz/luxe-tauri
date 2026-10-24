@@ -775,3 +775,62 @@
 
 - `npm run typecheck`、`npm run build`、`git diff --check` 通过。
 - 未在 Tauri 窗口中目视验证不同窗口宽度和深浅主题下的 Ratio 高度与 LV 表头。
+
+### 2026-10-24：ToneMap LCE 卡片与表格对齐 FDTH 样式
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx` 集中定义 LCE 卡片、标题栏和网格配色，沿用 AE Basic FDTH 所用的语义令牌；Target、Prob、Strength、Face 与 Cal 保持一致。
+- LCE 网格使用与 FDTH 相同的浅绿轴表头、外框和高亮交叉单元格样式，原有参数编辑、保存、热力图和源码跳转仍由原组件处理。
+
+**痛点**
+
+- LCE 原有表头为中性灰色且边框较轻，与同项目 FDTH 的卡片层级、轴表头和网格外框不一致；深浅主题需要复用现有变量，不能固定截图中的 RGB 色值。
+
+**闭坑**
+
+- 修改 LCE 网格视觉样式时检查 `src/styles/globals.css` 的 `--hs-weight-bv-bg`、`--normal-sheet-palegreen-fg` 和 `--normal-sheet-line`，同时核对浅色和深色主题。
+- 保持 Ratio 表头显示值与插值输入分离；网格标题和数据行继续共用一个 CSS Grid，避免横向滚动时错列。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 均通过。
+- 尚未在 Tauri 窗口目视检查窄窗口和深浅主题。
+
+### 2026-10-24：LCE 普通选中态不显示黑色描边
+
+**亮点**
+
+- `ToneNumberCell` 仅在开启热力图时对命中单元格显示内阴影边框；普通模式继续通过背景色和文字色标识选中项。
+
+**痛点**
+
+- FDTH 样式同步后，LCE 单元格无条件显示黑色边框，普通模式下视觉过重。
+
+**闭坑**
+
+- 调整 LCE 选中样式时区分 `heat` 是否存在，避免热力图的命中边框泄漏到普通模式。
+
+**验证**
+
+- `npm run typecheck`、`git diff --check` 均通过。
+- 未在 Tauri 窗口目视验证两种模式。
+
+### 2026-10-24：笛卡尔热力图命中描边跟随主题
+
+**亮点**
+
+- `ChartMapMode.tsx` 的 Face/Face_FLT 与 HS Area 共用热力图样式、`ToneChartMapMode.tsx` 的 LCE 命中样式统一以 `--colorBrandStroke1` 绘制选中描边，随当前主题变化。
+
+**痛点**
+
+- 命中描边原先使用 `--colorNeutralForeground1`，在浅色主题中接近黑色，压过热力图色阶。
+
+**闭坑**
+
+- 更改笛卡尔热力图选中态时同时核对 `faceBvDrHeatCellStyle` 和 `ToneNumberCell`；LCE 普通模式仍不得显示命中描边。
+
+**验证**
+
+- `npm run typecheck`、`git diff --check` 均通过。
+- 未在 Tauri 窗口核对浅色和深色主题下的命中描边。

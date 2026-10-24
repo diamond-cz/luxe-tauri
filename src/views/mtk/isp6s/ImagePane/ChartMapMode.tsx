@@ -15507,7 +15507,7 @@ function faceBvDrHeatCellStyle(count: number, maxCount: number, active: boolean)
       ? `color-mix(in srgb, var(--face-heat-high) ${Math.round(20 + strength * 60)}%, var(--face-heat-low))`
       : "var(--colorNeutralBackground2)",
     color: count > 0 ? "var(--face-heat-fg)" : "var(--colorNeutralForeground3)",
-    boxShadow: active ? "inset 0 0 0 2px var(--colorNeutralForeground1)" : undefined,
+    boxShadow: active ? "inset 0 0 0 2px var(--colorBrandStroke1)" : undefined,
   };
 }
 

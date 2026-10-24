@@ -575,6 +575,31 @@ interface ToneTableProps {
   onSelectHeatmapImages?: (paths: string[]) => void;
 }
 
+const lceFrameColor = "color-mix(in srgb, var(--normal-sheet-line) 56%, var(--colorNeutralStroke2))";
+const lceGridColor = "color-mix(in srgb, var(--normal-sheet-line) 42%, var(--colorNeutralStroke2))";
+const lceCardStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: "8px 8px 0 0",
+  background: "var(--colorNeutralBackground1)",
+  boxShadow: "0 1px 2px color-mix(in srgb, var(--colorNeutralForeground1) 6%, transparent)",
+};
+const lceHeaderStyle: React.CSSProperties = {
+  borderColor: "var(--colorNeutralStroke2)",
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))",
+};
+const lceAxisHeaderStyle: React.CSSProperties = {
+  borderColor: lceFrameColor,
+  background: "var(--hs-weight-bv-bg)",
+  color: "var(--normal-sheet-palegreen-fg)",
+};
+const lceRowHeaderStyle: React.CSSProperties = {
+  borderColor: lceFrameColor,
+  background: "var(--hs-weight-bv-bg)",
+  color: "var(--normal-sheet-palegreen-fg)",
+};
+
 function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
   tableId: ToneLceTableId;
   title: string;
@@ -586,8 +611,8 @@ function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
   const [saveError, setSaveError] = useState<string | null>(null);
   const dirty = tableDirty(rows, controls.sourceDraftText, controls.sourceSavedText, controls.lineFields);
   const mode = controls.heatmapModes[tableId];
-  return <div className="flex min-h-9 items-center justify-between gap-2 border-b px-2" style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
-    <div className="flex min-w-0 items-baseline gap-2 text-xs font-semibold">
+  return <div className="flex min-h-9 items-center justify-between gap-2 border-b px-2" style={lceHeaderStyle}>
+    <div className="flex min-w-0 items-baseline gap-2 text-xs font-bold">
       <span className="shrink-0">{title}</span>
       <strong className="min-w-0 truncate font-mono" style={{ color: "var(--colorBrandForeground1)" }} title={result}>{result}</strong>
     </div>
@@ -620,7 +645,7 @@ function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
 }
 
 function ToneCorner({ top, bottom }: { top: string; bottom: string }) {
-  return <div className="relative min-w-0 border-b border-r text-[10px] font-bold" style={{ height: "100%", borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
+  return <div className="relative min-w-0 border-b border-r text-[10px] font-black" style={{ height: "100%", ...lceRowHeaderStyle }}>
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
       <line x1="0" y1="0" x2="100" y2="100" stroke="var(--colorNeutralStroke1)" vectorEffect="non-scaling-stroke" />
     </svg>
@@ -654,9 +679,11 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
   };
   const color = field ? fieldChangeColor(field, value, controls.sourceInitialText, controls.lineFields) : undefined;
   const cellStyle: React.CSSProperties = {
-    minWidth: 0, minHeight: 26, borderRight: "1px solid var(--colorNeutralStroke2)", borderBottom: "1px solid var(--colorNeutralStroke2)",
-    background: heat?.background ?? (active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, var(--colorNeutralBackground1))" : undefined),
-    color: heat?.color ?? color ?? (active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)"),
+    minWidth: 0, minHeight: 26, borderRight: `1px solid ${lceGridColor}`, borderBottom: `1px solid ${lceGridColor}`,
+    background: heat?.background ?? (active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, var(--colorNeutralBackground1))" : "var(--colorNeutralBackground1)"),
+    color: heat?.color ?? color ?? (active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-text)"),
+    boxShadow: active && heat ? "inset 0 0 0 2px var(--colorBrandStroke1)" : undefined,
+    fontWeight: active ? 700 : 400,
   };
   if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]" style={cellStyle}
     onContextMenu={(event) => { event.preventDefault(); if (!controls.heatmapLoading && !controls.heatmapFailed) onHitImages?.(); }}>
@@ -682,9 +709,8 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
   const ratioBracket = axisBracket(position.lv, tables.ratio[0].map((field) => Number(field.value)));
   const targetBracket = indexedBracket(position.lv / 10, position.lvLow, position.lvHigh, targetWidth);
   return (
-    <section className="min-w-0 border" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-      <div className="flex h-7 items-center border-b px-2 text-xs font-semibold"
-           style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground3)" }}>Target</div>
+    <section style={lceCardStyle}>
+      <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
         <PanelGroup direction="horizontal" autoSaveId="isp6s-tone-lce-ratio-cal" className="flex w-full min-w-0 items-stretch">
           <Panel defaultSize={50} minSize={25} className="flex min-w-0 flex-col">
@@ -714,9 +740,9 @@ function ToneLceCalCard({ tomlData, parameterLvTarget }: { tomlData: Record<stri
   const lumaFlatTarget = flatTarget * lumaFlatProb + lumaTarget * (1000 - lumaFlatProb);
   const value = (number: number) => Number.isFinite(number) ? String(number) : "-";
 
-  return <section className="flex h-full min-w-0 flex-col border" style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
+  return <section className="flex h-full min-w-0 flex-col" style={lceCardStyle}>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 border-b px-2 text-xs font-semibold"
-      style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
+      style={lceHeaderStyle}>
       <span>Cal <span className="font-mono font-normal">EXIF: {value(finalTarget)}</span></span>
       <span className="font-mono font-normal">参数插值: {value(parameterFinalTarget)}</span>
     </div>
@@ -756,9 +782,8 @@ function ToneLceStrengthCard(props: ToneTableProps & { position: LceImagePositio
   const lvBracket = indexedBracket(position.lv / 10, position.lvLow, position.lvHigh, lvCount);
   const drBracket = indexedBracket(position.dr / 100, position.drLow, position.drHigh, tables.darkStrength.length);
   return (
-    <section className="min-w-0 border" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-      <div className="flex h-7 items-center border-b px-2 text-xs font-semibold"
-           style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground3)" }}>Strength</div>
+    <section style={lceCardStyle}>
+      <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Strength</div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
         <ToneLceMatrixGrid tableId="darkStrength" title="Dark Strength" rows={tables.darkStrength} lvBracket={lvBracket} drBracket={drBracket} controls={props} />
         <ToneLceMatrixGrid tableId="brightStrength" title="Bright Strength" rows={tables.brightStrength} lvBracket={lvBracket} drBracket={drBracket} controls={props} />
@@ -787,22 +812,23 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   const result = showResult ? labels.slice(tableId === "ratio" ? 1 : 0)
     .map((label, index) => `${label}: ${formatInterpolation(interpolateFields(rows[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
     .join(" | ") : "";
-  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0 border`} style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
+  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} style={lceCardStyle}>
     <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />
     <div className={`${fillHeight ? "min-h-0 flex-1 " : ""}min-w-0 overflow-x-auto`}>
       <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${count}, minmax(0, 1fr))`,
         gridTemplateRows: fillHeight ? `40px repeat(${labels.length}, minmax(26px, 1fr))` : "40px",
         gridAutoRows: 26, height: fillHeight ? "100%" : undefined,
-        width: "100%", minWidth: 0, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
+        width: "100%", minWidth: 0, boxSizing: "border-box", border: `2px solid ${lceFrameColor}`,
+        fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
         <ToneCorner top="LV" bottom={tableId === "ratio" ? "Ratio" : tableId === "face" ? "Face" : title} />
-        {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-end border-b border-r px-1 font-mono text-[10px] font-semibold"
-          style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
-            color: bracketHits(bracket, index) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>
+        {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-center border-b border-r px-1 font-mono text-[10px] font-bold"
+          style={{ ...lceAxisHeaderStyle,
+            color: bracketHits(bracket, index) ? "var(--colorBrandForeground1)" : lceAxisHeaderStyle.color }}>
           {tableId === "ratio" ? `LV${formatInterpolation(Number(rows[0]?.[index]?.value) / 10)}` : `LV${index}`}
         </div>)}
         {labels.map((label, rowIndex) => <div key={label} style={{ display: "contents" }}>
-          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-semibold" title={rowTooltips?.[rowIndex]}
-            style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>{label}</div>
+          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-bold" title={rowTooltips?.[rowIndex]}
+            style={lceRowHeaderStyle}>{label}</div>
           {Array.from({ length: count }, (_, columnIndex) => {
             const paths = hits[rowIndex]?.[columnIndex] ?? [];
             return <ToneNumberCell key={`${rowIndex}:${columnIndex}`} field={rows[rowIndex]?.[columnIndex]} active={bracketHits(bracket, columnIndex)}
@@ -830,20 +856,21 @@ function ToneLceMatrixGrid({ tableId, title, rows, lvBracket, drBracket, control
     ? toneHeatmapHits(tableId, controls.heatmapPoints, controls.tables, rows.length, count) : [],
     [mode.enabled, tableId, controls.heatmapPoints, controls.tables, rows.length, count]);
   const maximum = Math.max(0, ...hits.flat().map((paths) => paths.length));
-  return <div className="min-w-0 border" style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
+  return <div style={lceCardStyle}>
     <ToneLceTableHeader tableId={tableId} title={title} result={`插值: ${formatInterpolation(interpolateMatrix(rows, drBracket, lvBracket))}`}
       rows={rows} controls={controls} />
     <div className="min-w-0 overflow-x-auto">
       <div style={{ display: "grid", gridTemplateColumns: `72px repeat(${count}, minmax(0, 1fr))`, gridTemplateRows: "40px", gridAutoRows: 26,
-        width: "100%", minWidth: 0, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
+        width: "100%", minWidth: 0, boxSizing: "border-box", border: `2px solid ${lceFrameColor}`,
+        fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
         <ToneCorner top="LV" bottom="DR" />
-        {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-end border-b border-r px-1 font-mono text-[10px] font-semibold"
-          style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
-            color: bracketHits(lvBracket, index) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>LV{index}</div>)}
+        {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-center border-b border-r px-1 font-mono text-[10px] font-bold"
+          style={{ ...lceAxisHeaderStyle,
+            color: bracketHits(lvBracket, index) ? "var(--colorBrandForeground1)" : lceAxisHeaderStyle.color }}>LV{index}</div>)}
         {rows.map((fields, rowIndex) => <div key={rowIndex} style={{ display: "contents" }}>
-          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-semibold"
-            style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
-              color: bracketHits(drBracket, rowIndex) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>{rowIndex}</div>
+          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-bold"
+            style={{ ...lceRowHeaderStyle,
+              color: bracketHits(drBracket, rowIndex) ? "var(--colorBrandForeground1)" : lceRowHeaderStyle.color }}>{rowIndex}</div>
           {Array.from({ length: count }, (_, columnIndex) => {
             const paths = hits[rowIndex]?.[columnIndex] ?? [];
             return <ToneNumberCell key={`${rowIndex}:${columnIndex}`} field={fields[columnIndex]}
