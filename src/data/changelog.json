@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.2.10",
+    "date": "2026-10-24",
+    "items": [
+      { "type": "新增", "content": "ToneMap 支持导入 CA-LTM.cpp，并在 CA-LTM 标签页查看解析结果和对应源码。" },
+      { "type": "新增", "content": "AE Basic 与 ToneMap 的图片列表支持同步选中项和滚动位置。" },
+      { "type": "优化", "content": "近期更新可在标题栏预览并直接启动更新，首页与预览共用下载进度。" },
+      { "type": "优化", "content": "统一 ToneMap LCE 与 AE Basic 表格样式，修正 Ratio 的 LV 表头显示和热力图命中描边。" },
+      { "type": "优化", "content": "调整 bcompare 标签页和详情表格布局，改善边框、间距与行区分。" },
+      { "type": "修复", "content": "修复重新启动后图片、参数文件和 DP 解析工具路径无法恢复，以及快捷方式导入失败的问题。" },
+      { "type": "修复", "content": "修复本地开发模式下启动白屏的问题。" }
+    ]
+  },
+  {
     "version": "0.2.8",
     "date": "2026-10-23",
     "items": [

@@ -834,3 +834,24 @@
 
 - `npm run typecheck`、`git diff --check` 均通过。
 - 未在 Tauri 窗口核对浅色和深色主题下的命中描边。
+
+### 2026-10-24：v0.2.10 发布
+
+**亮点**
+
+- 从 `v0.2.8..HEAD` 的历史提交整理 `src/data/changelog.json` 首条内容，并以 `src-tauri/tauri.conf.json` 为版本源同步 npm 和 Cargo 元数据。
+- `v0.2.10` 标签触发 `.github/workflows/release.yml`，由 CI 检查签名、构建 NSIS/MSI、生成 `latest.json` 并发布。
+
+**痛点**
+
+- 本机缺少 `gh` 命令；发布是否完成必须以 GitHub Actions 运行结果及公开 Release 资产为准，不能以标签推送成功代替。
+
+**闭坑**
+
+- 标签前核对 `npm run version:check`、`npm run release:test`、变更日志版本与工作区状态；标签后核对工作流、五个资产及更新清单版本。
+
+**验证**
+
+- `npm run version:check`、`npm run release:test`（27 项）、`npm run build`、`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib`（13 项通过、1 项忽略）和 `git diff --check` 均通过。
+- 本机完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml` 因运行中的 `src-tauri/target/debug/luxe-tauri.exe` 被占用而无法替换可执行文件；GitHub Actions 将在独立环境重新运行。
+- GitHub Actions 发布与安装升级结果待标签推送后核对。
