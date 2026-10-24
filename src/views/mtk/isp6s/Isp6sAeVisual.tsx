@@ -640,7 +640,7 @@ const DetailsPanel = memo(function DetailsPanel({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden"
-         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: "8px 8px 0 0" }}>
+         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: detailsTab === "bcompare" ? 8 : "8px 8px 0 0" }}>
       <div className="flex h-8 shrink-0 items-stretch px-2"
            style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
         {DETAILS_TABS.map((tab) => {

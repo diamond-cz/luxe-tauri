@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Button } from "@fluentui/react-components";
 import { Save24Regular } from "@fluentui/react-icons";
 
 import { parseCppFile, type Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -113,9 +114,11 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
       <section style={cardStyle} aria-label="AE.CPP 参数对比表">
         <div style={headerStyle}>
           <strong style={{ fontSize: 12, fontWeight: 900 }}>AE.CPP</strong>
-          <button
-            type="button"
+          <Button
+            appearance="subtle"
+            size="small"
             aria-label={saving ? "正在保存 AE.CPP" : "保存 AE.CPP 修改"}
+            title={saving ? "正在保存 AE.CPP" : "保存 AE.CPP 修改"}
             disabled={!dirty || !sourceEditor || saving}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
@@ -127,11 +130,13 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
               void editor.onSave().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))
                 .finally(() => setSaving(false));
             }}
-            style={{ ...saveButtonStyle, opacity: dirty && !saving ? 1 : 0.45, cursor: dirty && !saving ? "pointer" : "default" }}
-          >
-            <Save24Regular className="h-4 w-4" />
-            {dirty && <span aria-hidden="true" style={{ position: "absolute", top: -4, right: -2, color: "var(--colorPaletteRedForeground1)", fontSize: 12, fontWeight: 700 }}>*</span>}
-          </button>
+            style={{ ...saveButtonStyle, color: dirty && !saving ? "var(--colorBrandForeground1)" : undefined }}
+            icon={<span className="relative inline-flex items-center justify-center">
+              <Save24Regular className="h-4 w-4" />
+              {dirty && <span aria-hidden="true" className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--colorPaletteRedForeground1)" }} />}
+            </span>}
+          />
         </div>
         {error && <div role="alert" className="px-3 py-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</div>}
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", containerType: "size" }}>
@@ -231,22 +236,19 @@ function comparisonTextStyle(highlight: boolean): CSSProperties {
 
 const cardStyle: CSSProperties = {
   display: "flex", flexDirection: "column", width: "100%", height: "100%", minWidth: 0, minHeight: 0,
-  border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: "0 0 8px 8px", overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  borderRadius: "0 0 7px 7px", overflow: "hidden", background: "var(--colorNeutralBackground1)",
 };
 const headerStyle: CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36, flexShrink: 0, padding: "0 7px 0 10px",
-  borderBottom: "1px solid var(--colorNeutralStroke2)",
-  background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))",
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, height: 32, flexShrink: 0, padding: "0 8px 0 10px",
+  background: "var(--colorNeutralBackground1)",
   color: "var(--colorNeutralForeground1)",
 };
 const saveButtonStyle: CSSProperties = {
-  position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0,
-  padding: 0, border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8,
-  background: "var(--colorNeutralBackground1)", color: "var(--colorBrandForeground1)",
+  width: 32, minWidth: 32, height: 32, padding: 0, flexShrink: 0,
 };
 const tableStyle: CSSProperties = {
-  display: "grid", width: "100%", height: "100%", minWidth: 0, minHeight: 0,
+  display: "grid", width: "100%", height: "100%", minWidth: 0, minHeight: 0, boxSizing: "border-box",
+  borderTop: "1px solid var(--normal-sheet-line)", borderLeft: "1px solid var(--normal-sheet-line)",
   fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums",
 };
 const rowStyle: CSSProperties = {

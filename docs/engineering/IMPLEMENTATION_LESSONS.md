@@ -686,3 +686,27 @@
 
 - `npm run typecheck`、`npm run build`、`node --test src/views/mtk/isp6s/TablePane/*.test.mjs`（27 项）和 `git diff --check` 通过。
 - 未在 Tauri 窗口中手动验证长列表、不同筛选和横向滚动的跨页效果。
+
+### 2026-10-24：bcompare 标题栏与表格边框对齐
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ParaCheckMode.tsx` 将 AE.CPP 标题栏改为与 EXIF 搜索栏相同的 `var(--colorNeutralBackground1)`，高度由 36px 调整为 32px；保存按钮改用 Fluent UI 的紧凑图标按钮，保留未保存标记和禁用状态。
+- bcompare 表格补齐上、左外沿，右、下外沿继续由单元格边框组成；详情面板在 bcompare 模式下启用底部圆角，子内容以 7px 圆角贴合父面板的 8px 圆角。
+- 保存按钮调整为 32×32px，与详情标题栏右侧的隐藏按钮共用 32px 高度和 8px 右侧留白，两者中心落在同一竖线上。
+
+**痛点**
+
+- 原标题栏使用混合品牌色，且保存按钮自绘边框占据较多高度；表格只绘制单元格右、下边线，外沿依赖另一层卡片边框，底部角位与详情面板的直角不一致。
+- 紧凑保存按钮原为 28px，隐藏按钮为 32px；即使两栏右侧留白相同，按钮中心仍有 2px 横向偏差。
+
+**闭坑**
+
+- 表格外沿与单元格线分别由表格上/左边框、单元格右/下边框负责；父面板负责最外层圆角与裁切，避免在 bcompare 子卡片重复绘制一圈边框。
+- 上下标题栏的图标按钮对齐时，同时核对按钮宽度与容器右侧留白；只比较图标本身的尺寸不足以判断中心是否对齐。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。
+- 保存按钮对齐调整后重新运行 `npm run typecheck`，通过。
+- 未在 Tauri 窗口中目视检查深浅主题、保存按钮悬浮态和底部圆角。
