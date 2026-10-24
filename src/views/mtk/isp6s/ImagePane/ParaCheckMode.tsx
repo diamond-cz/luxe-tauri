@@ -109,7 +109,7 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 overflow-hidden py-2">
+    <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       <section style={cardStyle} aria-label="AE.CPP 参数对比表">
         <div style={headerStyle}>
           <strong style={{ fontSize: 12, fontWeight: 900 }}>AE.CPP</strong>
@@ -140,8 +140,8 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
             <tr style={rowStyle}><Th>关键字</Th><Th>图片3A</Th><Th>参数文件</Th></tr>
           </thead>
           <tbody style={{ display: "contents" }}>
-            {rows.map((row) => (
-              <tr key={row.cpp_path} style={rowStyle}>
+            {rows.map((row, rowIndex) => (
+              <tr key={row.cpp_path} style={{ ...rowStyle, background: rowIndex % 2 === 0 ? "var(--colorNeutralBackground1)" : "var(--colorNeutralBackground2)" }}>
                 <td style={{ ...cellStyle, background: "var(--hs-weight-bv-bg)", color: "var(--normal-sheet-palegreen-fg)", fontWeight: 700 }}>{row.label}</td>
                 <td style={{ ...cellStyle, ...comparisonTextStyle(!row.match) }}>{row.tomlValue}</td>
                 <td style={{ ...cellStyle, padding: 0 }}>
@@ -232,7 +232,7 @@ function comparisonTextStyle(highlight: boolean): CSSProperties {
 const cardStyle: CSSProperties = {
   display: "flex", flexDirection: "column", width: "100%", height: "100%", minWidth: 0, minHeight: 0,
   border: "1px solid color-mix(in srgb, var(--colorNeutralStroke2) 74%, transparent)",
-  borderRadius: "10px 10px 0 0", overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
+  borderRadius: "0 0 8px 8px", overflow: "hidden", background: "var(--colorNeutralBackground1)", boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)",
 };
 const headerStyle: CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36, flexShrink: 0, padding: "0 7px 0 10px",

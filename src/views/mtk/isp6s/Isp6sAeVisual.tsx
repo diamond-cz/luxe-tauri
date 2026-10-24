@@ -17,7 +17,7 @@ import { ExifTable } from "./TablePane/ExifTable";
 import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
-import { workspaceSession, type DetailsTab, type WorkspaceSession } from "./workspaceSession";
+import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceSession } from "./workspaceSession";
 import { isDebugParserExecutable } from "../debugParserPath";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
@@ -90,9 +90,50 @@ export function Isp6sAeVisual({
   }, [schema, reportWorkspaceDivider]);
   const imageTabIdx = toneMode ? 0 : tabIdx;
   const imageDirEntry = useMtkStore((s) => s.imageDir[`${isp}|${imageTabIdx}`]);
+  const workspaceSelection = useMtkStore((s) => s.imageSelection[workspaceKey]);
+  const setImageSelection = useMtkStore((s) => s.setImageSelection);
   const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
-  const currentEntry = imageDir.entries[imageDir.current];
+  const selectionSyncEnabled = useIsp6sVisualStore((s) => s.selectionSyncEnabled);
+  const setSelectionSyncEnabled = useIsp6sVisualStore((s) => s.setSelectionSyncEnabled);
+  const pairedWorkspaceKey = isp === "ISP6S" && (tabIdx === 0 || tabIdx === 1)
+    ? `${isp}|${tabIdx === 0 ? 1 : 0}` : null;
+  const syncPairedScroll = (path: string, position: ScrollPosition | null,
+    enabled = useIsp6sVisualStore.getState().selectionSyncEnabled) => {
+    if (!enabled || !pairedWorkspaceKey) return;
+    const pairedSession = workspaceSession(pairedWorkspaceKey);
+    pairedSession.imageDir = imageDir.dir;
+    pairedSession.imagePath = path;
+    pairedSession.imageScroll = position ? { ...position } : { top: 0, left: 0 };
+    pairedSession.imageScrollPath = path;
+  };
+  const selectedIndex = workspaceSelection
+    ? imageDir.entries.findIndex((entry) => entry.jpg_path === workspaceSelection)
+    : imageDir.current;
+  const currentIndex = selectedIndex >= 0 && selectedIndex < imageDir.entries.length ? selectedIndex : imageDir.current;
+  const currentEntry = imageDir.entries[currentIndex];
   const setImageDir   = useMtkStore((s) => s.setImageDir);
+  const [selectedTomlData, setSelectedTomlData] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!currentEntry || !imageDir.dir) {
+      setSelectedTomlData({});
+      return;
+    }
+    const cached = session.selectedToml;
+    if (cached?.dir === imageDir.dir && cached.path === currentEntry.toml_path) {
+      setSelectedTomlData(cached.data);
+      return;
+    }
+    let active = true;
+    void loadImageToml(currentEntry.toml_path).then((data) => {
+      if (!active) return;
+      session.selectedToml = { dir: imageDir.dir ?? "", path: currentEntry.toml_path, data };
+      setSelectedTomlData(data);
+    }).catch(() => {
+      if (active) setSelectedTomlData({});
+    });
+    return () => { active = false; };
+  }, [currentEntry?.jpg_path, imageDir.dir, session]);
 
   useEffect(() => {
     if (!imageDir.dir) {
@@ -100,35 +141,26 @@ export function Isp6sAeVisual({
       setHeatmapSelection(null);
       return;
     }
-    if (session.imageDir !== imageDir.dir) {
+    const folderChanged = session.imageDir !== imageDir.dir;
+    const previousPath = folderChanged ? null : session.imagePath;
+    if (folderChanged) {
       session.imageDir = imageDir.dir;
-      session.imagePath = currentEntry?.jpg_path ?? null;
       session.imageScroll = null;
+      session.imageScrollPath = null;
       session.selectedToml = null;
       setHeatmapSelection(null);
-      return;
     }
     if (imageDir.entries.length === 0) return;
-    if (!session.imagePath) {
-      session.imagePath = currentEntry?.jpg_path ?? null;
-      return;
+    const selectedPath = imageDir.entries.find((entry) => entry.jpg_path === workspaceSelection)?.jpg_path;
+    if (selectedPath) {
+      session.imagePath = selectedPath;
+    } else {
+      const restoredPath = imageDir.entries.find((entry) => entry.jpg_path === previousPath)?.jpg_path;
+      const fallbackPath = restoredPath ?? currentEntry?.jpg_path ?? null;
+      session.imagePath = fallbackPath;
+      if (fallbackPath) setImageSelection(workspaceKey, fallbackPath);
     }
-    const savedIndex = imageDir.entries.findIndex((entry) => entry.jpg_path === session.imagePath);
-    if (savedIndex >= 0 && savedIndex !== imageDir.current) void onPickImage(savedIndex);
-  // Restore only when the workspace mounts or the folder changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageDir.dir, imageDir.entries, session]);
-
-  useEffect(() => {
-    if (imageDir.status === "done" && currentEntry
-      && session.imagePath === currentEntry.jpg_path) {
-      session.selectedToml = {
-        dir: imageDir.dir ?? "",
-        path: currentEntry.toml_path,
-        data: imageDir.tomlData,
-      };
-    }
-  }, [currentEntry, imageDir.entries, imageDir.status, imageDir.tomlData, session]);
+  }, [currentEntry?.jpg_path, imageDir.dir, imageDir.entries, session, setImageSelection, workspaceKey, workspaceSelection]);
 
   const handleParseExif = async () => {
     if (exifParsingRef.current) return;
@@ -208,7 +240,13 @@ export function Isp6sAeVisual({
     const selectedEntry = imageDir.entries[idx];
     session.imageDir = imageDir.dir;
     session.imagePath = selectedEntry.jpg_path;
+    session.imageScrollPath = selectedEntry.jpg_path;
     const imageDirKey = `${isp}|${imageTabIdx}`;
+    setImageSelection(workspaceKey, selectedEntry.jpg_path);
+    if (selectionSyncEnabled && pairedWorkspaceKey) {
+      setImageSelection(pairedWorkspaceKey, selectedEntry.jpg_path);
+      syncPairedScroll(selectedEntry.jpg_path, session.imageScroll);
+    }
     const selectionIsCurrent = () => {
       const current = useMtkStore.getState().imageDir[imageDirKey];
       return current?.dir === imageDir.dir && current.current === idx
@@ -353,18 +391,34 @@ export function Isp6sAeVisual({
           cppImportRevision={cppImportRevision}
           calculatorSourcePath={calculatorSourcePath}
           entries={imageDir.entries}
-          current={imageDir.current}
+          current={currentIndex}
           selectedHeatmapPaths={selectedHeatmapPaths}
           onVisibleHeatmapPathsChange={handleVisibleHeatmapPathsChange}
           imageDir={imageDir.dir}
           imageDataRevision={imageDataRevision}
-          scrollPosition={session.imageDir === imageDir.dir ? session.imageScroll : null}
-          onScrollPositionChange={(position) => { session.imageScroll = position; }}
+          scrollPosition={session.imageDir === imageDir.dir
+            && session.imageScrollPath === currentEntry?.jpg_path ? session.imageScroll : null}
+          onScrollPositionChange={(position) => {
+            session.imageScroll = position;
+            session.imageScrollPath = currentEntry?.jpg_path ?? null;
+            if (pairedWorkspaceKey && currentEntry?.jpg_path
+              && useMtkStore.getState().imageSelection[pairedWorkspaceKey] === currentEntry.jpg_path) {
+              syncPairedScroll(currentEntry.jpg_path, position);
+            }
+          }}
           exifParsing={exifParsing}
           onParseExif={() => void handleParseExif()}
           onNotice={onNotice}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
+          selectionSyncEnabled={selectionSyncEnabled}
+          onSelectionSyncChange={(enabled) => {
+            setSelectionSyncEnabled(enabled);
+            if (enabled && currentEntry && pairedWorkspaceKey) {
+              setImageSelection(pairedWorkspaceKey, currentEntry.jpg_path);
+              syncPairedScroll(currentEntry.jpg_path, session.imageScroll, true);
+            }
+          }}
           imageSearchQuery={imageSearchQuery}
           imageSearchError={imageSearchError}
           onImageSearchQueryChange={(value) => {
@@ -395,7 +449,7 @@ export function Isp6sAeVisual({
           entry={currentEntry}
           entries={imageDir.entries}
           visibleHeatmapPaths={filteredHeatmapPaths}
-          tomlData={imageDir.tomlData}
+          tomlData={selectedTomlData}
           onSelectHeatmapImages={onSelectHeatmapImages}
           onCalculatorSourcePathChange={setCalculatorSourcePath}
           onSourceEditorBindingChange={setSourceEditorBinding}
@@ -441,7 +495,7 @@ export function Isp6sAeVisual({
                             style={{ borderColor: "var(--colorBrandStroke1)", color: "var(--colorNeutralForeground1)" }}>LCE</span>
                     </div>
                     <div className="min-h-0 flex-1">
-                      <LceTab schema={schema} tomlData={imageDir.tomlData} />
+                      <LceTab schema={schema} tomlData={selectedTomlData} />
                     </div>
                   </div>
                 </Panel>
@@ -488,7 +542,7 @@ export function Isp6sAeVisual({
                 onHide={hideDetailsPanel}
                 session={session}
                 schema={schema}
-                tomlData={imageDir.tomlData}
+                tomlData={selectedTomlData}
                 tomlPath={currentEntry?.toml_path ?? null}
                 filePath={filePath}
                 cppImportRevision={cppImportRevision}

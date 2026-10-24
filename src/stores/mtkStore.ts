@@ -37,6 +37,8 @@ interface MtkState {
   /** Per-(ISP × tab) import state, keyed by `"${IspId}|${tabIdx}"`. */
   imports:  Record<string, ImportState>;
   imageDir: Record<string, ImageDirState>;
+  /** Per-workspace image selection. AE Basic and ToneMap can opt out of syncing. */
+  imageSelection: Record<string, string | null>;
 
   hydrate: (value: Mtk) => void;
   setCurrentIsp:  (idx: number) => void;
@@ -48,6 +50,7 @@ interface MtkState {
 
   setImport:   (isp: IspId, tabIdx: number, state: Partial<ImportState>) => void;
   setImageDir: (isp: IspId, tabIdx: number, state: Partial<ImageDirState>) => void;
+  setImageSelection: (workspaceKey: string, path: string | null) => void;
 }
 
 export const useMtkStore = create<MtkState>()(
@@ -56,6 +59,7 @@ export const useMtkStore = create<MtkState>()(
     debugParserPath: null,
     imports:  {},
     imageDir: {},
+    imageSelection: {},
 
     hydrate: (value) => set((s) => {
       s.mtk = value;
@@ -63,6 +67,7 @@ export const useMtkStore = create<MtkState>()(
       s.imports = Object.fromEntries(Object.entries(value.cpp_paths ?? {}).map(([key, filePath]) => [
         key, { ...DEFAULT_IMPORT, filePath },
       ]));
+      s.imageSelection = {};
       if (value.cpp_path && !s.imports["ISP6S|0"]) {
         s.imports["ISP6S|0"] = { ...DEFAULT_IMPORT, filePath: value.cpp_path };
       }
@@ -102,6 +107,9 @@ export const useMtkStore = create<MtkState>()(
           s.mtk.image_workspaces[key] = { dir: image.dir, selected_image: selected };
         }
       }
+    }),
+    setImageSelection: (workspaceKey, path) => set((s) => {
+      s.imageSelection[workspaceKey] = path;
     }),
   })),
 );

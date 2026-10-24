@@ -624,3 +624,65 @@
 
 - 在现有 Tauri 开发窗口临时采样：修复前 `#root` 已含完整首页内容，Tooltip 门户为 796×624、白色背景且位于最上层；修复后门户为 796×0、透明背景，窗口中心重新命中首页按钮。采样代码与本地监听器已移除。
 - `npm run typecheck`、`npm run build` 通过；构建后的 `dist/index.html` 引用了打包后的 PNG 图标。未在全新启动的 Tauri 进程中目视验收。
+
+### 2026-10-24：bcompare 表格铺满与跨 AE/Tone 图片选择同步
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ParaCheckMode.tsx` 移除详情页上下内边距，bcompare 卡片顶部改为直角；数据行使用主题背景交替显示，图片 3A 与参数文件列保持同一行色带。
+- `src/stores/mtkStore.ts` 增加按工作区的临时图片选中路径；`src/stores/isp6sVisualStore.ts` 提供同步开关。开启时 AE Basic/ToneMap 互相传播选中路径，关闭时各自保留选中项和对应 TOML 数据。
+- `src/views/mtk/isp6s/TablePane/TablePane.tsx` 在图片列表标题栏提供链路图标按钮，并通过 `aria-pressed`、标题和禁用链路图标表达当前状态。
+
+**痛点**
+
+- 两个页面原先共用 `imageDir.current` 和 `imageDir.tomlData`，无法在关闭同步后保留两个不同的当前图片；只增加按钮而不拆分工作区选中态会导致页面仍互相覆盖。
+
+**闭坑**
+
+- 共享目录和扫描结果继续复用，当前图片通过 `imageSelection[ISP6S|tab]` 隔离；切换独立选中项时重新读取该图片 TOML，避免右侧参数卡片显示另一页面的数据。
+- 同步开关只影响 ISP6S 的 AE Basic/ToneMap，不改变图片目录持久化和现有热力图多选集合。
+
+**验证**
+
+- `npm run typecheck` 通过。
+- `node --test src/views/mtk/isp6s/TablePane/*.test.mjs` 通过（27 项）。
+- `git diff --check` 通过；未在 Tauri 窗口中手动验收 bcompare 角位、行色带及开关跨页面点击效果。
+
+### 2026-10-24：跨 AE/Tone 图片选中行恢复
+
+**亮点**
+
+- `Isp6sAeVisual.tsx` 以 `imageSelection[ISP6S|tab]` 为选中路径来源；`workspaceSession.ts` 额外记录滚动位置对应的图片路径。进入另一页面时，若同步后的图片与旧滚动位置不匹配，表格定位到新选中行。
+- `TablePane.tsx` 在当前图片索引变化后解除旧滚动位置保护，让虚拟列表把新选中行滚入可见区域。
+
+**痛点**
+
+- 原恢复逻辑在页面重挂载时调用 `onPickImage`，将旧 `session.imagePath` 写回共享选中态；即使路径已同步，虚拟列表仍可能恢复旧滚动位置，选中行处于可视区域外。
+
+**闭坑**
+
+- 恢复页面时先匹配工作区选中路径；滚动位置只有在对应同一张图片时才能复用。切换图片目录时同时清除旧滚动路径，避免跨目录定位错误。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`node --test src/views/mtk/isp6s/TablePane/*.test.mjs`（27 项）和 `git diff --check` 通过。
+- 未在 Tauri 窗口中手动验证跨页面选中、筛选状态和长列表滚动效果。
+
+### 2026-10-24：AE Basic 与 ToneMap 图片列表滚动同步
+
+**亮点**
+
+- `src/views/mtk/isp6s/Isp6sAeVisual.tsx` 在选中图片、开启同步和列表滚动时，把当前表格的纵向与横向位置写入另一工作区的 `workspaceSession`；切页时沿用已有的滚动恢复入口。
+
+**痛点**
+
+- 此前只同步了选中路径，目标页仍使用自己的旧滚动位置；即使目标行已选中，两页看到的列表区域也可能不同。
+
+**闭坑**
+
+- 只在同步开关开启且目标工作区选中同一图片时传播后续滚动；关闭开关后，各页继续维护独立滚动位置。跨页滚动快照同时绑定图片路径和目录，避免复用旧图片的偏移量。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`node --test src/views/mtk/isp6s/TablePane/*.test.mjs`（27 项）和 `git diff --check` 通过。
+- 未在 Tauri 窗口中手动验证长列表、不同筛选和横向滚动的跨页效果。

@@ -47,13 +47,16 @@ function withoutRemovedImageInfo(next: Isp6sAeVisual): Isp6sAeVisual {
 
 interface VisualState {
   visual: Isp6sAeVisual;
+  selectionSyncEnabled: boolean;
   setVisual: (next: Isp6sAeVisual) => void;
   patch:     (patch: Partial<Isp6sAeVisual>) => void;
+  setSelectionSyncEnabled: (enabled: boolean) => void;
 }
 
 export const useIsp6sVisualStore = create<VisualState>()(
   immer((set) => ({
     visual: DEFAULT,
+    selectionSyncEnabled: true,
     setVisual: (next) => set((s) => {
       // Merge defaults with whatever came from state.toml so newly-added
       // fields (e.g. after a schema bump) always have a sane value.
@@ -62,6 +65,7 @@ export const useIsp6sVisualStore = create<VisualState>()(
     patch: (patch) => set((s) => {
       s.visual = withoutRemovedImageInfo({ ...s.visual, ...patch });
     }),
+    setSelectionSyncEnabled: (enabled) => set({ selectionSyncEnabled: enabled }),
   })),
 );
 

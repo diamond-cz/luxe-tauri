@@ -8,6 +8,7 @@ export type DetailsTab = "normal" | "face" | "lce" | "exif" | "bcompare";
 export interface WorkspaceSession {
   imageDir: string | null;
   imagePath: string | null;
+  imageScrollPath: string | null;
   selectedToml: { dir: string; path: string; data: Record<string, string> } | null;
   imageScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
@@ -39,6 +40,7 @@ export function workspaceSession(key: string): WorkspaceSession {
   session = {
     imageDir: null,
     imagePath: null,
+    imageScrollPath: null,
     selectedToml: null,
     imageScroll: null,
     detailsTab: "normal",

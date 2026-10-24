@@ -17,6 +17,8 @@ import {
   CalculatorArrowClockwise24Regular,
   Search24Regular,
   Settings24Regular,
+  LinkMultiple24Regular,
+  LinkDismiss24Regular,
 } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
@@ -100,6 +102,8 @@ interface Props {
   imageDir:  string | null;
   onPickImage: (idx: number, options?: { preserveHeatmapSelection?: boolean }) => void;
   onImageDirChange: (dir: string) => void;
+  selectionSyncEnabled: boolean;
+  onSelectionSyncChange: (enabled: boolean) => void;
   imageSearchQuery: string;
   imageSearchError: string | null;
   onImageSearchQueryChange: (value: string) => void;
@@ -307,6 +311,8 @@ export function TablePane({
   imageDir,
   onPickImage,
   onImageDirChange,
+  selectionSyncEnabled,
+  onSelectionSyncChange,
   imageSearchQuery,
   imageSearchError,
   onImageSearchQueryChange,
@@ -469,6 +475,13 @@ export function TablePane({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <Button size="small" appearance="subtle"
+            style={{ width: 28, minWidth: 28, height: 28, padding: 0, color: selectionSyncEnabled ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)" }}
+            icon={selectionSyncEnabled ? <LinkMultiple24Regular className="h-4 w-4" /> : <LinkDismiss24Regular className="h-4 w-4" />}
+            title={selectionSyncEnabled ? "已开启 AE Basic / ToneMap 图片选择同步" : "已关闭图片选择同步"}
+            aria-label={selectionSyncEnabled ? "关闭 AE Basic 与 ToneMap 图片选择同步" : "开启 AE Basic 与 ToneMap 图片选择同步"}
+            aria-pressed={selectionSyncEnabled}
+            onClick={() => onSelectionSyncChange(!selectionSyncEnabled)} />
           <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
             title={exifParsing ? "正在解析图片 EXIF" : "解析图片 EXIF"}
             disabled={entries.length === 0 || exifParsing}
@@ -1089,6 +1102,7 @@ export function ImageTab({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const restoreScrollRef = useRef(scrollPosition);
   const preserveRestoredScrollRef = useRef(Boolean(scrollPosition));
+  const previousCurrentRef = useRef(current);
   const previousKindFilterRef = useRef<string | null>(null);
   const scrollPositionChangeRef = useRef(onScrollPositionChange);
   const tableWindowPathsRef = useRef<string[]>([]);
@@ -2058,11 +2072,15 @@ export function ImageTab({
   }
 
   useEffect(() => {
+    if (previousCurrentRef.current !== current) {
+      previousCurrentRef.current = current;
+      preserveRestoredScrollRef.current = false;
+    }
     if (!preserveRestoredScrollRef.current && !restoreScrollRef.current
       && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT && currentDisplayIndex >= 0) {
       ensureImageTableRowVisible(currentDisplayIndex);
     }
-  }, [currentDisplayIndex, viewportHeight]);
+  }, [current, currentDisplayIndex, viewportHeight]);
 
   useEffect(() => {
     const previous = previousKindFilterRef.current;
