@@ -7,6 +7,7 @@ import {
   ArrowReset24Regular,
   ArrowUndo24Regular,
   ChevronRight16Regular,
+  DocumentText24Regular,
   Folder24Regular,
   Save24Regular,
 } from "@fluentui/react-icons";
@@ -338,28 +339,25 @@ export function ParamMapMode({
 
 function SourcePathBreadcrumb({ path }: { path: string }) {
   const parts = path.split(/[\\/]+/).filter(Boolean);
-  // 只显示源码所在目录，不显示当前源码文件名。
+  const fileName = parts.at(-1);
   const directoryParts = parts.slice(0, -1);
   const directoryPath = directoryParts.join("\\");
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden"
-      style={{ scrollbarWidth: "none", whiteSpace: "nowrap" }}
-      aria-label={`源码目录：${directoryPath || path}`}>
+    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" title={path || "未加载参数文件"}
+      aria-label={`当前参数文件：${path || "未加载"}`}>
       <Folder24Regular className="mr-1 h-4 w-4 shrink-0"
         style={{ color: "var(--colorNeutralForeground3)" }} aria-hidden="true" />
       {directoryParts.length === 0
-        ? <span className="truncate" style={{ color: "var(--colorNeutralForeground3)" }}>未加载源码目录</span>
-        : directoryParts.map((part, index) => (
-          <span key={`${part}-${index}`} className="flex shrink-0 items-center gap-0.5">
-            {index > 0 && <ChevronRight16Regular className="h-3 w-3 shrink-0"
-              style={{ color: "var(--colorNeutralForeground4)" }} aria-hidden="true" />}
-            <span
-              className={index === directoryParts.length - 1 ? "font-semibold" : undefined}
-              style={{ color: index === directoryParts.length - 1 ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)" }}>
-              {part}
-            </span>
-          </span>
-        ))}
+        ? !fileName && <span className="truncate" style={{ color: "var(--colorNeutralForeground3)" }}>未加载参数文件</span>
+        : <span className="min-w-0 truncate" style={{ color: "var(--colorNeutralForeground3)" }}>{directoryPath}</span>}
+      {fileName && <>
+        <ChevronRight16Regular className="h-3 w-3 shrink-0" style={{ color: "var(--colorNeutralForeground4)" }} aria-hidden="true" />
+        <span className="flex max-w-[70%] shrink-0 items-center gap-1 truncate rounded border px-1.5 py-0.5 font-mono font-semibold"
+          style={{ borderColor: "var(--colorBrandStroke2)", background: "var(--colorBrandBackground2)", color: "var(--colorBrandForeground1)" }}>
+          <DocumentText24Regular className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{fileName}</span>
+        </span>
+      </>}
     </div>
   );
 }

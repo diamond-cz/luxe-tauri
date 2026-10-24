@@ -63,6 +63,7 @@ export function MtkView() {
   }, [imageKey]);
 
   const importsEntry = useMtkStore((s) => s.imports[key]);
+  const caLtmImport = useMtkStore((s) => s.imports["ISP6S|CA-LTM"]);
   const imports = importsEntry ?? { filePath: null, parsed: null, revision: 0, status: "idle" as const, message: null };
   const setImport = useMtkStore((s) => s.setImport);
 
@@ -86,16 +87,16 @@ export function MtkView() {
     alignWorkspaceDividerRef.current?.(x);
   }, []);
 
-  const onCppPathChange = useCallback(async (path: string) => {
-    const importKey = `${ispId}|${tabIdx}`;
+  const importCppPath = useCallback(async (path: string, targetIsp: IspId, targetTab: number | "CA-LTM") => {
+    const importKey = `${targetIsp}|${targetTab}`;
     const requestId = cppRequestIds.current[importKey] = (cppRequestIds.current[importKey] ?? 0) + 1;
     restoredCppPaths.current[importKey] = path;
-    setCppPath(path, ispId, tabIdx);
-    setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
+    setCppPath(path, targetIsp, targetTab);
+    setImport(targetIsp, targetTab, { filePath: path, parsed: null, status: "parsing", message: null });
     try {
       if (!(await isFile(path))) {
         if (requestId === cppRequestIds.current[importKey]) {
-          setImport(ispId, tabIdx, { status: "error", message: "参数文件不存在" });
+          setImport(targetIsp, targetTab, { status: "error", message: "参数文件不存在" });
           setToast({ kind: "error", title: "参数文件不存在", detail: path });
         }
         return;
@@ -103,7 +104,7 @@ export function MtkView() {
       if (requestId !== cppRequestIds.current[importKey]) return;
       const result = await parseCppFile(path);
       if (requestId !== cppRequestIds.current[importKey]) return;
-      setImport(ispId, tabIdx, {
+      setImport(targetIsp, targetTab, {
         parsed:  result,
         revision: (useMtkStore.getState().imports[importKey]?.revision ?? 0) + 1,
         status:  "done",
@@ -117,10 +118,16 @@ export function MtkView() {
     } catch (err) {
       if (requestId !== cppRequestIds.current[importKey]) return;
       const msg = err instanceof Error ? err.message : String(err);
-      setImport(ispId, tabIdx, { filePath: path, parsed: null, status: "error", message: msg });
+      setImport(targetIsp, targetTab, { filePath: path, parsed: null, status: "error", message: msg });
       setToast({ kind: "error", title: "解析失败", detail: msg });
     }
-  }, [ispId, tabIdx, setCppPath, setImport]);
+  }, [setCppPath, setImport]);
+  const onCppPathChange = useCallback((path: string) => {
+    void importCppPath(path, ispId, tabIdx);
+  }, [importCppPath, ispId, tabIdx]);
+  const onCaLtmPathChange = useCallback((path: string) => {
+    void importCppPath(path, "ISP6S", "CA-LTM");
+  }, [importCppPath]);
 
   const onDebugParserPathChange = useCallback(async (path: string) => {
     const requestId = ++parserRequestId.current;
@@ -156,8 +163,8 @@ export function MtkView() {
     if (mtk.cpp_path && !paths["ISP6S|0"]) paths["ISP6S|0"] = mtk.cpp_path;
     for (const [savedKey, path] of Object.entries(paths)) {
       const [savedIsp, savedTab] = savedKey.split("|");
-      const savedTabIdx = Number(savedTab);
-      if (!path || !ISP_TABS[savedIsp as IspId]?.[savedTabIdx]?.fileHint
+      const savedTabIdx = savedIsp === "ISP6S" && savedTab === "CA-LTM" ? "CA-LTM" : Number(savedTab);
+      if (!path || !(savedTabIdx === "CA-LTM" || ISP_TABS[savedIsp as IspId]?.[savedTabIdx]?.fileHint)
         || restoredCppPaths.current[savedKey] === path) continue;
       restoredCppPaths.current[savedKey] = path;
       const requestId = cppRequestIds.current[savedKey] = (cppRequestIds.current[savedKey] ?? 0) + 1;
@@ -282,12 +289,14 @@ export function MtkView() {
         cppFileHint={tab.fileHint}
         cppPath={imports.filePath}
         debugParserPath={debugParserPath}
+        caLtmPath={caLtmImport?.filePath ?? null}
         pickerRatios={mtk.inner_splitter}
         onRegisterWorkspaceDividerAlign={registerWorkspaceDividerAlign}
         onIspChange={(id) => setCurrentIsp(ISP_LIST.findIndex((i) => i.id === id))}
         onTabChange={setCurrentTab}
         onCppPathChange={onCppPathChange}
         onDebugParserPathChange={onDebugParserPathChange}
+        onCaLtmPathChange={onCaLtmPathChange}
         onPickerRatiosChange={setInnerSplit}
         onToast={setToast}
       />
@@ -311,6 +320,11 @@ export function MtkView() {
                   parsed={parsedReady}
                   toneMode={tab.label === "ToneMap"}
                   toneParsed={tab.label === "ToneMap" ? imports.parsed : null}
+                  caLtmParsed={tab.label === "ToneMap" ? caLtmImport?.parsed ?? null : null}
+                  caLtmPath={tab.label === "ToneMap" ? caLtmImport?.filePath ?? null : null}
+                  caLtmRevision={tab.label === "ToneMap" ? caLtmImport?.revision ?? 0 : 0}
+                  caLtmStatus={tab.label === "ToneMap" ? caLtmImport?.status ?? "idle" : "idle"}
+                  caLtmMessage={tab.label === "ToneMap" ? caLtmImport?.message ?? null : null}
                   cppImportRevision={imports.revision}
                   onImageDirChange={onImageDirChange}
                   onCppPathChange={onCppPathChange}

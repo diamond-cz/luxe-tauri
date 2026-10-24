@@ -710,3 +710,47 @@
 - `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。
 - 保存按钮对齐调整后重新运行 `npm run typecheck`，通过。
 - 未在 Tauri 窗口中目视检查深浅主题、保存按钮悬浮态和底部圆角。
+
+### 2026-10-24：ToneMap 独立导入 CA-LTM.cpp
+
+**亮点**
+
+- `IspSelectBar.tsx` 在 ISP6S ToneMap 右侧路径槽选择或拖入 CA-LTM.cpp；AE Basic 的 DP 解析工具入口保持可用。
+- `MtkView.tsx` 复用 `cpp_paths` 的独立键 `ISP6S|CA-LTM` 和现有 CPP 解析流程；`ToneChartMapMode.tsx` 根据该文件的解析树分组显示字段。
+
+**痛点**
+
+- CA-LTM 标签此前从 Tone.cpp 中寻找注释，无法读取独立文件；直接复用 Tone.cpp 的源码跳转会使用错误的行号和文件。
+- 当前仓库没有 CA-LTM.cpp 样本，无法核对具体参数结构与展示名称。
+
+**闭坑**
+
+- CA-LTM 字段与 Tone.cpp 其他标签的数据分开；独立文件中的字段不提供指向 Tone.cpp 的源码跳转。文件未导入、解析中及解析失败时分别显示状态。
+- 新路径仍由现有 `cpp_paths` 持久化，旧 TOML 缺少该键时按未导入处理。
+
+**验证**
+
+- `npm run typecheck` 通过；持久化测试加入独立键。其余构建与测试结果见本次交付说明。
+- 未在 Tauri 窗口中手动验证文件选择、拖入、重启恢复和 CA-LTM 参数展示。
+
+### 2026-10-24：源码路径栏显示文件名与 CA-LTM 源码映射
+
+**亮点**
+
+- `ParamMapMode.tsx` 的路径栏在压缩目录后固定显示当前参数文件名，悬浮可查看完整路径。
+- `ImagePane.tsx` 以同一套草稿处理逻辑分别维护 Tone.cpp 与 CA-LTM.cpp；ToneMap 的 CA-LTM 标签切换到 CA-LTM.cpp 源码映射，其余标签继续使用 Tone.cpp。
+- `ToneChartMapMode.tsx` 的 CA-LTM 参数段和字段恢复源码跳转，跳转目标随标签指向 CA-LTM.cpp。
+
+**痛点**
+
+- 原路径栏只取目录片段，文件名被丢弃；原源码映射始终使用 Tone.cpp，即使 CA-LTM 标签展示了独立文件的解析结果，跳转行号也会落在错误文件。
+
+**闭坑**
+
+- 源码草稿、临时解析文件、撤销重做和保存操作按实际文件隔离；AE Basic 的 bcompare 仍绑定原有 AE.cpp 草稿。
+- 跨文件跳转携带目标路径，旧标签的跳转范围不会应用到另一份源码。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。
+- 未在 Tauri 窗口中手动验证窄窗口路径显示、CA-LTM 跳转定位和两个文件的实际保存。

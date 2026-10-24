@@ -21,7 +21,13 @@ interface ToneGroup {
 
 interface Props {
   filePath: string;
-  parsed: ParseResult;
+  parsed: ParseResult | null;
+  caLtmParsed: ParseResult | null;
+  caLtmPath: string | null;
+  caLtmSourcePath: string | null;
+  caLtmSourceRevision: number;
+  caLtmStatus: "idle" | "parsing" | "done" | "error";
+  caLtmMessage: string | null;
   tomlData: Record<string, string>;
   entries: ImageEntry[];
   visibleHeatmapPaths?: string[] | null;
@@ -302,8 +308,33 @@ function buildToneGroups(result: ParseResult): Record<ToneTab, ToneGroup[]> {
   return groups;
 }
 
+function buildCaLtmGroups(result: ParseResult): ToneGroup[] {
+  const nodes = result.tree.children;
+  const groups = nodes.map((node) => ({
+    path: node.path,
+    label: node.section_comment || node.path,
+    line: node.line_start,
+    fields: fieldsUnder(node).sort((a, b) => a.line - b.line || a.index - b.index),
+  })).filter((group) => group.fields.length > 0);
+  const rootFields = result.tree.values;
+  if (rootFields.length > 0) groups.unshift({
+    path: result.tree.path,
+    label: result.var_name || "CA-LTM",
+    line: result.tree.line_start,
+    fields: [...rootFields].sort((a, b) => a.line - b.line || a.index - b.index),
+  });
+  if (groups.length === 0 && result.fields.length > 0) groups.push({
+    path: result.tree.path,
+    label: result.var_name || "CA-LTM",
+    line: result.fields[0].line,
+    fields: result.fields,
+  });
+  return groups;
+}
+
 export function ToneChartMapMode({
-  filePath, parsed, tomlData, entries, visibleHeatmapPaths, sourceDraftText, sourceInitialText, sourceSavedText,
+  filePath, parsed, caLtmParsed, caLtmPath, caLtmSourcePath, caLtmSourceRevision, caLtmStatus, caLtmMessage,
+  tomlData, entries, visibleHeatmapPaths, sourceDraftText, sourceInitialText, sourceSavedText,
   onSourceDraftTextChange, onSaveSourceDraft, onSelectHeatmapImages, onSourceJump,
 }: Props) {
   const [result, setResult] = useState(parsed);
@@ -358,7 +389,11 @@ export function ToneChartMapMode({
 
   useEffect(() => {
     let cancelled = false;
-    if (!filePath) return;
+    if (!filePath || !parsed) {
+      setResult(parsed);
+      setError(null);
+      return;
+    }
     parseCppFile(filePath).then((next) => {
       if (!cancelled) {
         setResult(next);
@@ -370,18 +405,40 @@ export function ToneChartMapMode({
     return () => { cancelled = true; };
   }, [filePath, parsed]);
 
-  const groups = useMemo(() => buildToneGroups(result), [result]);
-  const currentGroups = groups[tab];
+  const groups = useMemo(() => result ? buildToneGroups(result) : {
+    LTM: [], LCE: [], GMA: [], DCE: [], "CA-LTM": [],
+  }, [result]);
+  const [caLtmDraftResult, setCaLtmDraftResult] = useState<{
+    path: string; revision: number; result: ParseResult;
+  } | null>(null);
+  useEffect(() => {
+    if (tab !== "CA-LTM" || !caLtmSourcePath || !caLtmParsed
+      || (caLtmSourcePath === caLtmPath && caLtmSourceRevision === 0)) {
+      setCaLtmDraftResult(null);
+      return;
+    }
+    let cancelled = false;
+    parseCppFile(caLtmSourcePath).then((next) => {
+      if (!cancelled) setCaLtmDraftResult({ path: caLtmSourcePath, revision: caLtmSourceRevision, result: next });
+    }).catch((reason) => {
+      if (!cancelled) console.warn("parse CA-LTM draft failed", reason);
+    });
+    return () => { cancelled = true; };
+  }, [tab, caLtmSourcePath, caLtmSourceRevision, caLtmPath, caLtmParsed]);
+  const currentCaLtmResult = caLtmDraftResult?.path === caLtmSourcePath
+    && caLtmDraftResult.revision === caLtmSourceRevision ? caLtmDraftResult.result : caLtmParsed;
+  const displayedCaLtmGroups = useMemo(() => currentCaLtmResult ? buildCaLtmGroups(currentCaLtmResult) : [], [currentCaLtmResult]);
+  const currentGroups = tab === "CA-LTM" ? displayedCaLtmGroups : groups[tab];
   const lceTables = useMemo(() => ({
-    ratio: LCE_RATIO_PATHS.map((path) => fieldsAtPath(result, path)),
-    target: LCE_TARGET_PATHS.map((path) => fieldsAtPath(result, path)),
-    prob: LCE_PROB_PATHS.map((path) => fieldsAtPath(result, path)),
-    face: LCE_FACE_PATHS.map((path) => fieldsAtPath(result, path)),
-    darkStrength: LCE_DARK_STRENGTH_PATHS.map((path) => fieldsAtPath(result, path)),
-    brightStrength: LCE_BRIGHT_STRENGTH_PATHS.map((path) => fieldsAtPath(result, path)),
+    ratio: LCE_RATIO_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
+    target: LCE_TARGET_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
+    prob: LCE_PROB_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
+    face: LCE_FACE_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
+    darkStrength: LCE_DARK_STRENGTH_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
+    brightStrength: LCE_BRIGHT_STRENGTH_PATHS.map((path) => result ? fieldsAtPath(result, path) : []),
   }), [result]);
   const currentPosition = imagePosition(tomlData);
-  const lineFields = useMemo(() => fieldsByLine(result.fields), [result]);
+  const lineFields = useMemo(() => fieldsByLine(result?.fields ?? []), [result]);
   const displayedTables = useMemo<ToneLceTables>(() => {
     const overlay = (rows: FieldEntry[][]) => rows.map((fields) => fields.map((field) => {
       const value = fieldToken(sourceDraftText, field, lineFields);
@@ -443,8 +500,11 @@ export function ToneChartMapMode({
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3" role="tabpanel" data-isp6s-chart-scroll="true">
-        {error && <div className="mb-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</div>}
-        {tab === "LCE" ? (
+        {tab !== "CA-LTM" && error && <div className="mb-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</div>}
+        {tab === "CA-LTM" && caLtmStatus === "error" && caLtmMessage && (
+          <div className="mb-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{caLtmMessage}</div>
+        )}
+        {tab === "LCE" && result ? (
           <div className="flex flex-col gap-3">
             <ToneLceTargetCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
             <ToneLceProbCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
@@ -453,7 +513,13 @@ export function ToneChartMapMode({
           </div>
         ) : currentGroups.length === 0 && (
           <div className="py-8 text-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
-            Tone.cpp 中未找到带 {tab} 注释的参数段
+            {tab === "CA-LTM"
+              ? caLtmStatus === "parsing" ? "正在解析 CA-LTM.cpp..."
+                : !caLtmPath ? "请在上方导入 CA-LTM.cpp 参数文件"
+                  : caLtmStatus === "error" ? "CA-LTM.cpp 解析失败"
+                    : "CA-LTM.cpp 中未找到可显示的参数"
+              : !result ? "请在上方导入 Tone.cpp 参数文件"
+                : `Tone.cpp 中未找到带 ${tab} 注释的参数段`}
           </div>
         )}
         {tab !== "LCE" && <div className="flex flex-col gap-3">
@@ -788,7 +854,7 @@ function ToneLceMatrixGrid({ tableId, title, rows, lvBracket, drBracket, control
 
 function ToneGroupRows({ group, onJump }: {
   group: ToneGroup;
-  onJump: (field: FieldEntry) => void;
+  onJump?: (field: FieldEntry) => void;
 }) {
   const [visibleCount, setVisibleCount] = useState(100);
   return (
@@ -803,8 +869,9 @@ function ToneGroupRows({ group, onJump }: {
               <tr key={`${field.path}:${field.line}:${field.index}`} className="border-t"
                   style={{ borderColor: "var(--colorNeutralStroke2)" }}>
                 <td className="max-w-0 truncate px-3 py-1 font-mono" title={`${field.path}${field.comment ? ` | ${field.comment}` : ""}`}>
-                  <button type="button" onClick={() => onJump(field)}
+                  {onJump ? <button type="button" onClick={() => onJump(field)}
                           className="max-w-full truncate text-left" style={{ color: "var(--colorBrandForeground1)" }}>{field.path}</button>
+                    : field.path}
                 </td>
                 <td className="px-3 py-1 text-right font-mono" title={field.value}>{field.value}</td>
               </tr>

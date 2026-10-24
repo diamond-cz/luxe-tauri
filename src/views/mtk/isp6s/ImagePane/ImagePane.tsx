@@ -7,6 +7,7 @@ import { rememberSourceScroll, type WorkspaceSession } from "../workspaceSession
 import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { ChartMapMode, type ChartSourceJumpDetails } from "./ChartMapMode";
 import { ToneChartMapMode } from "./ToneChartMapMode";
 import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
@@ -40,6 +41,11 @@ interface Props {
   mode:        PreviewMode | "image" | "image_split";
   toneMode?: boolean;
   toneParsed?: ParseResult | null;
+  caLtmParsed?: ParseResult | null;
+  caLtmPath?: string | null;
+  caLtmRevision?: number;
+  caLtmStatus?: "idle" | "parsing" | "done" | "error";
+  caLtmMessage?: string | null;
   onMode:      (m: PreviewMode) => void;
   filePath:    string;
   importRevision: number;
@@ -80,21 +86,158 @@ function rememberSourceHistory(path: string, snapshot: { revision: number; text:
   }
 }
 
+function useSourceDraft(filePath: string, importRevision: number) {
+  const [draft, setDraft] = useState<SourceCodeDraft | null>(null);
+  const draftRef = useRef<SourceCodeDraft | null>(null);
+  const undoHistoryRef = useRef<string[]>([]);
+  const redoHistoryRef = useRef<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [tempDraft, setTempDraft] = useState<{ version: number; path: string; sourcePath: string } | null>(null);
+  const [tempPending, setTempPending] = useState(false);
+  const currentDraft = draft?.filePath === filePath ? draft : null;
+  const dirty = sourceDraftDirty(currentDraft);
+  const tempReady = Boolean(currentDraft && tempDraft && tempDraft.sourcePath === filePath && tempDraft.version === currentDraft.version);
+  const resolvePath = dirty && tempReady ? tempDraft!.path : filePath;
+  const chartPath = filePath ? (dirty
+    ? (tempReady ? tempDraft!.path : tempDraft?.sourcePath === filePath ? tempDraft.path : filePath)
+    : filePath) : null;
+  const chartRevision = dirty ? (tempReady ? tempDraft!.version : 0) : currentDraft?.version ?? 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setDraft(null);
+    draftRef.current = null;
+    undoHistoryRef.current = [];
+    redoHistoryRef.current = [];
+    setError(null);
+    setTempDraft(null);
+    setTempPending(false);
+    if (!filePath) return;
+    readTextFile(filePath)
+      .then((rawText) => {
+        if (cancelled) return;
+        const normalized = normalizeSourceText(rawText);
+        const previousSnapshot = sourceHistorySnapshot(filePath);
+        const initialText = previousSnapshot?.revision === importRevision ? previousSnapshot.text : normalized.text;
+        if (previousSnapshot?.revision !== importRevision) {
+          rememberSourceHistory(filePath, { revision: importRevision, text: normalized.text });
+        }
+        const nextDraft: SourceCodeDraft = {
+          filePath, text: normalized.text, savedText: normalized.text, initialText,
+          lineEnding: normalized.lineEnding, version: 0, loadVersion: 1,
+        };
+        draftRef.current = nextDraft;
+        setDraft(nextDraft);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => { cancelled = true; };
+  }, [filePath, importRevision]);
+
+  useEffect(() => {
+    if (!draft || !dirty || draft.filePath !== filePath) {
+      setTempPending(false);
+      return;
+    }
+    if (tempDraft?.version === draft.version) return;
+    let cancelled = false;
+    setTempPending(true);
+    writeTempTextFile(filePath, serializeSourceText(draft))
+      .then(async (path) => {
+        await cppClearCache();
+        if (!cancelled) setTempDraft({ version: draft.version, path, sourcePath: filePath });
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => { if (!cancelled) setTempPending(false); });
+    return () => { cancelled = true; };
+  }, [dirty, draft, filePath, tempDraft]);
+
+  const onTextChange = useCallback((text: string) => {
+    const current = draftRef.current;
+    if (!current || current.filePath !== filePath || current.text === text) return;
+    undoHistoryRef.current.push(current.text);
+    redoHistoryRef.current = [];
+    if (undoHistoryRef.current.length > 100) undoHistoryRef.current.shift();
+    const nextDraft = { ...current, text, version: current.version + 1 };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+  }, [filePath]);
+
+  const onSave = useCallback(async () => {
+    const currentDraft = draftRef.current;
+    if (!currentDraft || currentDraft.filePath !== filePath) return;
+    await writeTextFile(filePath, serializeSourceText(currentDraft));
+    await cppClearCache();
+    const current = draftRef.current;
+    if (current?.filePath === filePath) {
+      const nextDraft = { ...current, savedText: currentDraft.text, version: current.version + 1 };
+      draftRef.current = nextDraft;
+      setDraft(nextDraft);
+      if (current.text === currentDraft.text) setTempDraft(null);
+    }
+  }, [filePath]);
+
+  const onSaveAs = useCallback(async (path: string) => {
+    const current = draftRef.current;
+    if (current?.filePath === filePath) await writeTextFile(path, serializeSourceText(current));
+  }, [filePath]);
+
+  const onRestore = useCallback(() => {
+    const current = draftRef.current;
+    if (!current || current.filePath !== filePath || current.text === current.initialText) return;
+    undoHistoryRef.current.push(current.text);
+    redoHistoryRef.current = [];
+    const nextDraft = { ...current, text: current.initialText, version: current.version + 1 };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    setTempDraft(null);
+  }, [filePath]);
+
+  const onUndo = useCallback(() => {
+    const current = draftRef.current;
+    if (current?.filePath !== filePath) return;
+    const previous = undoHistoryRef.current.pop();
+    if (previous === undefined) return;
+    redoHistoryRef.current.push(current.text);
+    const nextDraft = { ...current, text: previous, version: current.version + 1 };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+  }, [filePath]);
+
+  const onRedo = useCallback(() => {
+    const current = draftRef.current;
+    if (current?.filePath !== filePath) return;
+    const nextText = redoHistoryRef.current.pop();
+    if (nextText === undefined) return;
+    undoHistoryRef.current.push(current.text);
+    const nextDraft = { ...current, text: nextText, version: current.version + 1 };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+  }, [filePath]);
+
+  const getText = useCallback(() => draftRef.current?.filePath === filePath ? draftRef.current.text : "", [filePath]);
+  return { draft: currentDraft, error, dirty, tempReady, tempPending,
+    resolvePath, chartPath, chartRevision, getText, onTextChange, onSave, onSaveAs, onRestore,
+    onUndo, onRedo, undoHistoryRef, redoHistoryRef };
+}
+
 export function ImagePane({
-  mode, toneMode = false, toneParsed, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
+  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
   const dropPathsRef = useRef<string[]>([]);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
-  const [sourceOverride, setSourceOverride] = useState<SourceOverride | undefined>(undefined);
-  const [sourceDraft, setSourceDraft] = useState<SourceCodeDraft | null>(null);
-  const sourceDraftRef = useRef<SourceCodeDraft | null>(null);
-  const undoHistoryRef = useRef<string[]>([]);
-  const redoHistoryRef = useRef<string[]>([]);
-  const [sourceDraftError, setSourceDraftError] = useState<string | null>(null);
-  const [tempDraft, setTempDraft] = useState<{ version: number; path: string } | null>(null);
-  const [tempDraftPending, setTempDraftPending] = useState(false);
+  const [sourceOverride, setSourceOverride] = useState<(SourceOverride & { filePath: string }) | undefined>(undefined);
+  const toneSource = useSourceDraft(filePath, importRevision);
+  const caSource = useSourceDraft(toneMode ? caLtmPath ?? "" : "", caLtmRevision);
+  const toneTab = useIsp6sVisualStore((state) => state.visual.tone_chart_map_tab);
+  const caLtmActive = toneMode && toneTab === "CA-LTM";
+  const activeSource = caLtmActive ? caSource : toneSource;
+  const activeFilePath = caLtmActive ? caLtmPath ?? "" : filePath;
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [showModeLabels, setShowModeLabels] = useState(true);
@@ -157,18 +300,21 @@ export function ImagePane({
     };
   }, [onCppPathChange]);
 
-  const draftDirty = sourceDraftDirty(sourceDraft);
-  const tempDraftReady = Boolean(sourceDraft && tempDraft && tempDraft.version === sourceDraft.version);
-  const toneImportedPathsMatchDraft = Boolean(toneMode && sourceDraft && toneParsed && sourceDraft.text === sourceDraft.initialText);
+  const toneImportedPathsMatchDraft = Boolean(toneMode && toneSource.draft && toneParsed
+    && toneSource.draft.text === toneSource.draft.initialText);
   const toneSourceFields = toneImportedPathsMatchDraft
     ? toneParsed?.fields
-    : toneMode && draftDirty && !tempDraftReady ? [] : undefined;
-  const draftResolvePath = draftDirty && tempDraftReady ? tempDraft!.path : filePath;
-  const chartFilePath = filePath ? (draftDirty ? (tempDraftReady ? tempDraft!.path : tempDraft?.path ?? filePath) : filePath) : null;
-  const chartSourceRevision = draftDirty
-    ? (tempDraftReady ? tempDraft!.version : tempDraft?.version ?? 0)
-    : sourceDraft?.version ?? 0;
-  const calculatorSourcePath = draftDirty ? (tempDraftReady ? tempDraft!.path : null) : filePath;
+    : toneMode && toneSource.dirty && !toneSource.tempReady ? [] : undefined;
+  const caImportedPathsMatchDraft = Boolean(caSource.draft && caLtmParsed
+    && caSource.draft.text === caSource.draft.initialText);
+  const activeSourceFields = caLtmActive
+    ? caImportedPathsMatchDraft ? caLtmParsed?.fields : caSource.dirty && !caSource.tempReady ? [] : undefined
+    : toneSourceFields;
+  const activeSourceTree = caLtmActive
+    ? caImportedPathsMatchDraft ? caLtmParsed?.tree : undefined
+    : toneImportedPathsMatchDraft ? toneParsed?.tree : undefined;
+  const calculatorSourcePath = toneSource.dirty
+    ? toneSource.tempReady ? toneSource.resolvePath : null : filePath;
   useEffect(() => {
     onCalculatorSourcePathChange?.(calculatorSourcePath);
   }, [calculatorSourcePath, onCalculatorSourcePathChange]);
@@ -189,71 +335,6 @@ export function ImagePane({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setSourceDraft(null);
-    sourceDraftRef.current = null;
-    undoHistoryRef.current = [];
-    redoHistoryRef.current = [];
-    setSourceDraftError(null);
-    setTempDraft(null);
-    setTempDraftPending(false);
-    if (!filePath) return;
-    readTextFile(filePath)
-      .then((rawText) => {
-        if (cancelled) return;
-        const normalized = normalizeSourceText(rawText);
-        const previousSnapshot = sourceHistorySnapshot(filePath);
-        const initialText = previousSnapshot?.revision === importRevision ? previousSnapshot.text : normalized.text;
-        if (previousSnapshot?.revision !== importRevision) {
-          rememberSourceHistory(filePath, { revision: importRevision, text: normalized.text });
-        }
-        const nextDraft: SourceCodeDraft = {
-          filePath,
-          text: normalized.text,
-          savedText: normalized.text,
-          initialText,
-          lineEnding: normalized.lineEnding,
-          version: 0,
-          loadVersion: 1,
-        };
-        sourceDraftRef.current = nextDraft;
-        setSourceDraft(nextDraft);
-      })
-      .catch((e) => {
-        if (!cancelled) setSourceDraftError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filePath, importRevision]);
-
-  useEffect(() => {
-    if (!sourceDraft || !draftDirty) {
-      setTempDraftPending(false);
-      return;
-    }
-    if (tempDraft?.version === sourceDraft.version) return;
-
-    let cancelled = false;
-    const draft = sourceDraft;
-    setTempDraftPending(true);
-    writeTempTextFile(filePath, serializeSourceText(draft))
-      .then(async (path) => {
-        await cppClearCache();
-        if (!cancelled) setTempDraft({ version: draft.version, path });
-      })
-      .catch((e) => {
-        if (!cancelled) setSourceDraftError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setTempDraftPending(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [draftDirty, filePath, sourceDraft, tempDraft]);
-
   const handleMode = (nextMode: PreviewMode) => {
     if (nextMode === "param_map") {
       setSourceOverride(undefined);
@@ -265,9 +346,9 @@ export function ImagePane({
   };
 
   const handleSourceJump = useCallback((label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => {
-    setSourceOverride({ label, spec, details });
+    setSourceOverride({ label, spec, details, filePath: activeFilePath });
     onMode("param_map");
-  }, [onMode]);
+  }, [activeFilePath, onMode]);
 
   const handleBackToChart = useCallback((target?: ChartPreviewTarget) => {
     if (target?.label) {
@@ -279,108 +360,41 @@ export function ImagePane({
     onMode("chart_map");
   }, [onMode]);
 
-  const handleDraftTextChange = useCallback((text: string) => {
-    const current = sourceDraftRef.current;
-    if (!current || current.text === text) return;
-    undoHistoryRef.current.push(current.text);
-    redoHistoryRef.current = [];
-    if (undoHistoryRef.current.length > 100) undoHistoryRef.current.shift();
-    const nextDraft = { ...current, text, version: current.version + 1 };
-    sourceDraftRef.current = nextDraft;
-    setSourceDraft(nextDraft);
-  }, []);
-
   useEffect(() => {
     const onHistory = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (!rootRef.current?.contains(event.target as Node)) return;
-      const current = sourceDraftRef.current;
-      if (!current) return;
       const key = event.key.toLowerCase();
       const undo = key === "z" && !event.shiftKey;
       const redo = key === "y" || (key === "z" && event.shiftKey);
       if (!undo && !redo) return;
-      const history = undo ? undoHistoryRef.current : redoHistoryRef.current;
-      const nextText = history.pop();
-      if (nextText === undefined) return;
-      (undo ? redoHistoryRef.current : undoHistoryRef.current).push(current.text);
+      const available = undo ? activeSource.undoHistoryRef.current.length : activeSource.redoHistoryRef.current.length;
+      if (!available) return;
       event.preventDefault();
       event.stopPropagation();
-      const nextDraft = { ...current, text: nextText, version: current.version + 1 };
-      sourceDraftRef.current = nextDraft;
-      setSourceDraft(nextDraft);
+      if (undo) activeSource.onUndo();
+      else activeSource.onRedo();
     };
     window.addEventListener("keydown", onHistory, true);
     return () => window.removeEventListener("keydown", onHistory, true);
-  }, [effectiveMode]);
+  }, [effectiveMode, activeSource.onUndo, activeSource.onRedo,
+    activeSource.undoHistoryRef, activeSource.redoHistoryRef]);
 
-  const handleSaveDraft = useCallback(async () => {
-    const draft = sourceDraftRef.current;
-    if (!draft) return;
-    await writeTextFile(filePath, serializeSourceText(draft));
-    await cppClearCache();
-    const current = sourceDraftRef.current;
-    if (current && current.filePath === draft.filePath) {
-      const nextDraft = { ...current, savedText: draft.text, version: current.version + 1 };
-      sourceDraftRef.current = nextDraft;
-      setSourceDraft(nextDraft);
-    }
-    if (current?.text === draft.text) setTempDraft(null);
-  }, [filePath]);
-
-  const getDraftText = useCallback(() => sourceDraftRef.current?.text ?? "", []);
   useEffect(() => {
-    onSourceEditorBindingChange?.(sourceDraft?.filePath === filePath ? {
+    onSourceEditorBindingChange?.(toneSource.draft?.filePath === filePath ? {
       filePath,
       importRevision,
-      resolveFilePath: draftDirty ? (tempDraftReady ? tempDraft!.path : null) : filePath,
-      text: sourceDraft.text,
-      savedText: sourceDraft.savedText,
-      getText: getDraftText,
-      onTextChange: handleDraftTextChange,
-      onSave: handleSaveDraft,
+      resolveFilePath: toneSource.dirty ? (toneSource.tempReady ? toneSource.resolvePath : null) : filePath,
+      text: toneSource.draft.text,
+      savedText: toneSource.draft.savedText,
+      getText: toneSource.getText,
+      onTextChange: toneSource.onTextChange,
+      onSave: toneSource.onSave,
       onSourceJump: handleSourceJump,
     } : null);
-  }, [filePath, importRevision, sourceDraft, draftDirty, tempDraftReady, tempDraft, getDraftText,
-    handleDraftTextChange, handleSaveDraft, handleSourceJump, onSourceEditorBindingChange]);
+  }, [filePath, importRevision, toneSource.draft, toneSource.dirty, toneSource.tempReady, toneSource.resolvePath,
+    toneSource.getText, toneSource.onTextChange, toneSource.onSave, handleSourceJump, onSourceEditorBindingChange]);
   useEffect(() => () => onSourceEditorBindingChange?.(null), [onSourceEditorBindingChange]);
-
-  const handleSaveDraftAs = useCallback(async (path: string) => {
-    const draft = sourceDraft;
-    if (!draft) return;
-    await writeTextFile(path, serializeSourceText(draft));
-  }, [sourceDraft]);
-
-  const handleRestoreDraft = useCallback(() => {
-    const current = sourceDraftRef.current;
-    if (!current || current.text === current.initialText) return;
-    undoHistoryRef.current.push(current.text);
-    redoHistoryRef.current = [];
-    const nextDraft = { ...current, text: current.initialText, version: current.version + 1 };
-    sourceDraftRef.current = nextDraft;
-    setSourceDraft(nextDraft);
-    setTempDraft(null);
-  }, []);
-
-  const handleUndoDraft = useCallback(() => {
-    const current = sourceDraftRef.current;
-    const previous = undoHistoryRef.current.pop();
-    if (!current || previous === undefined) return;
-    redoHistoryRef.current.push(current.text);
-    const nextDraft = { ...current, text: previous, version: current.version + 1 };
-    sourceDraftRef.current = nextDraft;
-    setSourceDraft(nextDraft);
-  }, []);
-
-  const handleRedoDraft = useCallback(() => {
-    const current = sourceDraftRef.current;
-    const nextText = redoHistoryRef.current.pop();
-    if (!current || nextText === undefined) return;
-    undoHistoryRef.current.push(current.text);
-    const nextDraft = { ...current, text: nextText, version: current.version + 1 };
-    sourceDraftRef.current = nextDraft;
-    setSourceDraft(nextDraft);
-  }, []);
 
   return (
     <div ref={rootRef} className="relative flex h-full w-full flex-col"
@@ -426,7 +440,7 @@ export function ImagePane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {effectiveMode === "chart_map" && chartFilePath && (!toneMode || toneParsed) && (
+        {effectiveMode === "chart_map" && (toneMode ? Boolean(toneSource.chartPath || caLtmPath) : Boolean(toneSource.chartPath)) && (
           <div ref={chartWrapRef}
                style={{ width: "100%", height: "100%" }}
                onScrollCapture={(event) => {
@@ -435,21 +449,27 @@ export function ImagePane({
                    rememberSourceScroll(scrollSession, `${filePath}|chart_map`, { top: target.scrollTop, left: target.scrollLeft });
                  }
                }}>
-            {toneMode && toneParsed ? <ToneChartMapMode
-              filePath={chartFilePath}
-              parsed={toneParsed}
+            {toneMode ? <ToneChartMapMode
+              filePath={toneSource.chartPath ?? ""}
+              parsed={toneParsed ?? null}
+              caLtmParsed={caLtmParsed ?? null}
+              caLtmPath={caLtmPath ?? null}
+              caLtmSourcePath={caSource.chartPath}
+              caLtmSourceRevision={caSource.chartRevision}
+              caLtmStatus={caLtmStatus ?? "idle"}
+              caLtmMessage={caLtmMessage ?? null}
               tomlData={tomlData}
               entries={entries}
               visibleHeatmapPaths={visibleHeatmapPaths}
-              sourceDraftText={sourceDraft?.text ?? null}
-              sourceInitialText={sourceDraft?.initialText ?? null}
-              sourceSavedText={sourceDraft?.savedText ?? null}
-              onSourceDraftTextChange={handleDraftTextChange}
-              onSaveSourceDraft={handleSaveDraft}
+              sourceDraftText={toneSource.draft?.text ?? null}
+              sourceInitialText={toneSource.draft?.initialText ?? null}
+              sourceSavedText={toneSource.draft?.savedText ?? null}
+              onSourceDraftTextChange={toneSource.onTextChange}
+              onSaveSourceDraft={toneSource.onSave}
               onSelectHeatmapImages={onSelectHeatmapImages}
               onSourceJump={handleSourceJump}
             /> : <ChartMapMode
-              filePath={chartFilePath}
+              filePath={toneSource.chartPath!}
               sourceBasePath={filePath}
               schema={schema}
               entries={entries}
@@ -459,45 +479,46 @@ export function ImagePane({
               onSelectHeatmapImages={onSelectHeatmapImages}
               focusTarget={chartFocus}
               onFocusHandled={(key) => setChartFocus((current) => current?.key === key ? null : current)}
-              sourceRevision={chartSourceRevision}
-              sourceDraftText={sourceDraft?.text ?? null}
-              sourceInitialText={sourceDraft?.initialText ?? null}
-              sourceSavedText={sourceDraft?.savedText ?? null}
-              onSourceDraftTextChange={handleDraftTextChange}
-              onSaveSourceDraft={handleSaveDraft}
+              sourceRevision={toneSource.chartRevision}
+              sourceDraftText={toneSource.draft?.text ?? null}
+              sourceInitialText={toneSource.draft?.initialText ?? null}
+              sourceSavedText={toneSource.draft?.savedText ?? null}
+              onSourceDraftTextChange={toneSource.onTextChange}
+              onSaveSourceDraft={toneSource.onSave}
               onSourceJump={handleSourceJump}
             />}
           </div>
         )}
-        {effectiveMode === "chart_map" && !chartFilePath && (
+        {effectiveMode === "chart_map" && !toneSource.chartPath && !toneMode && (
           <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
-            {tempDraftPending ? "\u6b63\u5728\u540c\u6b65\u6e90\u7801\u8349\u7a3f..." : "\u6e90\u7801\u8349\u7a3f\u672a\u51c6\u5907\u5b8c\u6210"}
+            {toneSource.tempPending ? "\u6b63\u5728\u540c\u6b65\u6e90\u7801\u8349\u7a3f..." : "\u6e90\u7801\u8349\u7a3f\u672a\u51c6\u5907\u5b8c\u6210"}
           </div>
         )}
-        {effectiveMode === "chart_map" && toneMode && chartFilePath && !toneParsed && (
+        {effectiveMode === "chart_map" && toneMode && !toneSource.chartPath && !caLtmPath && (
           <div className="flex h-full items-center justify-center text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
-            正在解析 Tone.cpp...
+            请在上方导入 Tone.cpp 或 CA-LTM.cpp 参数文件
           </div>
         )}
         {effectiveMode === "param_map"   && (
           <ParamMapMode
-            filePath={filePath}
-            resolveFilePath={draftResolvePath}
+            key={activeFilePath}
+            filePath={activeFilePath}
+            resolveFilePath={activeSource.resolvePath}
             schema={schema}
-            sourceOverride={sourceOverride}
-            draft={sourceDraft}
-            draftLoadError={sourceDraftError}
-            onDraftTextChange={handleDraftTextChange}
-            onSaveDraft={handleSaveDraft}
-            onSaveDraftAs={handleSaveDraftAs}
-            onRestoreDraft={handleRestoreDraft}
-            onUndoDraft={handleUndoDraft}
-            onRedoDraft={handleRedoDraft}
-            canUndoDraft={undoHistoryRef.current.length > 0}
-            canRedoDraft={redoHistoryRef.current.length > 0}
+            sourceOverride={sourceOverride?.filePath === activeFilePath ? sourceOverride : undefined}
+            draft={activeSource.draft}
+            draftLoadError={activeSource.error}
+            onDraftTextChange={activeSource.onTextChange}
+            onSaveDraft={activeSource.onSave}
+            onSaveDraftAs={activeSource.onSaveAs}
+            onRestoreDraft={activeSource.onRestore}
+            onUndoDraft={activeSource.onUndo}
+            onRedoDraft={activeSource.onRedo}
+            canUndoDraft={activeSource.undoHistoryRef.current.length > 0}
+            canRedoDraft={activeSource.redoHistoryRef.current.length > 0}
             onBackToChart={handleBackToChart}
-            sourceFields={toneSourceFields}
-            sourceTree={toneImportedPathsMatchDraft ? toneParsed?.tree : undefined}
+            sourceFields={activeSourceFields}
+            sourceTree={activeSourceTree}
             scrollSession={scrollSession}
           />
         )}

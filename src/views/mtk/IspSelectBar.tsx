@@ -17,19 +17,21 @@ interface Props {
   cppFileHint: string | null;
   cppPath: string | null;
   debugParserPath: string | null;
+  caLtmPath: string | null;
   pickerRatios: number[];
   onRegisterWorkspaceDividerAlign: (align: ((x: number) => void) | null) => void;
   onIspChange: (id: IspId) => void;
   onTabChange: (idx: number) => void;
   onCppPathChange: (path: string) => void;
   onDebugParserPathChange: (path: string) => void;
+  onCaLtmPathChange: (path: string) => void;
   onPickerRatiosChange: (sizes: number[]) => void;
   onToast: (toast: { kind: ToastKind; title: string; detail?: string; duration?: number }) => void;
 }
 
 const CPP_EXTS = ["cpp", "c", "h", "hpp", "cxx", "cc"];
 const DEFAULT_PICKER_RATIOS = [40, 60];
-type PickerSlot = "cpp" | "debugParser" | null;
+type PickerSlot = "cpp" | "secondary" | null;
 
 export function IspSelectBar({
   isp,
@@ -37,16 +39,19 @@ export function IspSelectBar({
   cppFileHint,
   cppPath,
   debugParserPath,
+  caLtmPath,
   pickerRatios,
   onRegisterWorkspaceDividerAlign,
   onIspChange,
   onTabChange,
   onCppPathChange,
   onDebugParserPathChange,
+  onCaLtmPathChange,
   onPickerRatiosChange,
   onToast,
 }: Props) {
   const tabs = ISP_TABS[isp];
+  const caLtmSlot = isp === "ISP6S" && tabs[tabIdx]?.label === "ToneMap";
   const selectRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const pickerGroupRef = useRef<HTMLDivElement | null>(null);
@@ -107,12 +112,12 @@ export function IspSelectBar({
     let cancelled = false;
     const slotAt = (position: { x: number; y: number }): PickerSlot => {
       if (!cppFileHint) return null;
-      if (hitTest(debugParserRef.current, position)) return "debugParser";
+      if (hitTest(debugParserRef.current, position)) return "secondary";
       return hitTest(pickerRef.current, position) ? "cpp" : null;
     };
     const updateDropState = (slot: PickerSlot, paths: string[]) => {
-      setPickerDropState(slot === "cpp" ? classifyPickerDrop(slot, paths) : null);
-      setDebugParserDropState(slot === "debugParser" ? classifyPickerDrop(slot, paths) : null);
+      setPickerDropState(slot === "cpp" ? classifyPickerDrop(slot, paths, caLtmSlot) : null);
+      setDebugParserDropState(slot === "secondary" ? classifyPickerDrop(slot, paths, caLtmSlot) : null);
     };
     (async () => {
       const win = getCurrentWindow();
@@ -136,13 +141,14 @@ export function IspSelectBar({
           const slot = slotAt(payload.position);
           dropPathsRef.current = [];
           updateDropState(null, []);
-          if (!slot || classifyPickerDrop(slot, payload.paths) !== "ok") return;
+          if (!slot || classifyPickerDrop(slot, payload.paths, caLtmSlot) !== "ok") return;
           void (async () => {
             const path = await resolveDropCandidate(payload.paths, slot === "cpp"
               ? (item) => matchExt(item, CPP_EXTS)
-              : isDebugParserExecutable);
+              : caLtmSlot ? (item) => matchExt(item, CPP_EXTS) : isDebugParserExecutable);
             if (!path) return;
             if (slot === "cpp") onCppPathChange(path);
+            else if (caLtmSlot) onCaLtmPathChange(path);
             else onDebugParserPathChange(path);
           })().catch((error) => console.warn("resolve dropped picker path failed", error));
         }
@@ -156,7 +162,7 @@ export function IspSelectBar({
       dropPathsRef.current = [];
       unlisten?.();
     };
-  }, [cppFileHint, onCppPathChange, onDebugParserPathChange]);
+  }, [cppFileHint, caLtmSlot, onCppPathChange, onCaLtmPathChange, onDebugParserPathChange]);
 
   const pickerHighlight = pickerHover || pickerDropState !== null;
   const debugParserHighlight = debugParserHover || debugParserDropState !== null;
@@ -279,10 +285,10 @@ export function IspSelectBar({
                 <div className="min-w-0" style={{ flex: "1 1 0" }}>
                   <PathPicker
                     innerRef={debugParserRef}
-                    title="DP解析工具路径"
-                    fileLabel="DebugParser.exe"
-                    icon={<AppGeneric24Regular className="h-4 w-4" />}
-                    path={debugParserPath}
+                    title={caLtmSlot ? "CA-LTM.cpp参数路径" : "DP解析工具路径"}
+                    fileLabel={caLtmSlot ? "CA-LTM.cpp参数文件" : "DebugParser.exe"}
+                    icon={caLtmSlot ? <DocumentText24Regular className="h-4 w-4" /> : <AppGeneric24Regular className="h-4 w-4" />}
+                    path={caLtmSlot ? caLtmPath : debugParserPath}
                     highlighted={debugParserHighlight}
                     dropState={debugParserDropState}
                     onHoverChange={setDebugParserHover}
@@ -290,9 +296,15 @@ export function IspSelectBar({
                     onPick={async () => {
                       const picked = await openDialog({
                         multiple: false,
-                        filters: [{ name: "DebugParser.exe", extensions: ["exe"] }],
+                        filters: caLtmSlot
+                          ? [{ name: "CA-LTM.cpp", extensions: CPP_EXTS }]
+                          : [{ name: "DebugParser.exe", extensions: ["exe"] }],
                       });
                       if (typeof picked !== "string") return;
+                      if (caLtmSlot) {
+                        onCaLtmPathChange(picked);
+                        return;
+                      }
                       if (!isDebugParserExecutable(picked)) {
                         onToast({ kind: "error", title: "请选择 DebugParser.exe" });
                         return;
@@ -587,7 +599,8 @@ function classifyCppDrop(paths: string[]): "ok" | "bad" {
   return paths.some((path) => matchExt(path, CPP_EXTS) || isShortcutPath(path)) ? "ok" : "bad";
 }
 
-function classifyPickerDrop(slot: Exclude<PickerSlot, null>, paths: string[]): "ok" | "bad" {
+function classifyPickerDrop(slot: Exclude<PickerSlot, null>, paths: string[], caLtmSlot: boolean): "ok" | "bad" {
   if (slot === "cpp") return classifyCppDrop(paths);
+  if (caLtmSlot) return classifyCppDrop(paths);
   return paths.some((path) => isDebugParserExecutable(path) || isShortcutPath(path)) ? "ok" : "bad";
 }

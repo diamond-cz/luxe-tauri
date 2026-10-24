@@ -46,9 +46,9 @@ interface MtkState {
   setOuterSplit:  (sizes: number[]) => void;
   setInnerSplit:  (sizes: number[]) => void;
   setDebugParserPath: (path: string | null) => void;
-  setCppPath: (path: string | null, isp: IspId, tabIdx: number) => void;
+  setCppPath: (path: string | null, isp: IspId, tabIdx: number | "CA-LTM") => void;
 
-  setImport:   (isp: IspId, tabIdx: number, state: Partial<ImportState>) => void;
+  setImport:   (isp: IspId, tabIdx: number | "CA-LTM", state: Partial<ImportState>) => void;
   setImageDir: (isp: IspId, tabIdx: number, state: Partial<ImageDirState>) => void;
   setImageSelection: (workspaceKey: string, path: string | null) => void;
 }

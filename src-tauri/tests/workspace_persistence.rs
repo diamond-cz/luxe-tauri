@@ -29,6 +29,7 @@ fn portable_state_migrates_and_restores_tools_files_and_selected_image() {
     saved.mtk.debug_parser_path = Some(r"D:\tools\DebugParser.exe".into());
     saved.mtk.cpp_paths.insert("ISP6S|0".into(), r"D:\params\AE.cpp".into());
     saved.mtk.cpp_paths.insert("ISP6S|1".into(), r"D:\params\Tone.cpp".into());
+    saved.mtk.cpp_paths.insert("ISP6S|CA-LTM".into(), r"D:\params\CA-LTM.cpp".into());
     saved.mtk.image_workspaces.insert("ISP6S|0".into(), ImageWorkspace {
         dir: r"D:\images".into(), selected_image: Some(r"D:\images\2.jpg".into()),
     });
@@ -62,6 +63,7 @@ fn old_state_defaults_new_workspace_fields() {
     let restored: StateRoot = toml::from_str("[mtk]\ncurrent_isp = 1\n").unwrap();
     assert_eq!(restored.last_route, "/home");
     assert!(restored.mtk.image_workspaces.is_empty());
+    assert!(restored.mtk.cpp_paths.get("ISP6S|CA-LTM").is_none());
 }
 
 fn write_route(path: &std::path::Path, route: &str) {

@@ -31,6 +31,11 @@ interface Props {
   parsed:    boolean;
   toneMode?: boolean;
   toneParsed?: ParseResult | null;
+  caLtmParsed?: ParseResult | null;
+  caLtmPath?: string | null;
+  caLtmRevision?: number;
+  caLtmStatus?: "idle" | "parsing" | "done" | "error";
+  caLtmMessage?: string | null;
   cppImportRevision: number;
   onImageDirChange: (dir: string) => void;
   onCppPathChange: (path: string) => void;
@@ -54,7 +59,7 @@ const DETAILS_TABS = [
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
 export function Isp6sAeVisual({
-  isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
+  isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision, caLtmStatus, caLtmMessage, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
 }: Props) {
   const workspaceKey = `${isp}|${tabIdx}`;
   const session = workspaceSession(workspaceKey);
@@ -439,6 +444,11 @@ export function Isp6sAeVisual({
           key={`${filePath ?? ""}|${cppImportRevision}`}
           toneMode={toneMode}
           toneParsed={toneParsed}
+          caLtmParsed={caLtmParsed}
+          caLtmPath={caLtmPath}
+          caLtmRevision={caLtmRevision}
+          caLtmStatus={caLtmStatus}
+          caLtmMessage={caLtmMessage}
           importRevision={cppImportRevision}
           mode={toneMode ? visual.tone_preview_mode ?? "chart_map"
             : visual.preview_mode === "param_map" ? "param_map" : "chart_map"}
