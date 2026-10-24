@@ -854,4 +854,5 @@
 
 - `npm run version:check`、`npm run release:test`（27 项）、`npm run build`、`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib`（13 项通过、1 项忽略）和 `git diff --check` 均通过。
 - 本机完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml` 因运行中的 `src-tauri/target/debug/luxe-tauri.exe` 被占用而无法替换可执行文件；GitHub Actions 将在独立环境重新运行。
-- GitHub Actions 发布与安装升级结果待标签推送后核对。
+- GitHub Actions `Publish Windows release`（run 40085363348）成功；公开的 `v0.2.10` Release 包含 NSIS、`.sig`、MSI、`latest.json` 和 `SHA256SUMS.txt` 五项资产。
+- 发布工作流完成了独立环境的完整 Rust 测试与安装包校验；本机未执行真实安装升级。
