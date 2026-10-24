@@ -586,7 +586,7 @@ function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
   const [saveError, setSaveError] = useState<string | null>(null);
   const dirty = tableDirty(rows, controls.sourceDraftText, controls.sourceSavedText, controls.lineFields);
   const mode = controls.heatmapModes[tableId];
-  return <div className="flex min-h-9 items-center justify-between gap-2 border-b px-2" style={{ borderColor: "var(--colorNeutralStroke2)", background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))" }}>
+  return <div className="flex min-h-9 items-center justify-between gap-2 border-b px-2" style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
     <div className="flex min-w-0 items-baseline gap-2 text-xs font-semibold">
       <span className="shrink-0">{title}</span>
       <strong className="min-w-0 truncate font-mono" style={{ color: "var(--colorBrandForeground1)" }} title={result}>{result}</strong>
@@ -620,7 +620,7 @@ function ToneLceTableHeader({ tableId, title, result, rows, controls }: {
 }
 
 function ToneCorner({ top, bottom }: { top: string; bottom: string }) {
-  return <div className="relative min-w-0 border-b border-r text-[10px] font-bold" style={{ height: 40, borderColor: "var(--colorNeutralStroke1)", background: "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))" }}>
+  return <div className="relative min-w-0 border-b border-r text-[10px] font-bold" style={{ height: "100%", borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
     <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
       <line x1="0" y1="0" x2="100" y2="100" stroke="var(--colorNeutralStroke1)" vectorEffect="non-scaling-stroke" />
     </svg>
@@ -655,9 +655,8 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
   const color = field ? fieldChangeColor(field, value, controls.sourceInitialText, controls.lineFields) : undefined;
   const cellStyle: React.CSSProperties = {
     minWidth: 0, minHeight: 26, borderRight: "1px solid var(--colorNeutralStroke2)", borderBottom: "1px solid var(--colorNeutralStroke2)",
-    background: heat?.background ?? (active ? "var(--colorBrandBackground2)" : undefined),
-    color: heat?.color ?? color ?? "var(--colorNeutralForeground1)",
-    boxShadow: active ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
+    background: heat?.background ?? (active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, var(--colorNeutralBackground1))" : undefined),
+    color: heat?.color ?? color ?? (active ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)"),
   };
   if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]" style={cellStyle}
     onContextMenu={(event) => { event.preventDefault(); if (!controls.heatmapLoading && !controls.heatmapFailed) onHitImages?.(); }}>
@@ -717,7 +716,7 @@ function ToneLceCalCard({ tomlData, parameterLvTarget }: { tomlData: Record<stri
 
   return <section className="flex h-full min-w-0 flex-col border" style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 border-b px-2 text-xs font-semibold"
-      style={{ borderColor: "var(--colorNeutralStroke2)", background: "color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2))" }}>
+      style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
       <span>Cal <span className="font-mono font-normal">EXIF: {value(finalTarget)}</span></span>
       <span className="font-mono font-normal">参数插值: {value(parameterFinalTarget)}</span>
     </div>
@@ -788,14 +787,19 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   const result = showResult ? labels.slice(tableId === "ratio" ? 1 : 0)
     .map((label, index) => `${label}: ${formatInterpolation(interpolateFields(rows[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
     .join(" | ") : "";
-  return <div className={`${fillHeight ? "flex-1 " : ""}min-w-0 border`} style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
+  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0 border`} style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
     <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />
-    <div className="min-w-0 overflow-x-auto">
-      <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${count}, minmax(0, 1fr))`, gridTemplateRows: "40px", gridAutoRows: 26,
-        width: "100%", minWidth: 0, border: "2px solid var(--colorNeutralStroke1)", fontFamily: "ui-monospace, Consolas, monospace" }}>
+    <div className={`${fillHeight ? "min-h-0 flex-1 " : ""}min-w-0 overflow-x-auto`}>
+      <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${count}, minmax(0, 1fr))`,
+        gridTemplateRows: fillHeight ? `40px repeat(${labels.length}, minmax(26px, 1fr))` : "40px",
+        gridAutoRows: 26, height: fillHeight ? "100%" : undefined,
+        width: "100%", minWidth: 0, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
         <ToneCorner top="LV" bottom={tableId === "ratio" ? "Ratio" : tableId === "face" ? "Face" : title} />
         {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-end border-b border-r px-1 font-mono text-[10px] font-semibold"
-          style={{ borderColor: "var(--colorNeutralStroke2)", background: bracketHits(bracket, index) ? "var(--colorBrandBackground2)" : "var(--colorNeutralBackground2)" }}>LV{index}</div>)}
+          style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
+            color: bracketHits(bracket, index) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>
+          {tableId === "ratio" ? `LV${formatInterpolation(Number(rows[0]?.[index]?.value) / 10)}` : `LV${index}`}
+        </div>)}
         {labels.map((label, rowIndex) => <div key={label} style={{ display: "contents" }}>
           <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-semibold" title={rowTooltips?.[rowIndex]}
             style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>{label}</div>
@@ -831,13 +835,15 @@ function ToneLceMatrixGrid({ tableId, title, rows, lvBracket, drBracket, control
       rows={rows} controls={controls} />
     <div className="min-w-0 overflow-x-auto">
       <div style={{ display: "grid", gridTemplateColumns: `72px repeat(${count}, minmax(0, 1fr))`, gridTemplateRows: "40px", gridAutoRows: 26,
-        width: "100%", minWidth: 0, border: "2px solid var(--colorNeutralStroke1)", fontFamily: "ui-monospace, Consolas, monospace" }}>
+        width: "100%", minWidth: 0, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
         <ToneCorner top="LV" bottom="DR" />
         {Array.from({ length: count }, (_, index) => <div key={`h:${index}`} className="flex min-w-0 items-center justify-end border-b border-r px-1 font-mono text-[10px] font-semibold"
-          style={{ borderColor: "var(--colorNeutralStroke2)", background: bracketHits(lvBracket, index) ? "var(--colorBrandBackground2)" : "var(--colorNeutralBackground2)" }}>LV{index}</div>)}
+          style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
+            color: bracketHits(lvBracket, index) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>LV{index}</div>)}
         {rows.map((fields, rowIndex) => <div key={rowIndex} style={{ display: "contents" }}>
           <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-semibold"
-            style={{ borderColor: "var(--colorNeutralStroke2)", background: bracketHits(drBracket, rowIndex) ? "var(--colorBrandBackground2)" : "var(--colorNeutralBackground2)" }}>{rowIndex}</div>
+            style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)",
+              color: bracketHits(drBracket, rowIndex) ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)" }}>{rowIndex}</div>
           {Array.from({ length: count }, (_, columnIndex) => {
             const paths = hits[rowIndex]?.[columnIndex] ?? [];
             return <ToneNumberCell key={`${rowIndex}:${columnIndex}`} field={fields[columnIndex]}

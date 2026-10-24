@@ -754,3 +754,24 @@
 
 - `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。
 - 未在 Tauri 窗口中手动验证窄窗口路径显示、CA-LTM 跳转定位和两个文件的实际保存。
+
+### 2026-10-24：ToneMap LCE 表格与 Ratio LV 表头
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx` 的 Ratio 横轴按 `LV(Base10)` 第一行当前值除以 10 显示；参数草稿修改该行时，表头随显示值更新。
+- LCE 的 Ratio、Target、Prob、Strength 和 Face 网格统一使用主题表头、单层表格边线与轻量选中态；Ratio 网格行在与 Cal 并排时填满卡片高度。
+
+**痛点**
+
+- Ratio 横轴先前使用列索引，`30/50/80/120` 错标为 `LV0/LV1/LV2/LV3`；Ratio 外层虽拉伸，内部网格仍为固定高度，底部留下空白。
+
+**闭坑**
+
+- 插值仍使用源码的 `LV(Base10)` 原值与图片 LV 比较，仅表头除以 10；不得把显示单位写回参数或用于插值。
+- 表头和数据列共用同一网格；Ratio 只在填充模式下按卡片可用高度分配数据行。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。
+- 未在 Tauri 窗口中目视验证不同窗口宽度和深浅主题下的 Ratio 高度与 LV 表头。
