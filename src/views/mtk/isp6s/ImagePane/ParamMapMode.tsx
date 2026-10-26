@@ -341,18 +341,27 @@ function SourcePathBreadcrumb({ path }: { path: string }) {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   const fileName = parts.at(-1);
   const directoryParts = parts.slice(0, -1);
-  const directoryPath = directoryParts.join("\\");
+  const parentDirectory = directoryParts.length > 1 || (directoryParts.length === 1 && !directoryParts[0].endsWith(":"))
+    ? directoryParts.at(-1) : null;
+  const ancestorPath = parentDirectory ? directoryParts.slice(0, -1).join("\\") : directoryParts.join("\\");
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" title={path || "未加载参数文件"}
-      aria-label={`当前参数文件：${path || "未加载"}`}>
+    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+      aria-label={`当前参数文件：${path || "未加载"}`}
+      style={{ fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', fontVariantNumeric: "tabular-nums" }}>
       <Folder24Regular className="mr-1 h-4 w-4 shrink-0"
         style={{ color: "var(--colorNeutralForeground3)" }} aria-hidden="true" />
       {directoryParts.length === 0
         ? !fileName && <span className="truncate" style={{ color: "var(--colorNeutralForeground3)" }}>未加载参数文件</span>
-        : <span className="min-w-0 truncate" style={{ color: "var(--colorNeutralForeground3)" }}>{directoryPath}</span>}
+        : <span className="flex min-w-0 items-center overflow-hidden whitespace-nowrap">
+            {ancestorPath && <span className="min-w-0 truncate" style={{ color: "var(--colorNeutralForeground3)" }}>
+              {ancestorPath}{parentDirectory ? "\\" : ""}
+            </span>}
+            {parentDirectory && <strong className="max-w-[40%] shrink-0 truncate font-bold"
+              style={{ color: "var(--colorNeutralForeground1)" }}>{parentDirectory}</strong>}
+          </span>}
       {fileName && <>
         <ChevronRight16Regular className="h-3 w-3 shrink-0" style={{ color: "var(--colorNeutralForeground4)" }} aria-hidden="true" />
-        <span className="flex max-w-[70%] shrink-0 items-center gap-1 truncate rounded border px-1.5 py-0.5 font-mono font-semibold"
+        <span className="flex max-w-[70%] shrink-0 items-center gap-1 truncate rounded border px-1.5 py-0.5 font-semibold"
           style={{ borderColor: "var(--colorBrandStroke2)", background: "var(--colorBrandBackground2)", color: "var(--colorBrandForeground1)" }}>
           <DocumentText24Regular className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{fileName}</span>

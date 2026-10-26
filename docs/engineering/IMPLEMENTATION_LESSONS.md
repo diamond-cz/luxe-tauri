@@ -856,3 +856,23 @@
 - 本机完整 `cargo test --locked --manifest-path src-tauri/Cargo.toml` 因运行中的 `src-tauri/target/debug/luxe-tauri.exe` 被占用而无法替换可执行文件；GitHub Actions 将在独立环境重新运行。
 - GitHub Actions `Publish Windows release`（run 40085363348）成功；公开的 `v0.2.10` Release 包含 NSIS、`.sig`、MSI、`latest.json` 和 `SHA256SUMS.txt` 五项资产。
 - 发布工作流完成了独立环境的完整 Rust 测试与安装包校验；本机未执行真实安装升级。
+
+### 2026-10-26：LCE 表格居中与源码路径层级
+
+**亮点**
+
+- `ToneChartMapMode.tsx` 的 LCE 数值输入格、行标签和横轴表头统一居中，Ratio、Target、Prob、Strength 和 Face 共用该样式。
+- `ParamMapMode.tsx` 的共用源码路径栏移除整栏原生悬浮提示，保留完整路径的无障碍名称；将直接父文件夹加粗，并为路径使用 Cascadia Code/Consolas 等宽字体栈。
+
+**痛点**
+
+- 原路径栏只有一段可截断的目录文字，无法突出最接近文件的文件夹；整栏 `title` 会在鼠标悬浮时遮挡源码区域。
+
+**闭坑**
+
+- 更改源码映射路径栏时检查 AE Basic、ToneMap 和 CA-LTM 共用的 `SourcePathBreadcrumb`，并核对较长路径下父目录与文件名的截断。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 均通过。
+- 未在 Tauri 窗口目视核对窄窗口下的路径截断与 LCE 表格对齐。

@@ -691,7 +691,7 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
   </div>;
   return <div style={cellStyle}>
     <input value={draft} readOnly={!field || !controls.sourceDraftText} aria-label={`${tableId} ${field?.path ?? fallback ?? ""}`}
-      inputMode="decimal" className="h-full w-full min-w-0 bg-transparent px-1 text-right font-mono text-[10px] outline-none"
+      inputMode="decimal" className="h-full w-full min-w-0 bg-transparent px-1 text-center font-mono text-[10px] outline-none"
       style={{ color: "inherit", cursor: field ? "text" : "default" }}
       onFocus={(event) => { setFocused(true); event.currentTarget.select(); }}
       onBlur={() => { setFocused(false); if (discardOnBlur.current) discardOnBlur.current = false; else commit(); }}
@@ -827,7 +827,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
           {tableId === "ratio" ? `LV${formatInterpolation(Number(rows[0]?.[index]?.value) / 10)}` : `LV${index}`}
         </div>)}
         {labels.map((label, rowIndex) => <div key={label} style={{ display: "contents" }}>
-          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-bold" title={rowTooltips?.[rowIndex]}
+          <div className="flex min-w-0 items-center justify-center border-b border-r px-2 text-center text-[10px] font-bold" title={rowTooltips?.[rowIndex]}
             style={lceRowHeaderStyle}>{label}</div>
           {Array.from({ length: count }, (_, columnIndex) => {
             const paths = hits[rowIndex]?.[columnIndex] ?? [];
@@ -868,7 +868,7 @@ function ToneLceMatrixGrid({ tableId, title, rows, lvBracket, drBracket, control
           style={{ ...lceAxisHeaderStyle,
             color: bracketHits(lvBracket, index) ? "var(--colorBrandForeground1)" : lceAxisHeaderStyle.color }}>LV{index}</div>)}
         {rows.map((fields, rowIndex) => <div key={rowIndex} style={{ display: "contents" }}>
-          <div className="flex min-w-0 items-center border-b border-r px-2 text-[10px] font-bold"
+          <div className="flex min-w-0 items-center justify-center border-b border-r px-2 text-center text-[10px] font-bold"
             style={{ ...lceRowHeaderStyle,
               color: bracketHits(drBracket, rowIndex) ? "var(--colorBrandForeground1)" : lceRowHeaderStyle.color }}>{rowIndex}</div>
           {Array.from({ length: count }, (_, columnIndex) => {
