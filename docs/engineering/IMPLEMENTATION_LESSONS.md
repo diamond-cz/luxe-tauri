@@ -876,3 +876,44 @@
 
 - `npm run typecheck`、`npm run build`、`git diff --check` 均通过。
 - 未在 Tauri 窗口目视核对窄窗口下的路径截断与 LCE 表格对齐。
+
+### 2026-10-26：Face_LCE 补齐 L0 数据行
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx` 将 `Face_LCE` 的行路径扩展为 `[0][0][0][4][0]` 至 `[0][0][0][4][15]`，L0 通过现有字段提取、编辑、保存、热力图和源码跳转链路读取 `.0` 至 `.18` 数值。
+- 原 L1 的说明提示继续关联 L1；`src-tauri/tests/tone_cpp_paths.rs` 对可用的真实 TONE.cpp 样本增加 L0 的 19 列断言。
+
+**痛点**
+
+- 原路径列表从 `[4][1]` 开始，导致 L0 被整体遗漏；行名和第一行说明提示均依赖列表索引，增加首行时需要同步调整。
+
+**闭坑**
+
+- 新增 LCE 行时核对路径、行名、说明提示与解析字段数是否一一对应；L0 的 19 个字段仍由同一表格网格显示，不另建数据副本。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 均通过。
+- `cargo test --locked --manifest-path src-tauri/Cargo.toml --test tone_cpp_paths` 因运行中的 `src-tauri/target/debug/luxe-tauri.exe` 被占用，在编译阶段报“拒绝访问 (os error 5)”，未执行到测试；没有结束正在运行的程序。
+- 项目根目录没有 `TONE.cpp` 样本，无法核验真实 L0 的 19 列数据；未在 Tauri 窗口目视核对表格效果。
+
+### 2026-10-26：Face_LCE L0 独立列结构
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx` 将 L0 单独显示为两组 `LV0、LV2、...、LV16` 与末尾 `rsv`；列值按 `[0][0][0][4][0].0` 至 `.18` 精确匹配，缺失字段不会使后续列错位。
+- L0 的热力图按步长为 2 的 LV 列同时映射到两组，`rsv` 始终显示源码值；L1-L15 继续使用原有 LV0-LV18 表格与命中逻辑。Face_LCE 的保存及源码跳转仍覆盖全部行。
+
+**痛点**
+
+- L0 虽有 19 个字段，但字段含义不是连续的 19 个 LV；直接复用普通行表头会错标第二组和 `rsv`。
+
+**闭坑**
+
+- 后续调整 Face_LCE 时分别核对 L0 的 `.0-.8`、`.9-.17`、`.18` 和普通行的 LV0-LV18；保存按钮的脏状态必须包含 L0。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 均通过。
+- 项目根目录没有 `TONE.cpp` 样本，未核验真实数值或 Tauri 窗口显示。

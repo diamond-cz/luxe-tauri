@@ -259,7 +259,10 @@ const LCE_TARGET_PATHS = [
   "[0][0][0][0][3]", "[0][0][0][0][4]", "[0][0][0][0][5]",
 ] as const;
 const LCE_PROB_PATHS = Array.from({ length: 4 }, (_, index) => `[0][0][0][3][${index}]`);
-const LCE_FACE_PATHS = Array.from({ length: 15 }, (_, index) => `[0][0][0][4][${index + 1}]`);
+const LCE_FACE_PATHS = Array.from({ length: 16 }, (_, index) => `[0][0][0][4][${index}]`);
+const LCE_FACE_L0_COLUMNS = 19;
+const LCE_FACE_L0_GROUP_COLUMNS = 9;
+const LCE_FACE_L0_LVS = Array.from({ length: LCE_FACE_L0_GROUP_COLUMNS }, (_, index) => index * 2);
 const LCE_DARK_STRENGTH_PATHS = Array.from({ length: 11 }, (_, index) => `[0][0][0][2][0][${index}]`);
 const LCE_BRIGHT_STRENGTH_PATHS = Array.from({ length: 11 }, (_, index) => `[0][0][0][2][1][${index}]`);
 
@@ -766,14 +769,79 @@ function ToneLceProbCard(props: ToneTableProps & { position: LceImagePosition })
 }
 
 function ToneLceFaceCard(props: ToneTableProps & { position: LceImagePosition }) {
-  const labels = LCE_FACE_PATHS.map((_, index) => `i4LCEfaceTbL${index + 1}`);
-  const width = Math.max(1, ...props.tables.face.map((fields) => fields.length));
+  const rows = props.tables.face.slice(1);
+  const labels = rows.map((_, index) => `i4LCEfaceTbL${index + 1}`);
+  const width = Math.max(1, ...rows.map((fields) => fields.length));
   const bracket = indexedBracket(props.position.lv / 10, props.position.lvLow, props.position.lvHigh, width);
-  const rowTooltips = props.tables.face.map((fields, index) => index === 0
+  const rowTooltips = rows.map((fields, index) => index === 0
     ? "Dark linear blend strength (1000-based)"
     : lastLineComment(props.sourceDraftText, fields[0]));
-  return <ToneLceValueGrid tableId="face" title="Face_LCE" labels={labels} rows={props.tables.face}
-    bracket={bracket} rowTooltips={rowTooltips} showResult={false} controls={props} />;
+  return <section style={lceCardStyle}>
+    <ToneLceTableHeader tableId="face" title="Face_LCE" result="" rows={props.tables.face} controls={props} />
+    <ToneLceFaceL0Grid fields={props.tables.face[0] ?? []} position={props.position} controls={props} />
+    <ToneLceValueGrid tableId="face" title="Face_LCE" labels={labels} rows={rows}
+      bracket={bracket} rowTooltips={rowTooltips} showResult={false} embedded controls={props} />
+  </section>;
+}
+
+function ToneLceFaceL0Grid({ fields, position, controls }: {
+  fields: FieldEntry[];
+  position: LceImagePosition;
+  controls: ToneTableProps;
+}) {
+  const mode = controls.heatmapModes.face;
+  const bracket = axisBracket(position.lv / 10, LCE_FACE_L0_LVS);
+  const hits = useMemo(() => {
+    const columns = Array.from({ length: LCE_FACE_L0_COLUMNS }, () => [] as string[]);
+    if (!mode.enabled) return columns;
+    for (const point of controls.heatmapPoints) {
+      const hit = axisBracket(point.position.lv / 10, LCE_FACE_L0_LVS);
+      if (!hit) continue;
+      for (const index of new Set([hit.low, hit.high])) {
+        columns[index].push(point.path);
+        columns[index + LCE_FACE_L0_GROUP_COLUMNS].push(point.path);
+      }
+    }
+    return columns;
+  }, [mode.enabled, controls.heatmapPoints]);
+  const maximum = Math.max(0, ...hits.map((paths) => paths.length));
+  const fieldByPath = new Map(fields.map((field) => [field.path, field]));
+  const basePath = LCE_FACE_PATHS[0];
+  const groups = [
+    { title: "融合强度 (0-1000)：值越大，人脸对比度越高", background: "var(--normal-sheet-yellow-bg)", color: "var(--normal-sheet-yellow-fg)" },
+    { title: "HighBound 限制 (85-105)：保护人脸高光", background: "var(--normal-sheet-peach-bg)", color: "var(--normal-sheet-peach-fg)" },
+  ];
+  return <div className="min-w-0 overflow-x-auto border-b" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+    <div className="border-b px-2 py-1 font-mono text-[10px] font-semibold" style={{ borderColor: lceFrameColor, color: "var(--colorNeutralForeground2)" }}>
+      i4LCEfaceTbL0
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${LCE_FACE_L0_COLUMNS}, minmax(0, 1fr))`,
+      gridTemplateRows: "minmax(36px, auto) 26px 26px", minWidth: 760,
+      border: `2px solid ${lceFrameColor}`, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
+      {groups.map((group) => <div key={group.title} className="flex min-w-0 items-center border-b border-r px-2 text-[10px] leading-4"
+        style={{ gridColumn: `span ${LCE_FACE_L0_GROUP_COLUMNS}`, borderColor: lceFrameColor,
+          background: `color-mix(in srgb, ${group.background} 38%, var(--colorNeutralBackground1))`,
+          color: "var(--colorNeutralForeground1)" }}>{group.title}</div>)}
+      <div className="border-b" style={{ borderColor: lceFrameColor, background: "var(--colorNeutralBackground2)" }} />
+      {Array.from({ length: LCE_FACE_L0_COLUMNS }, (_, index) => {
+        const group = index < LCE_FACE_L0_GROUP_COLUMNS ? groups[0] : groups[1];
+        const lvIndex = index % LCE_FACE_L0_GROUP_COLUMNS;
+        return <div key={`h:${index}`} className="flex min-w-0 items-center justify-center border-b border-r px-1 text-[10px] font-bold"
+          style={{ borderColor: lceFrameColor, background: index === 18 ? "var(--colorNeutralBackground2)" : group.background,
+            color: index === 18 ? "var(--colorNeutralForeground1)" : group.color }}>
+          {index === 18 ? "rsv" : `LV${LCE_FACE_L0_LVS[lvIndex]}`}
+        </div>;
+      })}
+      {Array.from({ length: LCE_FACE_L0_COLUMNS }, (_, index) => {
+        const paths = hits[index];
+        return <ToneNumberCell key={index} field={fieldByPath.get(`${basePath}.${index}`)}
+          active={index < 18 && bracketHits(bracket, index % LCE_FACE_L0_GROUP_COLUMNS)}
+          heat={mode.enabled ? heatCellStyle(paths.length, maximum) : undefined}
+          hitCount={controls.heatmapLoading ? undefined : paths.length} showCount={index < 18 && mode.enabled && mode.showCounts}
+          tableId="face" controls={controls} onHitImages={() => controls.onSelectHeatmapImages?.(paths)} />;
+      })}
+    </div>
+  </div>;
 }
 
 function ToneLceStrengthCard(props: ToneTableProps & { position: LceImagePosition }) {
@@ -792,7 +860,7 @@ function ToneLceStrengthCard(props: ToneTableProps & { position: LceImagePositio
   );
 }
 
-function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, showResult = true, fillHeight = false, controls }: {
+function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, showResult = true, fillHeight = false, embedded = false, controls }: {
   tableId: ToneLceTableId;
   title: string;
   labels: string[];
@@ -801,6 +869,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   rowTooltips?: Array<string | undefined>;
   showResult?: boolean;
   fillHeight?: boolean;
+  embedded?: boolean;
   controls: ToneTableProps;
 }) {
   const count = Math.max(1, ...rows.map((fields) => fields.length));
@@ -812,8 +881,8 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   const result = showResult ? labels.slice(tableId === "ratio" ? 1 : 0)
     .map((label, index) => `${label}: ${formatInterpolation(interpolateFields(rows[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
     .join(" | ") : "";
-  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} style={lceCardStyle}>
-    <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />
+  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} style={embedded ? undefined : lceCardStyle}>
+    {!embedded && <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />}
     <div className={`${fillHeight ? "min-h-0 flex-1 " : ""}min-w-0 overflow-x-auto`}>
       <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${count}, minmax(0, 1fr))`,
         gridTemplateRows: fillHeight ? `40px repeat(${labels.length}, minmax(26px, 1fr))` : "40px",

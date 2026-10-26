@@ -56,7 +56,7 @@ fn supplied_tone_lce_tables_have_expected_dimensions() {
     for index in 0..4 {
         assert_eq!(path_query::get_fields_at_path(&parsed, &format!("[0][0][0][3][{index}]")).len(), 19);
     }
-    for index in 1..=15 {
+    for index in 0..=15 {
         assert_eq!(path_query::get_fields_at_path(&parsed, &format!("[0][0][0][4][{index}]")).len(), 19);
     }
 }
