@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "EXIF 計算來源",
+  "face_fdsz_keyword": "圖片關鍵字",
+  "face_fdsz_parameter": "參數插值",
+  "face_fdsz_switch_hint": "按一下切換 EXIF 計算使用的 FDSZ_RA 來源",
   "home_current_version": "目前版本 v{{version}}",
   "update_available_version": "發現新版本 v{{version}}",
   "update_install_now": "立即更新",

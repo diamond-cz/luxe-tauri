@@ -917,3 +917,24 @@
 
 - `npm run typecheck`、`npm run build` 和 `git diff --check` 均通过。
 - 项目根目录没有 `TONE.cpp` 样本，未核验真实数值或 Tauri 窗口显示。
+
+### 2026-10-27：Face_FLT EXIF 权重来源与 Cal_FLT 对齐
+
+**亮点**
+
+- `ChartMapMode.tsx` 的 FDSZ_RA 标题栏提供来源切换按钮；EXIF 公式可选图片关键字 `AE_TAG_FLT_FDSZ_RA` 或源码表格的参数插值，选择通过 `isp6s_ae_visual.chart_face_flt_exif_use_parameter_fdsz_ra` 保存。
+- `TablePane.tsx` 为所有图片使用同一来源选择重新计算 Face Link Target EXIF 值；切换会更新计算器标识，使列表派生结果及列宽缓存重新计算。`src-tauri/resources/face_table.toml` 的 `Cal_FLT` 改为 `FLT.Link_FACE_CWR`。
+
+**痛点**
+
+- 原 EXIF 权重直接取图片关键字，参数计算权重来自源码表格，两者不同但界面未提供来源选择；若只改当前卡片，图片列表仍会按旧来源计算。
+
+**闭坑**
+
+- 后续调整 FDSZ_RA 时检查当前卡片、`loadFaceLinkTargetCalculator`、列表的批量与可见行计算；仅 EXIF 权重应受来源选择影响，参数插值仍使用源码表格结果。旧 `state.toml` 缺少新字段时默认使用图片关键字。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 通过；`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 通过（15 项通过、1 项忽略），覆盖状态默认值与回读，以及 `Cal_FLT` 公式来源。
+- `npm run rust:test` 未通过：集成测试编译遇到 Windows 页文件不足（os error 1455），随后运行中的 `luxe-tauri.exe` 被占用，无法替换（os error 5）；未结束用户程序。
+- 16 份语言 JSON 均能解析，新增文案键均存在；未在 Tauri 窗口目视验证按钮与图片列表交互。

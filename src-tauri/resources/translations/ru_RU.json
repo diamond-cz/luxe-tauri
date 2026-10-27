@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Источник расчёта EXIF",
+  "face_fdsz_keyword": "Тег изображения",
+  "face_fdsz_parameter": "Интерполяция параметров",
+  "face_fdsz_switch_hint": "Нажмите, чтобы переключить источник FDSZ_RA для расчётов EXIF",
   "home_current_version": "Текущая версия v{{version}}",
   "update_available_version": "Доступна версия v{{version}}",
   "update_install_now": "Обновить сейчас",

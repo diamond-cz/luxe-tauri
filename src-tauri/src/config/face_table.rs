@@ -61,3 +61,15 @@ fn value_to_string(value: &Value) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::FaceTableSchema;
+
+    #[test]
+    fn cal_flt_uses_link_face_cwr() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/face_table.toml");
+        let schema = FaceTableSchema::load(&path).unwrap();
+        assert_eq!(schema.top_kv.get("Cal_FLT").map(String::as_str), Some("= FLT.Link_FACE_CWR"));
+    }
+}

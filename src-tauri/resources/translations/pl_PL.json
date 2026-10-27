@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Źródło obliczeń EXIF",
+  "face_fdsz_keyword": "Znacznik obrazu",
+  "face_fdsz_parameter": "Interpolacja parametrów",
+  "face_fdsz_switch_hint": "Kliknij, aby zmienić źródło FDSZ_RA używane w obliczeniach EXIF",
   "home_current_version": "Bieżąca wersja v{{version}}",
   "update_available_version": "Dostępna wersja v{{version}}",
   "update_install_now": "Aktualizuj teraz",

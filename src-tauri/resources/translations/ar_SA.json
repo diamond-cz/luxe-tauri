@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "مصدر حساب EXIF",
+  "face_fdsz_keyword": "وسم الصورة",
+  "face_fdsz_parameter": "استيفاء المعلمات",
+  "face_fdsz_switch_hint": "انقر لتبديل مصدر FDSZ_RA المستخدم في حسابات EXIF",
   "home_current_version": "الإصدار الحالي v{{version}}",
   "update_available_version": "الإصدار v{{version}} متاح",
   "update_install_now": "التحديث الآن",

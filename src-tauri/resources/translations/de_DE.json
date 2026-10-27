@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "EXIF-Berechnungsquelle",
+  "face_fdsz_keyword": "Bild-Tag",
+  "face_fdsz_parameter": "Parameterinterpolation",
+  "face_fdsz_switch_hint": "Klicken, um die FDSZ_RA-Quelle für EXIF-Berechnungen zu wechseln",
   "home_current_version": "Aktuelle Version v{{version}}",
   "update_available_version": "Version v{{version}} ist verfügbar",
   "update_install_now": "Jetzt aktualisieren",

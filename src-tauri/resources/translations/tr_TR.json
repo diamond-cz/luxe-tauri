@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "EXIF hesaplama kaynağı",
+  "face_fdsz_keyword": "Görüntü etiketi",
+  "face_fdsz_parameter": "Parametre enterpolasyonu",
+  "face_fdsz_switch_hint": "EXIF hesaplamalarında kullanılan FDSZ_RA kaynağını değiştirmek için tıklayın",
   "home_current_version": "Geçerli sürüm v{{version}}",
   "update_available_version": "v{{version}} sürümü kullanılabilir",
   "update_install_now": "Şimdi güncelle",

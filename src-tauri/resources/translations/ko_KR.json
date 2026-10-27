@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "EXIF 계산 소스",
+  "face_fdsz_keyword": "이미지 태그",
+  "face_fdsz_parameter": "매개변수 보간",
+  "face_fdsz_switch_hint": "클릭하여 EXIF 계산에 사용할 FDSZ_RA 소스 전환",
   "home_current_version": "현재 버전 v{{version}}",
   "update_available_version": "새 버전 v{{version}} 사용 가능",
   "update_install_now": "지금 업데이트",

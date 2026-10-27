@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Source du calcul EXIF",
+  "face_fdsz_keyword": "Balise image",
+  "face_fdsz_parameter": "Interpolation des paramètres",
+  "face_fdsz_switch_hint": "Cliquer pour changer la source FDSZ_RA utilisée dans les calculs EXIF",
   "home_current_version": "Version actuelle v{{version}}",
   "update_available_version": "Version v{{version}} disponible",
   "update_install_now": "Mettre à jour",

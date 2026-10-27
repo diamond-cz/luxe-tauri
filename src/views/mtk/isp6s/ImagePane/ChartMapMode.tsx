@@ -9,6 +9,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, LayoutColumnThree24Regular, LayoutRowThree24Regular, LayoutRowTwoSplitTop24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
+import { useTranslation } from "react-i18next";
+import { Button } from "@fluentui/react-components";
 
 import {
   cppGetFieldsAtPath,
@@ -2297,6 +2299,10 @@ export function ChartMapMode({
               faceProbExifValue={faceExifProbValue}
               fdszValue={faceFltFdszValue}
               fdszRaValue={faceFltFdszRaValue}
+              useParameterFdszRaForExif={visual.chart_face_flt_exif_use_parameter_fdsz_ra}
+              onToggleFdszRaExifSource={() => patchVis({
+                chart_face_flt_exif_use_parameter_fdsz_ra: !visual.chart_face_flt_exif_use_parameter_fdsz_ra,
+              })}
               nsProbValue={nsProbValue}
               normalTargetValue={faceNormalTargetValue}
               normalTargetSource={normalTargetFormulaSource}
@@ -2894,7 +2900,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
         loadNsBTSource(filePath).catch(() => null),
       ])
     : [null, null, null, null, null, null, null, null, null, null, null, null];
-  return (tomlData: Record<string, string>, bvKey: string) => {
+  return (tomlData: Record<string, string>, bvKey: string, useParameterFdszRaForExif = false) => {
     const value = (key: string) => parseFiniteNumber(readTomlValue(tomlData, key));
     const firstValue = (keys: string[]) => parseFiniteNumber(readFirstTomlValue(tomlData, keys));
     const cwv = parseFiniteNumber(readFirstTomlValue(tomlData, FACE_CWV_KEYS));
@@ -2973,6 +2979,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       fddr: value(FACE_FBT_FDDR_KEY),
       fdsz: NaN,
       exifFdszRa: NaN,
+      useParameterFdszRaForExif: false,
       exifThreshold: value(FACE_FBT_TARGET_KEY),
       fltMode: false,
     });
@@ -2985,6 +2992,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       fddr: value(FACE_FLT_FDDR_KEY),
       fdsz: value(FACE_FLT_FDSZ_KEY),
       exifFdszRa: value(FACE_FLT_FDSZ_RA_KEY),
+      useParameterFdszRaForExif,
       exifThreshold: value(FACE_FLT_TARGET_KEY),
       fltMode: true,
     });
@@ -6271,6 +6279,7 @@ interface FaceTargetInputs {
   fddr: number;
   fdsz: number;
   exifFdszRa: number;
+  useParameterFdszRaForExif: boolean;
   exifThreshold: number;
   fltMode: boolean;
 }
@@ -6281,7 +6290,9 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const faceWeight = fltMode
     ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz).result
     : input.faceProb;
-  const exifWeight = fltMode ? input.exifFdszRa : input.faceProb;
+  const exifWeight = fltMode
+    ? input.useParameterFdszRaForExif ? faceWeight : input.exifFdszRa
+    : input.faceProb;
   const oethInterpolated = source ? interpolateFaceBvDrTableSource(source.oeth, bv, dr) : NaN;
   const nsOethInterpolated = source ? interpolateFaceBvDrTableSource(source.nsOeth, bv, dr) : NaN;
   const fdMinThInterpolated = source ? interpolateFaceBvDrTableSource(source.fdMinTh, bv, dr) : NaN;
@@ -6394,6 +6405,8 @@ function FaceTabContent({
   faceProbExifValue,
   fdszValue,
   fdszRaValue,
+  useParameterFdszRaForExif,
+  onToggleFdszRaExifSource,
   nsProbValue,
   normalTargetValue,
   normalTargetSource,
@@ -6432,6 +6445,8 @@ function FaceTabContent({
   faceProbExifValue: string | null;
   fdszValue: string | null;
   fdszRaValue: string | null;
+  useParameterFdszRaForExif: boolean;
+  onToggleFdszRaExifSource: () => void;
   nsProbValue: string | null;
   normalTargetValue: string | null;
   normalTargetSource: NormalTargetFormulaSource;
@@ -6507,6 +6522,7 @@ function FaceTabContent({
     fddr: parseFiniteNumber(fddrValue),
     fdsz: parseFiniteNumber(fdszValue),
     exifFdszRa: parseFiniteNumber(fdszRaValue),
+    useParameterFdszRaForExif,
     exifThreshold, fltMode,
   });
   const exifFaceTarget = exifTarget;
@@ -6719,6 +6735,8 @@ function FaceTabContent({
                 source={currentSource?.fdszRa ?? null}
                 fdszValue={fdszValue}
                 fdszRaValue={fdszRaValue}
+                useParameterFdszRaForExif={useParameterFdszRaForExif}
+                onToggleExifSource={onToggleFdszRaExifSource}
                 editable={canEdit}
                 heatmapPoints={fdszHeatmapPoints}
                 onSelectHeatmapImages={onSelectHeatmapImages}
@@ -7109,7 +7127,7 @@ function FaceProbTableCard({
 }
 
 function FaceFdszTableCard({
-  source, fdszValue, fdszRaValue, editable,
+  source, fdszValue, fdszRaValue, useParameterFdszRaForExif, onToggleExifSource, editable,
   heatmapPoints, onSelectHeatmapImages, heatmapLoading, heatmapFailed, onHeatmapRequest,
   onCellPreview, onCellCommit, onSourceJump,
   sourceInitialText, sourceDraftText, sourceSavedText, onSaveSourceDraft,
@@ -7117,6 +7135,8 @@ function FaceFdszTableCard({
   source: FaceProbSource | null;
   fdszValue: string | null;
   fdszRaValue: string | null;
+  useParameterFdszRaForExif: boolean;
+  onToggleExifSource: () => void;
   editable: boolean;
   heatmapPoints: FaceAxisHeatmapPoint[];
   onSelectHeatmapImages?: (paths: string[]) => void;
@@ -7131,6 +7151,7 @@ function FaceFdszTableCard({
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [tableExpanded, setTableExpanded] = useState(true);
   const tableId = "face-flt-fdsz-ra-table";
   const rows = source?.rows ?? FACE_FLT_FDSZ_TABLE_ROWS.map(({ label, path }) => ({
@@ -7159,9 +7180,19 @@ function FaceFdszTableCard({
           <span title={`${FACE_FLT_FDSZ_KEY}: ${fdszValue ?? "-"}`} style={{ ...faceMetricSourceStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {FACE_FLT_FDSZ_KEY}: {fdszValue ?? "-"}
           </span>
-          <span title={`${FACE_FLT_FDSZ_RA_KEY}: ${fdszRaValue ?? "-"}`} style={{ ...faceMetricSourceStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {FACE_FLT_FDSZ_RA_KEY}: {fdszRaValue ?? "-"}
-          </span>
+          <Button type="button" size="small" appearance={useParameterFdszRaForExif ? "secondary" : "subtle"}
+            className="min-w-0 max-w-full" aria-pressed={useParameterFdszRaForExif}
+            aria-label={`${t("face_fdsz_exif_source")}: ${t(useParameterFdszRaForExif ? "face_fdsz_parameter" : "face_fdsz_keyword")}`}
+            title={t("face_fdsz_switch_hint")}
+            onClick={onToggleExifSource}
+            style={{ ...faceMetricSourceStyle, border: "1px solid var(--colorNeutralStroke2)", borderRadius: 4,
+              color: "var(--colorNeutralForeground1)" }}>
+            <span className="min-w-0 truncate">
+              {useParameterFdszRaForExif
+                ? `${t("face_fdsz_parameter")}: ${formatComputedNumber(result)}`
+                : `${FACE_FLT_FDSZ_RA_KEY}: ${fdszRaValue ?? "-"}`}
+            </span>
+          </Button>
         </div>
         <div className="face-target-header-actions" style={faceCardHeaderActionsStyle}>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />

@@ -187,6 +187,18 @@ mod mtk_splitter_tests {
         assert_eq!(old.mtk.outer_splitter, vec![40.0, 60.0]);
         assert_eq!(old.mtk.inner_splitter, vec![16.0, 84.0]);
     }
+
+    #[test]
+    fn face_flt_exif_source_defaults_to_image_keyword_and_round_trips() {
+        let old: StateRoot = toml::from_str("[isp6s_ae_visual]\n").unwrap();
+        assert!(!old.isp6s_ae_visual.chart_face_flt_exif_use_parameter_fdsz_ra);
+
+        let mut changed = old;
+        changed.isp6s_ae_visual.chart_face_flt_exif_use_parameter_fdsz_ra = true;
+        let saved = toml::to_string(&changed).unwrap();
+        let restored: StateRoot = toml::from_str(&saved).unwrap();
+        assert!(restored.isp6s_ae_visual.chart_face_flt_exif_use_parameter_fdsz_ra);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +238,7 @@ pub struct Isp6sAeVisual {
     #[serde(default)] pub chart_face_card_collapsed:   Vec<String>,
     #[serde(default)] pub chart_face_heatmap_modes:    BTreeMap<String, FaceHeatmapMode>,
     #[serde(default)] pub chart_face_sync_modes:       BTreeMap<String, bool>,
+    #[serde(default)] pub chart_face_flt_exif_use_parameter_fdsz_ra: bool,
     #[serde(default = "default_chart_main_t_mid_chart_mode")]
     pub chart_main_t_mid_chart_mode:                   String,
     #[serde(default = "default_chart_main_t_mid_chart_source")]
@@ -291,6 +304,7 @@ impl Default for Isp6sAeVisual {
             chart_face_card_collapsed: vec![],
             chart_face_heatmap_modes: BTreeMap::new(),
             chart_face_sync_modes: BTreeMap::new(),
+            chart_face_flt_exif_use_parameter_fdsz_ra: false,
             chart_main_t_mid_chart_mode: default_chart_main_t_mid_chart_mode(),
             chart_main_t_mid_chart_source: default_chart_main_t_mid_chart_source(),
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),

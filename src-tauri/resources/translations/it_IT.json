@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Origine calcolo EXIF",
+  "face_fdsz_keyword": "Tag immagine",
+  "face_fdsz_parameter": "Interpolazione parametri",
+  "face_fdsz_switch_hint": "Fai clic per cambiare l'origine FDSZ_RA usata nei calcoli EXIF",
   "home_current_version": "Versione corrente v{{version}}",
   "update_available_version": "Versione v{{version}} disponibile",
   "update_install_now": "Aggiorna ora",

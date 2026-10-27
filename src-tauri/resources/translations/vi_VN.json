@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Nguồn tính EXIF",
+  "face_fdsz_keyword": "Thẻ ảnh",
+  "face_fdsz_parameter": "Nội suy tham số",
+  "face_fdsz_switch_hint": "Nhấp để đổi nguồn FDSZ_RA dùng cho tính toán EXIF",
   "home_current_version": "Phiên bản hiện tại v{{version}}",
   "update_available_version": "Đã có phiên bản v{{version}}",
   "update_install_now": "Cập nhật ngay",

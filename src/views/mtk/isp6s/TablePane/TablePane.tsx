@@ -239,7 +239,7 @@ const FACE_LINK_TARGET_IMAGE_KEYS = [
 ] as const;
 type FaceTargetPair = { exif: number; calculated: number };
 type FaceLinkTargetCalculator = (
-  tomlData: Record<string, string>, bvKey: string,
+  tomlData: Record<string, string>, bvKey: string, useParameterFdszRaForExif?: boolean,
 ) => { normal: FaceTargetPair; backScene: FaceTargetPair; faceLink: FaceTargetPair };
 
 function roundedFaceTarget(value: number | undefined): number | null {
@@ -1146,6 +1146,7 @@ export function ImageTab({
   const columnMode: ColumnMode = toneMode ? "tone" : "isp6s";
   const selectedKindFilter = useIsp6sVisualStore((state) => toneMode
     ? state.visual.tone_image_table_kind_filter : state.visual.image_table_kind_filter);
+  const useParameterFdszRaForExif = useIsp6sVisualStore((state) => state.visual.chart_face_flt_exif_use_parameter_fdsz_ra);
   const setKindFilter = (kind: "all" | "scene" | "portrait") => {
     const store = useIsp6sVisualStore.getState();
     store.patch(toneMode ? { tone_image_table_kind_filter: kind } : { image_table_kind_filter: kind });
@@ -1253,10 +1254,13 @@ export function ImageTab({
   const [calculatorError, setCalculatorError] = useState<{ version: number; message: string } | null>(null);
   const [parseAllError, setParseAllError] = useState<{ version: number; message: string } | null>(null);
   const requestedCalculatorPath = applyAllVersion > 0 ? calculatorSourcePath ?? null : filePath;
-  const faceLinkTargetCalculator = faceLinkTargetState && faceLinkTargetState.filePath === requestedCalculatorPath
+  const baseFaceLinkTargetCalculator = faceLinkTargetState && faceLinkTargetState.filePath === requestedCalculatorPath
     && faceLinkTargetState.version === applyAllVersion
     ? faceLinkTargetState.calculate
     : null;
+  const faceLinkTargetCalculator = useMemo(() => baseFaceLinkTargetCalculator
+    ? (data: Record<string, string>, bvKey: string) => baseFaceLinkTargetCalculator(data, bvKey, useParameterFdszRaForExif)
+    : null, [baseFaceLinkTargetCalculator, useParameterFdszRaForExif]);
   const allParsedRows = parsedTomls?.entries === entries && parsedTomls.keySignature === imageTomlKeySignature
     && parsedTomls.version === parseAllVersion
     ? parsedTomls.rows : null;

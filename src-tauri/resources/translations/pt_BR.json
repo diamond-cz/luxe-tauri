@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Fonte do cálculo EXIF",
+  "face_fdsz_keyword": "Tag da imagem",
+  "face_fdsz_parameter": "Interpolação de parâmetros",
+  "face_fdsz_switch_hint": "Clique para alternar a fonte FDSZ_RA usada nos cálculos EXIF",
   "home_current_version": "Versão atual v{{version}}",
   "update_available_version": "Versão v{{version}} disponível",
   "update_install_now": "Atualizar agora",

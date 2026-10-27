@@ -1,4 +1,8 @@
 {
+  "face_fdsz_exif_source": "Zdroj výpočtu EXIF",
+  "face_fdsz_keyword": "Značka obrázku",
+  "face_fdsz_parameter": "Interpolace parametrů",
+  "face_fdsz_switch_hint": "Kliknutím přepnete zdroj FDSZ_RA pro výpočty EXIF",
   "home_current_version": "Aktuální verze v{{version}}",
   "update_available_version": "Je dostupná verze v{{version}}",
   "update_install_now": "Aktualizovat nyní",

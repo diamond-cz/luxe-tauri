@@ -31,7 +31,7 @@ FBT_THD = "AE_TAG_FBT_TARGET"
 Normal_Target = "AE_TAG_FACE_20_NORMAL_TARGET"
 LCE_Gain = "= Face_LINK / Link_AE_CWR"
 
-Cal_FLT = "= FLT.FLTCwrTarget"
+Cal_FLT = "= FLT.Link_FACE_CWR"
 Cal_BackTar = "= FBT.BackTarget"
 Cal_FBT = "= FBT.FBTCwrTarget"
 Cal_Gain = "= FLT.Link_FACE_CWR / FBT.BackTarget"
