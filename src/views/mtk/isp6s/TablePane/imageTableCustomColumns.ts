@@ -32,6 +32,61 @@ const FUNCTIONS: Record<string, (values: number[]) => number> = {
   max: (values) => Math.max(...values),
 };
 
+type CompositePart = { key: string } | { literal: string } | CompositeSource;
+type CompositeSource = { kind: "join" | "list"; parts: CompositePart[] };
+
+function stringLiteral(token: string): string | null {
+  if (token.startsWith('"')) return JSON.parse(token) as string;
+  if (token.startsWith("“")) return token.slice(1, -1);
+  return null;
+}
+
+function parseCompositeSource(source: string): CompositeSource | null {
+  const trimmed = source.trim();
+  if (!trimmed.startsWith("=")) return null;
+  const tokens = tokenize(trimmed.slice(1));
+  let position = 0;
+  const parseFunction = (): CompositeSource => {
+    const functionName = tokens[position++]?.toLowerCase();
+    if (functionName !== "join" && functionName !== "list" || tokens[position++] !== "(")
+      throw new Error("expected join or list function");
+    const parts: CompositePart[] = [];
+    while (position < tokens.length && tokens[position] !== ")") {
+      const token = tokens[position++];
+      const literal = stringLiteral(token);
+      if (literal !== null && functionName === "join") parts.push({ literal });
+      else if (token && IDENTIFIER.test(token) && !NUMBER.test(token)) {
+        if (tokens[position] === "(") {
+          position -= 1;
+          parts.push(parseFunction());
+        } else parts.push({ key: token });
+      } else throw new Error(`${functionName} accepts TOML fields${functionName === "join" ? ", quoted text" : ""}, and nested join/list functions`);
+      if (tokens[position] === ",") {
+        position += 1;
+        if (tokens[position] === ")") throw new Error(`${functionName} does not allow a trailing comma`);
+      } else if (tokens[position] !== ")") throw new Error(`${functionName} arguments must be comma-separated`);
+    }
+    if (tokens[position++] !== ")" || !parts.some((part) => "key" in part || "parts" in part))
+      throw new Error(`${functionName} requires one or more TOML fields`);
+    return { kind: functionName, parts };
+  };
+  if (!(["join", "list"].includes(tokens[0]?.toLowerCase())) || tokens[1] !== "(") return null;
+  const result = parseFunction();
+  if (position !== tokens.length) throw new Error("unexpected content after function");
+  return result;
+}
+
+function compositeKeys(source: CompositeSource): string[] {
+  return source.parts.flatMap((part) => "key" in part ? [part.key] : "parts" in part ? compositeKeys(part) : []);
+}
+
+function compositeText(source: CompositeSource, lookup: (key: string) => string): string {
+  const values = source.parts.map((part) => "key" in part ? lookup(part.key)
+    : "parts" in part ? compositeText(part, lookup) : part.literal);
+  if (source.kind === "list") return `[${values.join(", ")}]`;
+  return source.parts.some((part) => "literal" in part) ? values.join("") : values.join(", ");
+}
+
 export const AE_GAIN_PAIR_SOURCE = "=FLinkTar_old / BackTar_old(FLinkTar_new / BackTar_new)";
 
 export function isAeGainPairSource(source: string): boolean {
@@ -57,7 +112,8 @@ function tokenize(source: string): string[] {
   while (offset < source.length) {
     if (/\s/.test(source[offset])) { offset += 1; continue; }
     const rest = source.slice(offset);
-    const token = rest.match(NUMBER)?.[0] ?? rest.match(IDENTIFIER)?.[0]
+    const token = rest.match(/^"(?:\\.|[^"\\])*"/)?.[0] ?? rest.match(/^“[^”]*”/)?.[0]
+      ?? rest.match(NUMBER)?.[0] ?? rest.match(IDENTIFIER)?.[0]
       ?? ("+-*/(),".includes(rest[0]) ? rest[0] : null);
     if (!token || tokens.length >= 64) throw new Error("invalid formula");
     tokens.push(token);
@@ -79,6 +135,10 @@ export function recognizeImageColumnSource(source: string, knownKeys: ReadonlySe
     ? { recognized: true, source: trimmed, kind: "keyword", unverifiedKeys: knownKeys.has(trimmed) ? [] : [trimmed] }
     : { recognized: false, reason: "关键字只能包含字母、数字、下划线和点，且不能以数字开头" };
   try {
+    const composite = parseCompositeSource(formula);
+    if (composite) {
+      return { recognized: true, source: formula, kind: "formula", unverifiedKeys: [...new Set(compositeKeys(composite).filter((key) => !knownKeys.has(key)))] };
+    }
     const tokens = tokenize(formula.slice(1));
     const unverified = new Set<string>();
     let position = 0;
@@ -127,6 +187,8 @@ export function imageColumnSourceKeys(source: string): string[] {
   if (isAeGainPairSource(trimmed)) return ["FLinkTar_old", "BackTar_old", "FLinkTar_new", "BackTar_new"];
   if (!trimmed.startsWith("=")) return [trimmed];
   try {
+    const composite = parseCompositeSource(trimmed);
+    if (composite) return [...new Set(compositeKeys(composite))];
     const tokens = tokenize(trimmed.slice(1));
     return [...new Set(tokens.filter((token, index) => IDENTIFIER.test(token)
       && !NUMBER.test(token) && tokens[index + 1] !== "("))];
@@ -140,6 +202,8 @@ export function customImageColumnText(source: string, lookup: (key: string) => s
   if (!trimmed) return "-";
   if (!trimmed.startsWith("=")) return lookup(trimmed);
   try {
+    const composite = parseCompositeSource(trimmed);
+    if (composite) return compositeText(composite, lookup);
     const tokens = tokenize(trimmed.slice(1));
     let position = 0;
     const take = (value: string) => {

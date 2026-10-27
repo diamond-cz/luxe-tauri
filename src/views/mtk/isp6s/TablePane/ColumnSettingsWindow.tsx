@@ -28,7 +28,7 @@ const thresholdDraftsFrom = (settings: ImageTableModeColumns): ThresholdDrafts =
     .map((key) => [key, String(settings.color_thresholds[key])]),
 ) as ThresholdDrafts;
 const validThreshold = (value: string): boolean => /^\d+(?:\.\d+)?$/.test(value.trim()) && Number.isFinite(Number(value));
-const HELP_TECHNICAL_PATTERN = /(=FLinkTar_old \/ BackTar_old\(FLinkTar_new \/ BackTar_new\)|=log2\(CWR_new \/ CWR_old\)|=CWR_new - CWR_old|AE_TAG_REALBVX1000|Normal_old|Normal_new|BackTar_old|BackTar_new|FLinkTar_old|FLinkTar_new|CWR_old|CWR_new|Normal\|BackTar\|FLinkTar|AEGain\(new\)|AE Basic|TOML|[∆Δ]CWR|ΔEV|\b(?:abs|log2|min|max)\b|\b\d+(?:\.\d+)?\b)/g;
+const HELP_TECHNICAL_PATTERN = /(=FLinkTar_old \/ BackTar_old\(FLinkTar_new \/ BackTar_new\)|=log2\(CWR_new \/ CWR_old\)|=CWR_new - CWR_old|=list\(join\([^)]*\)[^)]*\)|=join\([^)]*\)|=list\([^)]*\)|AE_TAG_REALBVX1000|AE_TAG_PURE_AE_CWR_STABLE|AE_TAG_LINK_FACE_CWR_STABLE|Normal_old|Normal_new|BackTar_old|BackTar_new|FLinkTar_old|FLinkTar_new|CWR_old|CWR_new|Normal\|BackTar\|FLinkTar|AEGain\(new\)|AE Basic|TOML|[∆Δ]CWR|ΔEV|\b(?:abs|log2|min|max|join|list)\b|\b\d+(?:\.\d+)?\b)/g;
 
 function helpRuleText(value: string) {
   return value.split(HELP_TECHNICAL_PATTERN).map((part, index) =>
@@ -214,6 +214,10 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
     }
   }, [pending?.id, scope]);
 
+  useLayoutEffect(() => {
+    if (helpOpen && listRef.current) listRef.current.scrollTo({ top: 0, behavior: "auto" });
+  }, [helpOpen]);
+
   const saveEdit = (row: ColumnRow) => {
     const label = draft.label.trim();
     const source = draft.source.trim();
@@ -371,8 +375,8 @@ export function ColumnSettingsWindow({ initialSchema }: { initialSchema?: Column
           {helpOpen && <div className="column-settings-help m-2 rounded-md border px-4 py-3 text-xs" role="region" aria-label={t("column_source_help_button")}>
             <strong className="block text-sm" style={{ color: "var(--colorNeutralForeground1)" }}>{t("column_source_help_title")}</strong>
             <ol className="column-settings-help-list">
-              {(["column_source_help_syntax", "column_source_help_validation",
-                ...(!tone ? ["column_source_help_delta", "column_source_help_aliases", "column_source_help_ev",
+              {(["column_source_help_syntax", "column_source_help_validation", "column_source_help_multiple",
+                ...(!tone ? ["column_source_help_delta", "column_source_help_aliases",
                   "column_source_help_ae_gain", "column_source_help_colors"] : []),
                 "column_source_help_save"] as const).map((key) =>
                 <li key={key}>

@@ -956,3 +956,78 @@
 **验证**
 
 - `npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；尚未在 Tauri 窗口目视核对布局。
+
+### 2026-10-27：列设置规则定位与多字段来源
+
+**亮点**
+
+- `ColumnSettingsWindow.tsx` 打开规则详情时将列表滚动容器定位到顶部；规则区补充多个 TOML 字段的显示与计算示例。
+- `imageTableCustomColumns.ts` 增加 `=join(字段1, 字段2)` 与 `=list(字段1, 字段2)`：前者用逗号连接，后者额外包裹方括号。字段重复出现时按填写顺序重复显示；16 份语言资源均提供规则说明。
+
+**痛点**
+
+- 规则详情渲染在可滚动列表顶部，滚动到底部再展开时保持原滚动位置，导致详情不在可视区；原有解析器仅处理单字段或数值表达式，无法按原样组合多个字段值。
+
+**闭坑**
+
+- 调整列设置帮助时检查实际滚动容器 `listRef`，并核对新增语法在保存识别、字段预取、表格显示三个入口一致；`join`/`list` 只接受 TOML 字段名，数值计算继续使用原有四则运算公式。
+
+**验证**
+
+- `node --test src/views/mtk/isp6s/TablePane/imageTableCustomColumns.test.mjs`、`npm run typecheck`、`npm run build`、`git diff --check` 通过；16 份语言 JSON 均可解析且包含新键。
+- 未在 Tauri 窗口手动核对滚动与规则展示。
+
+### 2026-10-27：列设置 join 自定义分隔符
+
+**亮点**
+
+- `imageTableCustomColumns.ts` 的 `join` 可把带引号的文字当作分隔内容，例如 `=join(A, "-", B)` 显示 `值A-值B`，`=join(A, "|", B)` 显示 `值A|值B`；无文字参数的旧规则继续用逗号加空格连接。字段预取只提取 TOML 字段名，不把分隔文字当字段。
+
+**痛点**
+
+- 原解析器只识别标识符、数字和算术符号，带引号的分隔符在保存校验阶段就会被拒绝；只改显示逻辑无法使规则生效。
+
+**闭坑**
+
+- 新增列公式语法时同步检查保存识别、字段预取和表格显示；`list` 仍只接受 TOML 字段，`join` 使用引号文字时按原样连接，无引号文字时沿用默认逗号分隔。
+
+**验证**
+
+- `node --test src/views/mtk/isp6s/TablePane/imageTableCustomColumns.test.mjs` 7 项通过，`npm run typecheck` 通过；16 份语言 JSON 可解析且包含更新的规则说明。未在 Tauri 窗口目视核对。
+
+### 2026-10-27：列设置支持嵌套拼接
+
+**亮点**
+
+- `imageTableCustomColumns.ts` 使用同一递归解析结果完成保存校验、字段提取和显示，支持 `=list(join(Normal_old,"|",Normal_new),BackTar_new,FLinkTar_new)`；字段别名继续由 `TablePane.tsx` 的 `imageTableFormulaAlias` 解析。
+
+**痛点**
+
+- 先前 `join`/`list` 只接受直接字段或文字参数，外层 `list` 遇到内层 `join(...)` 即拒绝保存；即使单独放行校验，字段预取与显示也会遗漏嵌套字段。
+
+**闭坑**
+
+- 调整复合规则时同步验证嵌套的保存识别、字段预取、未知字段提示和显示结果；`list` 仍不接受直接文字参数，算术表达式仍走原有数值公式解析。
+
+**验证**
+
+- `node --test src/views/mtk/isp6s/TablePane/imageTableCustomColumns.test.mjs` 8 项、`npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；16 份语言 JSON 可解析且包含嵌套示例。
+- 尚未在 Tauri 窗口目视验证。
+
+### 2026-10-27：列设置帮助文案精简
+
+**亮点**
+
+- `ColumnSettingsWindow.tsx` 将 `ΔCWR` 与 `ΔEV` 的说明合为第 4 条，帮助区从 9 条缩为 8 条；16 份语言资源同步缩短字段、拼接、别名和保存说明。
+
+**痛点**
+
+- 新增 `join/list` 示例后，第 3 条过长；`ΔCWR` 和 `ΔEV` 分占两条，重复解释同一组 `Normal|BackTar|FLinkTar` 顺序。
+
+**闭坑**
+
+- 精简规则时保留默认逗号、自定义分隔符、嵌套写法、旧新值别名及差值精度等行为要点；删除展示项时同时清理 16 份资源中的旧键。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 通过；16 份语言 JSON 均可解析，合并规则包含 `log2`，旧 `column_source_help_ev` 键无剩余引用。未在 Tauri 窗口目视核对帮助区排版。
