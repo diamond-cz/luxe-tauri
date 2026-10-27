@@ -1123,3 +1123,21 @@
 - `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。Rust 测试命令因当前构建产物缺少 `luxe_tauri_lib` 及若干依赖的 rlib 格式而失败；尚未在 Tauri 窗口实际拖拽并切页验收。
 
 - 补充验证：`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib config::state_schema::image_table_column_tests` 与 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib config::state_file::image_table_mode_tests` 均通过；此前未限定 `--lib` 的测试命令触发了本地集成测试链接错误。
+
+### 2026-10-27：整理并准备发布 v0.2.12
+
+**亮点**
+
+- 从 v0.2.10 到发布候选提交整理功能记录，排除仅记录上次发布验证的提交；更新 `src/data/changelog.json`，汇总 i4LCEfaceTbL0、表格规则拼接、图片选择与列宽、Face_FLT 数据源、详情页解析及更新检查改动。
+
+**痛点**
+
+- 工作区在版本发布前干净，应用版本此前仍为 0.2.10；本机完整 Rust 测试受 Windows 页面文件不足及目标可执行文件占用影响，未能完成。
+
+**闭坑**
+
+- 正式推送版本标签前确认 `tauri.conf.json`、npm/Cargo 清单与锁文件同步，更新记录中包含唯一且完整的版本项；标签推送会触发 Windows 发布工作流，由 runner 执行完整 Rust 测试、签名构建和 GitHub Release 发布。
+
+**验证**
+
+- `npm run version:check`、`npm run release:test`（27 项）、`npm run build`、`git diff --check` 通过。`cargo test --locked --manifest-path src-tauri/Cargo.toml` 在本机失败：并行构建遇到页面文件不足（OS error 1455），单线程重试遇到 `luxe-tauri.exe` 占用（OS error 5）。
