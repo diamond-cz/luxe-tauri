@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
   loadState,
@@ -23,6 +24,7 @@ import { useMtkStore } from "@/stores/mtkStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { runUpdateCheck } from "@/services/runUpdateCheck";
+import { useUpdateStore } from "@/stores/updateStore";
 import { trimMemory } from "@/ipc/memory";
 import { bootstrapI18n } from "@/locales/i18n";
 import { localeAt } from "@/locales";
@@ -71,6 +73,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       setMainWindow(root.main_window);
       setSettings(root.settings);
       setShortcuts(root.shortcuts);
+      void getVersion().then((version) => {
+        if (!disposed) useUpdateStore.getState().setCurrentVersion(version);
+      }).catch((error) => console.warn("read app version failed", error));
       useMtkStore.getState().hydrate(root.mtk);
       // The backend already debounces disk writes. Submit path changes now,
       // even when the user leaves MTK or exits before a UI timer could fire.
@@ -195,7 +200,7 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       if (root.settings.auto_update) {
         runUpdateCheck("startup")
           .then((result) => {
-            if (result?.status === "available" && root.settings.update_notify) {
+            if ((result?.status === "available" || result?.status === "manual") && root.settings.update_notify) {
               try {
                 sendNotification({
                   title: "LUXE 有新版本",

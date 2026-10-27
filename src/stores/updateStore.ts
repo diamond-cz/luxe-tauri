@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { CURRENT_VERSION, GITHUB_RELEASES_URL, type UpdateCheckResult } from "@/services/updateCheck";
 
-export type UpdateStatus = "idle" | "checking" | "ok" | "available" | "downloading" | "installing" | "error";
+export type UpdateStatus = "idle" | "checking" | "ok" | "available" | "manual" | "downloading" | "installing" | "error";
 export type UpdateCheckSource = "manual" | "startup";
 
 interface UpdateState {
@@ -17,6 +17,7 @@ interface UpdateState {
   update: Update | null;
   downloadedBytes: number;
   totalBytes: number | null;
+  setCurrentVersion: (version: string) => void;
   setChecking: (source: UpdateCheckSource) => void;
   setResult: (result: UpdateCheckResult, source: UpdateCheckSource) => void;
   setDownloadStart: () => void;
@@ -37,6 +38,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   update: null,
   downloadedBytes: 0,
   totalBytes: null,
+  setCurrentVersion: (currentVersion) => set({ currentVersion }),
   setChecking: (source) => set({
     status: "checking",
     message: source === "startup" ? "正在自动检查更新..." : "正在检查更新...",
@@ -47,7 +49,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   }),
   setResult: (result, source) => set({
     status: result.status,
-    message: result.status === "available"
+    message: result.status === "available" || result.status === "manual"
       ? `发现新版本 v${result.latestVersion}，当前版本 v${result.currentVersion}`
       : `当前已是最新版本 v${result.currentVersion}`,
     currentVersion: result.currentVersion,

@@ -9,6 +9,8 @@
   "update_downloading": "جارٍ التنزيل",
   "update_installing": "جارٍ التثبيت",
   "update_retry": "التحقق مرة أخرى",
+  "update_open_release": "افتح صفحة الإصدار",
+  "update_manual_release": "يتوفر الإصدار v{{version}}، لكن التحديث التلقائي غير متاح. افتح صفحة الإصدار للتنزيل.",
   "update_download_progress": "تقدم تنزيل التحديث",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

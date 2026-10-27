@@ -9,6 +9,8 @@
   "update_downloading": "Téléchargement",
   "update_installing": "Installation",
   "update_retry": "Vérifier à nouveau",
+  "update_open_release": "Ouvrir la page de version",
+  "update_manual_release": "La version v{{version}} est disponible, mais la mise à jour automatique est indisponible. Téléchargez-la depuis la page de version.",
   "update_download_progress": "Progression du téléchargement",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

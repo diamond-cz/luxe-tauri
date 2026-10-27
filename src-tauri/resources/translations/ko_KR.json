@@ -9,6 +9,8 @@
   "update_downloading": "다운로드 중",
   "update_installing": "설치 중",
   "update_retry": "다시 확인",
+  "update_open_release": "릴리스 페이지 열기",
+  "update_manual_release": "v{{version}} 버전이 있지만 자동 업데이트를 사용할 수 없습니다. 릴리스 페이지에서 다운로드하세요.",
   "update_download_progress": "업데이트 다운로드 진행률",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

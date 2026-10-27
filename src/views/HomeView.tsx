@@ -13,6 +13,7 @@ import {
   ArrowSync24Regular,
   ArrowDownload24Regular,
   DocumentText24Regular,
+  Open24Regular,
   Sparkle24Regular,
 } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
@@ -24,7 +25,6 @@ import { UpdateLogDialog } from "@/components/common/UpdateLogDialog";
 import { FluentIcon, type LuxeIconName } from "@/components/icons/FluentIcon";
 import { openUrl } from "@/ipc/shell";
 import {
-  CURRENT_VERSION,
   GITHUB_RELEASES_URL,
   GITHUB_REPOSITORY_URL,
 } from "@/services/updateCheck";
@@ -70,7 +70,9 @@ export function HomeView() {
   const { t } = useTranslation();
   const poetry = usePoetryStore((s) => s.line);
   const updateStatus = useUpdateStore((s) => s.status);
+  const currentVersion = useUpdateStore((s) => s.currentVersion);
   const latestVersion = useUpdateStore((s) => s.latestVersion);
+  const releaseUrl = useUpdateStore((s) => s.releaseUrl);
   const downloadBytes = useUpdateStore((s) => s.downloadedBytes);
   const downloadTotal = useUpdateStore((s) => s.totalBytes);
   const setUpdateError = useUpdateStore((s) => s.setError);
@@ -89,6 +91,8 @@ export function HomeView() {
       ? "下载中"
       : updateStatus === "installing"
         ? "安装中"
+      : updateStatus === "manual"
+        ? t("update_open_release")
         : updateStatus === "available"
           ? "下载并安装"
       : "检查更新";
@@ -211,12 +215,12 @@ export function HomeView() {
                 </div>
                 <div className="mt-1 flex items-center gap-1 text-sm" style={{ color: "var(--colorNeutralForeground3)" }}>
                   <span>版本</span>
-                  <Tooltip content={t("home_current_version", { version: CURRENT_VERSION })} relationship="description" positioning="above">
+                  <Tooltip content={t("home_current_version", { version: currentVersion })} relationship="description" positioning="above">
                     <span
                       tabIndex={0}
                       className="inline-flex min-h-6 items-center rounded px-1.5 font-mono font-semibold tabular-nums text-[var(--colorNeutralForeground2)] transition-all duration-150 hover:-translate-y-px hover:bg-[var(--colorBrandBackground2)] hover:text-[var(--colorBrandForeground1)] focus-visible:bg-[var(--colorBrandBackground2)] focus-visible:text-[var(--colorBrandForeground1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--colorBrandForeground1)] motion-reduce:transform-none motion-reduce:transition-none"
                     >
-                      v{CURRENT_VERSION}
+                      v{currentVersion}
                     </span>
                   </Tooltip>
                 </div>
@@ -225,11 +229,14 @@ export function HomeView() {
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 <Button
                   appearance="primary"
-                  icon={updateStatus === "available"
+                  icon={updateStatus === "manual"
+                    ? <Open24Regular />
+                    : updateStatus === "available"
                     ? <ArrowDownload24Regular />
                     : <ArrowSync24Regular className={updateStatus === "checking" ? "animate-spin motion-reduce:animate-none" : undefined} />}
                   disabled={updateBusy}
-                  onClick={updateStatus === "available" ? () => void installAvailableUpdate() : checkUpdate}
+                  onClick={updateStatus === "available" ? () => void installAvailableUpdate()
+                    : updateStatus === "manual" ? () => openReleaseUrl(releaseUrl) : checkUpdate}
                 >
                   {primaryUpdateLabel}
                 </Button>
@@ -243,8 +250,8 @@ export function HomeView() {
                 color: updateStatus === "error" ? "var(--colorPaletteRedForeground1)" : updateStatus === "ok" ? "var(--colorPaletteGreenForeground1)" : "var(--colorNeutralForeground2)",
               }}
             >
-              {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" ? <span aria-hidden>✦</span> : null}
-              {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "ok" ? `当前已是最新版本 v${CURRENT_VERSION}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
+              {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" || updateStatus === "manual" ? <span aria-hidden>✦</span> : null}
+              {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "manual" ? t("update_manual_release", { version: latestVersion }) : updateStatus === "ok" ? `当前已是最新版本 v${currentVersion}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
             </div>
 
             <div

@@ -11,11 +11,8 @@ import {
   Sparkle24Regular,
 } from "@fluentui/react-icons";
 
-import {
-  CURRENT_VERSION,
-  GITHUB_RELEASES_URL,
-  GITHUB_REPOSITORY_URL,
-} from "@/services/updateCheck";
+import { GITHUB_RELEASES_URL, GITHUB_REPOSITORY_URL } from "@/services/updateCheck";
+import { useUpdateStore } from "@/stores/updateStore";
 
 interface Props {
   open: boolean;
@@ -28,6 +25,7 @@ function releaseUrlFor(version: string) {
 }
 
 export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
+  const currentVersion = useUpdateStore((state) => state.currentVersion);
   return (
     <Dialog
       open={open}
@@ -72,7 +70,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
                 className="mt-1 truncate text-xs"
                 style={{ color: "var(--colorNeutralForeground3)" }}
               >
-                当前版本 v{CURRENT_VERSION} · 已收录 {UPDATE_LOGS.length} 个版本
+                当前版本 v{currentVersion} · 已收录 {UPDATE_LOGS.length} 个版本
               </div>
               </div>
             </div>
@@ -91,7 +89,7 @@ export function UpdateLogDialog({ open, onClose, onOpenRelease }: Props) {
           >
             <div>
               {UPDATE_LOGS.map((entry) => {
-                const isCurrent = entry.version === CURRENT_VERSION;
+                const isCurrent = entry.version === currentVersion;
 
                 return (
                   <article

@@ -1049,3 +1049,57 @@
 **验证**
 
 - `npm run typecheck`、`npm run build`、`git diff --check` 通过。未在 Tauri 窗口用真实 DP 解析工具及图片目录复现并目视核对全部详情标签。
+
+### 2026-10-27：热力图命中边框与图片列表列分隔线
+
+**亮点**
+
+- `ChartMapMode.tsx` 与 `ToneChartMapMode.tsx` 的笛卡尔热力图命中项统一使用 1px 主题色内描边；`TablePane.tsx` 在图片列表选中行使用 1px 主题混合色列分隔线，保持原有选中行外框。
+
+**痛点**
+
+- Face BV/DR、HS Area 与 Tone LCE 的热力图命中边框原为 2px；FaceProb、FDSZ_RA、FDDR_RA、base_exp_tbl 开启热力图时只有命中配色。图片列表选中行仍用中性色列线，选中背景降低了竖线对比度。
+
+**闭坑**
+
+- 新增笛卡尔热力图表格时同时检查参数值和命中数两种显示状态；命中描边只在热力图开启时出现，并使用主题色令牌。图片列表列分隔线只增强当前选中行，不能改变普通行和选中外框。
+
+**验证**
+
+- `npm run typecheck` 和 `git diff --check` 通过。未在 Tauri 窗口目视核对不同主题下的线条对比度。
+
+### 2026-10-27：图片列表悬浮预览适配图片比例
+
+**亮点**
+
+- `TablePane.tsx` 的悬浮预览使用全局深浅主题背景令牌，预览框随图片原始比例收紧，并限制最大宽高与屏幕边界。
+
+**痛点**
+
+- 预览通过 Portal 挂在 `document.body`，`App.tsx` 禁用了 Fluent 令牌向 Portal 透传；原背景 `--colorNeutralBackground1` 在预览节点处未定义，导致列表内容从空白区域透出。固定 208px 正方形也给竖幅图片留下多余空间。
+
+**闭坑**
+
+- 后续在 `document.body` 下创建 Portal 时，先检查主题变量是否能在该节点解析；图片预览同时限制宽高，并让容器跟随图片比例，避免固定正方形。
+
+**验证**
+
+- `npm run typecheck` 通过；未在 Tauri 窗口目视核对横幅、竖幅图片及深浅主题。
+
+### 2026-10-27：关于页版本与更新结果核对
+
+**亮点**
+
+- `useShellBootstrap.ts` 和 `updateCheck.ts` 从 Tauri 运行时读取当前安装版本；首页、设置页与近期更新共用该值。updater 返回无更新时，`updateCheck.ts` 再读取带时间参数的 `latest.json` 核对远端版本；若远端更高，首页与标题栏提供对应 Release 页入口。
+
+**痛点**
+
+- 原页面只使用编译进前端的版本号。截图中的 v0.2.8 说明当前窗口加载的是旧前端资源；更新插件返回 `null` 时，界面未核对远端清单就把这个值写成“最新版本”。公开 v0.2.10 Release 及代理清单已核实为 v0.2.10，但截图时 updater 为何返回 `null` 仍需在该旧窗口查看运行时日志才能确认。
+
+**闭坑**
+
+- 当前安装版本以 Tauri `getVersion()` 为准；`check()` 返回 `null` 不能单独证明远端没有新版本。自动安装仍须通过 Tauri updater 及签名验证，清单版本高于运行时版本但无安装对象时只提供官方 Release 链接。
+
+**验证**
+
+- GitHub API 最新 Release 为 v0.2.10，代理 `latest.json` 的版本也为 0.2.10；`npm run typecheck` 通过。尚未在用户截图对应的旧程序窗口复现 updater 返回值，也未实际安装升级。

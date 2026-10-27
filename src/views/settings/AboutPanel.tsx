@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import logo from "@/assets/luxe-logo.png";
 import { SectionTitle } from "@/components/settings/SectionTitle";
 import { SettingRow } from "@/components/settings/SettingRow";
-import { APP_VERSION } from "@/services/appVersion";
+import { useUpdateStore } from "@/stores/updateStore";
 import { openUrl } from "@/ipc/shell";
 import { UpdateLogDialog } from "@/components/common/UpdateLogDialog";
 
@@ -17,6 +17,7 @@ function openExternal(url: string) {
 
 export function AboutPanel() {
   const { t } = useTranslation();
+  const currentVersion = useUpdateStore((state) => state.currentVersion);
   const [updateLogOpen, setUpdateLogOpen] = useState(false);
 
   return (
@@ -25,7 +26,7 @@ export function AboutPanel() {
       <img src={logo} alt="LUXE" className="h-24 w-24 rounded-md" />
       <div className="text-2xl font-bold tracking-wide">LUXE</div>
       <div className="text-sm" style={{ color: "var(--colorNeutralForeground3)" }}>
-        v{APP_VERSION}
+        v{currentVersion}
         <span className="mx-2 text-pink-400">❤</span>
         {t("app_desc", { defaultValue: "影像效果跨平台AE算法可视化" })}
       </div>

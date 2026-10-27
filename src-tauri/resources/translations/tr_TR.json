@@ -9,6 +9,8 @@
   "update_downloading": "İndiriliyor",
   "update_installing": "Yükleniyor",
   "update_retry": "Yeniden denetle",
+  "update_open_release": "Sürüm sayfasını aç",
+  "update_manual_release": "v{{version}} sürümü mevcut, ancak otomatik güncelleme kullanılamıyor. Sürüm sayfasından indirin.",
   "update_download_progress": "Güncelleme indirme ilerlemesi",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

@@ -9,6 +9,8 @@
   "update_downloading": "Đang tải xuống",
   "update_installing": "Đang cài đặt",
   "update_retry": "Kiểm tra lại",
+  "update_open_release": "Mở trang phát hành",
+  "update_manual_release": "Đã có phiên bản v{{version}}, nhưng không thể tự động cập nhật. Hãy tải từ trang phát hành.",
   "update_download_progress": "Tiến độ tải bản cập nhật",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

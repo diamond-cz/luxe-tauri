@@ -685,7 +685,7 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
     minWidth: 0, minHeight: 26, borderRight: `1px solid ${lceGridColor}`, borderBottom: `1px solid ${lceGridColor}`,
     background: heat?.background ?? (active ? "color-mix(in srgb, var(--colorBrandBackground2) 24%, var(--colorNeutralBackground1))" : "var(--colorNeutralBackground1)"),
     color: heat?.color ?? color ?? (active ? "var(--colorBrandForeground1)" : "var(--normal-sheet-text)"),
-    boxShadow: active && heat ? "inset 0 0 0 2px var(--colorBrandStroke1)" : undefined,
+    boxShadow: active && heat ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
     fontWeight: active ? 700 : 400,
   };
   if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]" style={cellStyle}

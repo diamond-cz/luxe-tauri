@@ -7723,6 +7723,7 @@ function faceAxisHeatCellStyle(count: number, maxCount: number, active: boolean)
       : heatBackground,
     color: active ? "var(--colorBrandForeground1)" : "var(--face-heat-fg)",
     fontWeight: 700,
+    boxShadow: active ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
   };
 }
 
@@ -9694,7 +9695,10 @@ function ThresholdEditableCell({
     <td
       style={{
         ...thresholdValueCellStyle(label, highlighted, editable && !showHitCounts),
-        ...(heatmapStyle ? { background: heatmapStyle.background } : {}),
+        ...(heatmapStyle ? {
+          background: heatmapStyle.background,
+          boxShadow: highlighted ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
+        } : {}),
       }}
       onContextMenu={(event) => {
         if (showHitCounts) {
@@ -15538,7 +15542,7 @@ function faceBvDrHeatCellStyle(count: number, maxCount: number, active: boolean)
       ? `color-mix(in srgb, var(--face-heat-high) ${Math.round(20 + strength * 60)}%, var(--face-heat-low))`
       : "var(--colorNeutralBackground2)",
     color: count > 0 ? "var(--face-heat-fg)" : "var(--colorNeutralForeground3)",
-    boxShadow: active ? "inset 0 0 0 2px var(--colorBrandStroke1)" : undefined,
+    boxShadow: active ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
   };
 }
 

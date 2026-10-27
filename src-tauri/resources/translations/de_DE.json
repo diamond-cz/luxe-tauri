@@ -9,6 +9,8 @@
   "update_downloading": "Wird heruntergeladen",
   "update_installing": "Wird installiert",
   "update_retry": "Erneut prüfen",
+  "update_open_release": "Release-Seite öffnen",
+  "update_manual_release": "Version v{{version}} ist verfügbar, aber die automatische Aktualisierung ist nicht verfügbar. Laden Sie sie auf der Release-Seite herunter.",
   "update_download_progress": "Downloadfortschritt des Updates",
   "column_source_invalid": "Cannot recognize the keyword or formula. Restored the previous source.",
   "column_source_unverified": "Syntax recognized. Using {{source}}; {{keys}} are not listed in the schema, so values depend on the image TOML.",

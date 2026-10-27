@@ -9,6 +9,8 @@
   "update_downloading": "正在下载",
   "update_installing": "正在安装",
   "update_retry": "重试检查",
+  "update_open_release": "打开发布页",
+  "update_manual_release": "发现新版本 v{{version}}，但自动更新暂不可用，请从发布页下载。",
   "update_download_progress": "更新下载进度",
   "column_source_invalid": "无法识别关键字或公式，已恢复原来源。",
   "column_source_unverified": "语法识别成功，已采用 {{source}}；{{keys}} 未在配置中声明，实际值取决于图片 TOML。",

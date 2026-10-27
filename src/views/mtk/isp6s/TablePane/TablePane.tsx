@@ -129,6 +129,7 @@ const IMAGE_TABLE_HEADER_HEIGHT = 36;
 // Keep the corner cell in sync with faceBvDrCornerCellStyle in ChartMapMode.
 const IMAGE_TABLE_CORNER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))";
 const IMAGE_TABLE_SELECTED_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))";
+const IMAGE_TABLE_SELECTED_COLUMN_STROKE = "color-mix(in srgb, var(--colorBrandStroke1) 60%, var(--colorNeutralStroke1))";
 const IMAGE_TABLE_ROW_HEIGHT = 54;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
 const IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH = IMAGE_TABLE_THUMBNAIL_SIZE + 6;
@@ -1058,16 +1059,21 @@ function ImageTableHoverPreview({ scrollRef }: { scrollRef: RefObject<HTMLDivEle
   }, [hovered]);
 
   if (!hovered || !preview?.url || preview.path !== hovered.path) return null;
-  const size = Math.min(208, window.innerWidth - 16, window.innerHeight - 16);
-  const left = hovered.rect.right + size + 12 <= window.innerWidth
-    ? hovered.rect.right + 8 : Math.max(8, hovered.rect.left - size - 8);
-  const top = Math.max(8, Math.min(hovered.rect.top + hovered.rect.height / 2 - size / 2, window.innerHeight - size - 8));
+  const size = Math.max(20, Math.min(208, window.innerWidth - 16, window.innerHeight - 16));
+  const showOnRight = hovered.rect.right + size + 8 <= window.innerWidth;
+  const showOnLeft = !showOnRight && hovered.rect.left - size - 8 >= 8;
+  const left = showOnRight ? hovered.rect.right + 8 : showOnLeft ? undefined : 8;
+  const right = showOnLeft ? window.innerWidth - hovered.rect.left + 8 : undefined;
+  const centerY = hovered.rect.top + hovered.rect.height / 2;
+  const top = Math.max(8 + size / 2, Math.min(centerY, window.innerHeight - 8 - size / 2));
   return createPortal(
-    <div className="fixed z-[9999] flex items-center justify-center rounded-md border p-2 shadow-lg"
+    <div className="fixed z-[9999] rounded-md border p-2 shadow-lg"
       role="img" aria-label={`放大预览：${hovered.name}`}
-      style={{ left, top, width: size, height: size, boxSizing: "border-box", pointerEvents: "none",
-        background: "var(--colorNeutralBackground1)", borderColor: "var(--colorNeutralStroke2)" }}>
-      <img src={preview.url} alt="" className="h-full w-full object-contain" draggable={false} />
+      style={{ left, right, top, transform: "translateY(-50%)", width: "max-content", height: "max-content",
+        maxWidth: size, maxHeight: size, boxSizing: "border-box", pointerEvents: "none",
+        background: "var(--normal-sheet-bg)", borderColor: "var(--normal-sheet-grid)" }}>
+      <img src={preview.url} alt="" className="block object-contain"
+        style={{ width: "auto", height: "auto", maxWidth: size - 18, maxHeight: size - 18 }} draggable={false} />
     </div>,
     document.body,
   );
@@ -3104,7 +3110,9 @@ function Td({
     <td className={`${compact ? "px-px" : "px-2"} ${selectedBody ? "py-px" : "py-0.5"}`}
         style={{
           borderTop: selectedBody ? "2px dashed var(--colorBrandStroke1)" : undefined,
-          borderRight: selectedBody && selectedOutlineEnd ? "2px dashed var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
+          borderRight: selectedBody
+            ? selectedOutlineEnd ? "2px dashed var(--colorBrandStroke1)" : `1px solid ${IMAGE_TABLE_SELECTED_COLUMN_STROKE}`
+            : "1px solid var(--colorNeutralStroke2)",
           borderBottom: selectedBody ? "2px dashed var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
           borderLeft: selectedBody && selectedOutlineStart ? "2px dashed var(--colorBrandStroke1)" : undefined,
           textAlign: align,

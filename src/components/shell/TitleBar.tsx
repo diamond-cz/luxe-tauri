@@ -12,7 +12,7 @@ import {
   ArrowCircleUp24Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { fetchPoetry } from "@/ipc/shell";
+import { fetchPoetry, openUrl } from "@/ipc/shell";
 import { usePoetryStore } from "@/stores/poetryStore";
 import { useUpdateStore } from "@/stores/updateStore";
 import { getUpdateNotes } from "@/services/updateNotes";
@@ -156,6 +156,7 @@ function AvailableUpdateButton() {
   const rootRef = useRef<HTMLDivElement>(null);
   const status = useUpdateStore((state) => state.status);
   const version = useUpdateStore((state) => state.latestVersion);
+  const releaseUrl = useUpdateStore((state) => state.releaseUrl);
   const notes = useUpdateStore((state) => state.notes);
   const error = useUpdateStore((state) => state.message);
   const downloaded = useUpdateStore((state) => state.downloadedBytes);
@@ -169,8 +170,8 @@ function AvailableUpdateButton() {
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [open]);
-  const visible = Boolean(version && (update || status === "error") &&
-    ["available", "downloading", "installing", "error"].includes(status));
+  const visible = Boolean(version && (update || status === "error" || status === "manual") &&
+    ["available", "manual", "downloading", "installing", "error"].includes(status));
   if (!visible || !version) return null;
 
   const items = getUpdateNotes(version, notes);
@@ -179,7 +180,8 @@ function AvailableUpdateButton() {
   const label = status === "downloading"
     ? t("update_downloading")
     : status === "installing" ? t("update_installing")
-      : status === "error" ? t("update_retry") : t("update_install_now");
+      : status === "manual" ? t("update_open_release")
+        : status === "error" ? t("update_retry") : t("update_install_now");
 
   return (
     <div
@@ -220,6 +222,11 @@ function AvailableUpdateButton() {
               <UpdateNoteList items={items} compact />
             </div>
           )}
+          {status === "manual" && (
+            <p className="px-4 pt-3 text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+              {t("update_manual_release", { version })}
+            </p>
+          )}
           <div className="border-t px-4 py-3" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
             {status === "downloading" && (
               <div className="mb-3" aria-live="polite">
@@ -235,7 +242,8 @@ function AvailableUpdateButton() {
               appearance="primary"
               size="small"
               disabled={busy}
-              onClick={() => void (status === "error" ? runUpdateCheck("manual") : installAvailableUpdate())}
+              onClick={() => void (status === "manual" ? openUrl(releaseUrl).catch((error) => console.warn("open release failed", error))
+                : status === "error" ? runUpdateCheck("manual") : installAvailableUpdate())}
               className="w-full"
             >
               {label}
