@@ -118,8 +118,10 @@ export function Isp6sAeVisual({
   const currentEntry = imageDir.entries[currentIndex];
   const setImageDir   = useMtkStore((s) => s.setImageDir);
   const [selectedTomlData, setSelectedTomlData] = useState<Record<string, string>>({});
+  const selectedTomlLoadRef = useRef(0);
 
   useEffect(() => {
+    const requestId = ++selectedTomlLoadRef.current;
     if (!currentEntry || !imageDir.dir) {
       setSelectedTomlData({});
       return;
@@ -131,14 +133,14 @@ export function Isp6sAeVisual({
     }
     let active = true;
     void loadImageToml(currentEntry.toml_path).then((data) => {
-      if (!active) return;
+      if (!active || requestId !== selectedTomlLoadRef.current) return;
       session.selectedToml = { dir: imageDir.dir ?? "", path: currentEntry.toml_path, data };
       setSelectedTomlData(data);
     }).catch(() => {
-      if (active) setSelectedTomlData({});
+      if (active && requestId === selectedTomlLoadRef.current) setSelectedTomlData({});
     });
     return () => { active = false; };
-  }, [currentEntry?.jpg_path, imageDir.dir, session]);
+  }, [currentEntry?.jpg_path, currentEntry?.toml_path, imageDir.dir, imageDir.entries, imageDataRevision, session]);
 
   useEffect(() => {
     if (!imageDir.dir) {
@@ -198,9 +200,23 @@ export function Isp6sAeVisual({
       if (useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir !== dir) return;
       const entries = await scanImageDir(dir);
       const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedPath));
-      const tomlData = entries[current]
-        ? await loadImageToml(entries[current].toml_path).catch((): Record<string, string> => ({}))
-        : {};
+      const selectedEntry = entries[current];
+      let tomlData: Record<string, string> = {};
+      let tomlLoaded = false;
+      if (selectedEntry) {
+        try {
+          tomlData = await loadImageToml(selectedEntry.toml_path);
+          tomlLoaded = true;
+        } catch (error) {
+          console.warn("reload parsed image TOML", error);
+        }
+      }
+      if (useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir !== dir) return;
+      selectedTomlLoadRef.current += 1;
+      session.selectedToml = tomlLoaded && selectedEntry
+        ? { dir, path: selectedEntry.toml_path, data: tomlData } : null;
+      if (pairedWorkspaceKey) workspaceSession(pairedWorkspaceKey).selectedToml = null;
+      setSelectedTomlData(tomlData);
       setImageDir(isp, imageTabIdx, { entries, current, tomlData, status: "done", message: null });
       setImageDataRevision((revision) => revision + 1);
       onNotice({

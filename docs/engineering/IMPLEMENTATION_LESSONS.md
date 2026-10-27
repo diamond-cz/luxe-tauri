@@ -1031,3 +1031,21 @@
 **验证**
 
 - `npm run typecheck`、`npm run build` 通过；16 份语言 JSON 均可解析，合并规则包含 `log2`，旧 `column_source_help_ev` 键无剩余引用。未在 Tauri 窗口目视核对帮助区排版。
+
+### 2026-10-27：首次解析后刷新图片详情数据
+
+**亮点**
+
+- `Isp6sAeVisual.tsx` 在解析完成并重扫图片目录后，将当前图片新生成的 TOML 数据同步到详情面板与会话缓存；配对的 AE Basic/ToneMap 页面清除旧会话缓存，并在目录条目更新时重新读取。
+
+**痛点**
+
+- 初次导入时同名 TOML 不存在，`selectedTomlData` 首次读取失败后保持空对象。解析完成虽更新了共享 `imageDir.tomlData`，Normal、Face、LCE、bcompare 仍读取独立的 `selectedTomlData`；原 effect 只监听图片和目录路径，路径未变时不会重读。EXIF 标签自行按路径加载文件，因此切换过去能看到数据。
+
+**闭坑**
+
+- 生成或重写同路径 TOML 后，同时更新详情数据、失效配对页面缓存并隔离解析前的异步读取；读取失败时不得把空结果永久缓存。目录切换后不得提交旧目录的解析结果。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。未在 Tauri 窗口用真实 DP 解析工具及图片目录复现并目视核对全部详情标签。
