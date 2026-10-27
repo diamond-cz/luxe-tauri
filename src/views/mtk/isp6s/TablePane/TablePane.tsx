@@ -1348,6 +1348,7 @@ export function ImageTab({
     widths: Record<string, number>;
   } | null>(null);
   const [columnWidthOverrides, setColumnWidthOverrides] = useState<Record<string, number>>({});
+  const pendingColumnWidthsRef = useRef<Record<string, number> | null>(null);
 
   useEffect(() => {
     if (!faceLinkTargetCalculator || toneMode || entries.length === 0) return;
@@ -1496,6 +1497,10 @@ export function ImageTab({
   const columnScope: ColumnScope = toneMode ? "all" : sceneOnly ? "normal" : portraitOnly ? "face" : "all";
   const activeColumnSettings = modeSettings[columnScope];
   const colorThresholds = modeSettings.color_thresholds;
+  useEffect(() => {
+    setColumnWidthOverrides(activeColumnSettings.widths ?? {});
+    pendingColumnWidthsRef.current = null;
+  }, [activeColumnSettings.widths, columnScope]);
   const orderedColumns = useMemo(() => {
     const scoped = tableColumns.filter((column) => !column.scope || column.scope === columnScope).map((column) => {
       const edit = activeColumnSettings.edits[column.id];
@@ -2259,10 +2264,25 @@ export function ImageTab({
       const onMove = (moveEvent: PointerEvent) => {
         const maxWidth = column === "name" ? 2000 : 640;
         const nextWidth = Math.max(minWidth, Math.min(maxWidth, initialWidth + moveEvent.clientX - startX));
-        setColumnWidthOverrides((current) => ({ ...current, [column]: nextWidth }));
+        pendingColumnWidthsRef.current = { ...columnWidthOverrides, [column]: nextWidth };
+        setColumnWidthOverrides(pendingColumnWidthsRef.current);
       };
       const onUp = () => {
         window.removeEventListener("pointermove", onMove);
+        const widths = pendingColumnWidthsRef.current;
+        if (widths) {
+          const nextModeSettings = {
+            ...modeSettings,
+            [columnScope]: { ...activeColumnSettings, widths },
+          };
+          setModeSettings(nextModeSettings);
+          void saveImageTableMode(columnMode, nextModeSettings,
+            readLegacyColumnMode(columnMode === "isp6s" ? "tone" : "isp6s"))
+            .then(() => flushStateNow())
+            .then(() => emit(COLUMN_SETTINGS_SAVED_EVENT, { mode: columnMode, settings: nextModeSettings }))
+            .catch((error) => console.warn("save image table column width", error));
+          pendingColumnWidthsRef.current = null;
+        }
         window.removeEventListener("pointerup", onUp);
       };
 
@@ -2903,15 +2923,24 @@ function expandImageColumnKeys(columns: ReadonlyArray<ReadonlyArray<string>>): s
 }
 
 let imageColumnMeasureContext: CanvasRenderingContext2D | null = null;
+const imageColumnMeasureCache = new Map<string, number>();
 function estimateImageColumnTextWidth(value: string): number {
+  const text = value || "-";
+  const cached = imageColumnMeasureCache.get(text);
+  if (cached !== undefined) return cached;
+  if (imageColumnMeasureCache.size >= 4096) imageColumnMeasureCache.clear();
   if (!imageColumnMeasureContext) {
     imageColumnMeasureContext = document.createElement("canvas").getContext("2d");
     if (imageColumnMeasureContext) imageColumnMeasureContext.font = '13px "Segoe UI", Arial, sans-serif';
   }
   if (imageColumnMeasureContext) {
-    return Math.ceil(imageColumnMeasureContext.measureText(value || "-").width + 20);
+    const width = Math.ceil(imageColumnMeasureContext.measureText(text).width + 20);
+    imageColumnMeasureCache.set(text, width);
+    return width;
   }
-  return Math.ceil((value || "-").length * 8 + 20);
+  const width = Math.ceil(text.length * 8 + 20);
+  imageColumnMeasureCache.set(text, width);
+  return width;
 }
 
 function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string[] {

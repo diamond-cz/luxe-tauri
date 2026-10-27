@@ -45,6 +45,7 @@ pub struct ImageTableScopeColumns {
     #[serde(default)] pub pinned: Vec<String>,
     #[serde(default)] pub hidden: Vec<String>,
     #[serde(default)] pub deleted: Vec<String>,
+    #[serde(default)] pub widths: BTreeMap<String, f64>,
     #[serde(default)] pub edits: BTreeMap<String, ImageTableColumnEdit>,
     #[serde(default)] pub custom: Vec<ImageTableCustomColumn>,
 }
@@ -363,6 +364,7 @@ mod image_table_column_tests {
         let mut columns = ImageTableColumns::default();
         columns.isp6s.all.hidden.push("ev".into());
         columns.isp6s.all.pinned = vec!["cwr".into(), "ev".into()];
+        columns.isp6s.all.widths.insert("cwr".into(), 173.5);
         columns.isp6s.color_thresholds.ev = 0.012;
         columns.isp6s.color_thresholds.ae_gain = 0.08;
         columns.isp6s.face.order = vec!["cwr".into(), "ev".into()];
@@ -380,6 +382,7 @@ mod image_table_column_tests {
         let saved = restored.image_table_columns.unwrap().isp6s;
         assert_eq!(saved.all.hidden, vec!["ev"]);
         assert_eq!(saved.all.pinned, vec!["cwr", "ev"]);
+        assert_eq!(saved.all.widths.get("cwr"), Some(&173.5));
         assert_eq!(saved.color_thresholds.ev, 0.012);
         assert_eq!(saved.color_thresholds.ae_gain, 0.08);
         assert_eq!(saved.color_thresholds.delta, 5.0);

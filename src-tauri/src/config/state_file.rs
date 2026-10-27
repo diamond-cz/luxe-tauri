@@ -209,8 +209,10 @@ mod image_table_mode_tests {
         let store = Arc::new(StateStore::load_paths(preferred.clone(), fallback.clone()).unwrap());
         let mut isp6s = ImageTableModeColumns::default();
         isp6s.face.hidden.push("ev".into());
+        isp6s.face.widths.insert("cwr".into(), 184.0);
         let mut tone = ImageTableModeColumns::default();
         tone.all.order.push("extra:SW_LCE_LV".into());
+        tone.all.widths.insert("name".into(), 360.0);
 
         let (first, second) = tokio::join!(
             store.save_image_table_mode("isp6s", isp6s, ImageTableModeColumns::default()),
@@ -223,7 +225,9 @@ mod image_table_mode_tests {
         let restored = StateStore::load_paths(preferred, fallback).unwrap().snapshot();
         let columns = restored.image_table_columns.unwrap();
         assert_eq!(columns.isp6s.face.hidden, vec!["ev"]);
+        assert_eq!(columns.isp6s.face.widths.get("cwr"), Some(&184.0));
         assert_eq!(columns.tone.all.order, vec!["extra:SW_LCE_LV"]);
+        assert_eq!(columns.tone.all.widths.get("name"), Some(&360.0));
         assert!(columns.isp6s.normal.hidden.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }

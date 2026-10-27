@@ -89,6 +89,7 @@ export interface ImageTableScopeColumns {
   pinned: string[];
   hidden: string[];
   deleted: string[];
+  widths: Record<string, number>;
   edits: Record<string, { label?: string; source?: string }>;
   custom: Array<{ id: string; label: string; source: string; scope: "all" | "face" | "normal" }>;
 }

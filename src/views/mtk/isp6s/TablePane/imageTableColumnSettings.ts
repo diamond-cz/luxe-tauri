@@ -59,6 +59,10 @@ export function normalizeColumnMode(value: ImageTableModeColumns | undefined | n
       pinned: Array.isArray(saved?.pinned) ? saved.pinned : [],
       hidden: Array.isArray(saved?.hidden) ? saved.hidden : [],
       deleted: Array.isArray(saved?.deleted) ? saved.deleted : [],
+      widths: saved?.widths && typeof saved.widths === "object"
+        ? Object.fromEntries(Object.entries(saved.widths).filter(([, width]) =>
+          typeof width === "number" && Number.isFinite(width) && width > 0))
+        : {},
       edits: saved?.edits && typeof saved.edits === "object" ? saved.edits : {},
       custom: Array.isArray(saved?.custom) ? saved.custom.filter((column) => column.scope === scope) : [],
     };
@@ -98,6 +102,7 @@ export function readLegacyColumnMode(mode: ColumnMode): ImageTableModeColumns {
   };
   const scopeSettings = (scope: ColumnScope): ImageTableScopeColumns => ({
     ...shared, order: [...shared.order], pinned: [...shared.pinned], hidden: [...shared.hidden], deleted: [...shared.deleted],
+    widths: {},
     edits: Object.fromEntries(Object.entries(shared.edits).map(([id, edit]) => [id, { ...edit }])),
     custom: custom.filter((column) => column.scope === scope).map((column) => ({ ...column })),
   });

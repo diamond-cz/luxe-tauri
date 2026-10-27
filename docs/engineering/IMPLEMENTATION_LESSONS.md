@@ -1103,3 +1103,23 @@
 **验证**
 
 - GitHub API 最新 Release 为 v0.2.10，代理 `latest.json` 的版本也为 0.2.10；`npm run typecheck` 通过。尚未在用户截图对应的旧程序窗口复现 updater 返回值，也未实际安装升级。
+
+### 2026-10-27：图片列表列宽持久化与自适应测量
+
+**亮点**
+
+- `TablePane.tsx` 将手动列宽写入现有 `image_table_columns`，按 `isp6s/tone` 和 `all/face/normal` 作用域保存；自动宽度通过复用 Canvas 上下文并缓存最多 4096 个文本测量结果，减少重复测量。
+
+**痛点**
+
+- 手动宽度原来只存在 `TablePane` 本地 React 状态，组件卸载后消失；自动测量每次遇到重复文本都会调用 Canvas。
+
+**闭坑**
+
+- 维护 `ImageTableScopeColumns.widths` 时同步检查 TypeScript IPC 类型、Rust serde schema、旧 TOML 默认值与规范化逻辑。自动测量宽度只能作为后备，不能覆盖持久化的手动宽度。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 通过。Rust 测试命令因当前构建产物缺少 `luxe_tauri_lib` 及若干依赖的 rlib 格式而失败；尚未在 Tauri 窗口实际拖拽并切页验收。
+
+- 补充验证：`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib config::state_schema::image_table_column_tests` 与 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib config::state_file::image_table_mode_tests` 均通过；此前未限定 `--lib` 的测试命令触发了本地集成测试链接错误。
