@@ -938,3 +938,21 @@
 - `npm run typecheck`、`npm run build` 通过；`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 通过（15 项通过、1 项忽略），覆盖状态默认值与回读，以及 `Cal_FLT` 公式来源。
 - `npm run rust:test` 未通过：集成测试编译遇到 Windows 页文件不足（os error 1455），随后运行中的 `luxe-tauri.exe` 被占用，无法替换（os error 5）；未结束用户程序。
 - 16 份语言 JSON 均能解析，新增文案键均存在；未在 Tauri 窗口目视验证按钮与图片列表交互。
+
+### 2026-10-27：Face_LCE L0 与普通行对齐
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx` 将 `i4LCEfaceTbL0` 放到跨三行的左侧标签单元格；L0 与 L1-L15 共用 `128px + 19` 列的网格宽度，保留两组 LV 标题与 `rsv` 列。
+
+**痛点**
+
+- L0 原先使用单独的行名条和 19 等分列，下方表格另有 128px 标签列，导致列边界无法对齐。
+
+**闭坑**
+
+- 调整 L0 样式时检查首列宽度、三行合并位置和各组 9/9/1 列排列；字段路径 `[0][0][0][4][0].0` 至 `.18`、LV 命中与插值逻辑不得随布局变更。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；尚未在 Tauri 窗口目视核对布局。

@@ -812,12 +812,11 @@ function ToneLceFaceL0Grid({ fields, position, controls }: {
     { title: "HighBound 限制 (85-105)：保护人脸高光", background: "var(--normal-sheet-peach-bg)", color: "var(--normal-sheet-peach-fg)" },
   ];
   return <div className="min-w-0 overflow-x-auto border-b" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-    <div className="border-b px-2 py-1 font-mono text-[10px] font-semibold" style={{ borderColor: lceFrameColor, color: "var(--colorNeutralForeground2)" }}>
-      i4LCEfaceTbL0
-    </div>
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${LCE_FACE_L0_COLUMNS}, minmax(0, 1fr))`,
-      gridTemplateRows: "minmax(36px, auto) 26px 26px", minWidth: 760,
+    <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${LCE_FACE_L0_COLUMNS}, minmax(0, 1fr))`,
+      gridTemplateRows: "minmax(36px, auto) 26px 26px", width: "100%", minWidth: 0, boxSizing: "border-box",
       border: `2px solid ${lceFrameColor}`, fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums" }}>
+      <div className="flex min-w-0 items-center justify-center border-b border-r px-2 text-center text-[10px] font-bold"
+        style={{ ...lceRowHeaderStyle, gridColumn: 1, gridRow: "1 / span 3" }}>i4LCEfaceTbL0</div>
       {groups.map((group) => <div key={group.title} className="flex min-w-0 items-center border-b border-r px-2 text-[10px] leading-4"
         style={{ gridColumn: `span ${LCE_FACE_L0_GROUP_COLUMNS}`, borderColor: lceFrameColor,
           background: `color-mix(in srgb, ${group.background} 38%, var(--colorNeutralBackground1))`,
