@@ -140,7 +140,6 @@ const IMAGE_TABLE_FIELD_CACHE_LIMIT = 768;
 const IMAGE_TABLE_PREFETCH_DELAY_MS = 90;
 const IMAGE_TABLE_PREFETCH_MIN_ROWS = 96;
 const IMAGE_TABLE_PREFETCH_PAGES = 3;
-const IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY = "luxe:isp6s:image-table-sort-controls";
 const IMAGE_TABLE_COLUMN_DRAG_DELAY_MS = 280;
 const IMAGE_TABLE_COLUMN_DRAG_DISTANCE = 6;
 const IMAGE_TABLE_GLOBAL_CACHE_LIMIT = 4096;
@@ -330,10 +329,22 @@ export function TablePane({
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
   const [parseAllVersion, setParseAllVersion] = useState(0);
   const [applyAllVersion, setApplyAllVersion] = useState(0);
+  const [applyMode, setApplyMode] = useState<"all" | "single">("all");
+  const [applySingleIndex, setApplySingleIndex] = useState<number | null>(null);
   const nextApplyVersionRef = useRef(0);
   const [appliedCalculatorSourcePath, setAppliedCalculatorSourcePath] = useState<string | null>(null);
   const [parseProgress, setParseProgress] = useState<{ done: number; total: number; error?: string } | null>(null);
   const [applyPending, setApplyPending] = useState(false);
+  const startApply = (mode: "all" | "single", index?: number) => {
+    if (entries.length === 0 || !calculatorSourcePath || applyPending) return;
+    setApplyPending(true);
+    setApplyMode(mode);
+    setApplySingleIndex(mode === "single" && index !== undefined ? index : null);
+    setAppliedCalculatorSourcePath(calculatorSourcePath);
+    const nextVersion = ++nextApplyVersionRef.current;
+    setApplyAllVersion(nextVersion);
+    setParseAllVersion(nextVersion);
+  };
 
   // 热力图命中选择只记录 TOML 路径。标题栏按钮通过同一顺序切换当前图片，
   // 不会改变热力图的多选集合。
@@ -488,14 +499,12 @@ export function TablePane({
             disabled={entries.length === 0 || exifParsing}
             onClick={onParseExif} aria-label="解析图片 EXIF" />
           {!toneMode && <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<CalculatorArrowClockwise24Regular className="h-4 w-4" />}
-            title="Apply all image: 使用当前参数重新计算 CWR 和 ∆CWR"
+            title="左键：Apply all image；右键：Apply single image（当前图片）"
             disabled={entries.length === 0 || !calculatorSourcePath || applyPending || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
-            onClick={() => {
-              setApplyPending(true);
-              setAppliedCalculatorSourcePath(calculatorSourcePath);
-              const nextVersion = ++nextApplyVersionRef.current;
-              setApplyAllVersion(nextVersion);
-              setParseAllVersion(nextVersion);
+            onClick={() => startApply("all")}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              startApply("single", current);
             }} aria-label="Apply all image" />}
           <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<FolderAdd24Regular className="h-4 w-4" />}
             title="Add image folder" onClick={pickImageDir} aria-label="Add image folder" />
@@ -556,6 +565,7 @@ export function TablePane({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <ImageTab key={imageDir ?? ""} schema={schema} toneMode={toneMode} filePath={toneMode ? null : filePath} directoryName={getPathBaseName(imageDir ?? "")} calculatorSourcePath={appliedCalculatorSourcePath}
+          applyMode={applyMode} applySingleIndex={applySingleIndex}
           parseAllVersion={parseAllVersion} applyAllVersion={applyAllVersion} onParseProgress={setParseProgress}
           onApplyResult={(result) => {
             setApplyPending(false);
@@ -1080,7 +1090,7 @@ function ImageTableHoverPreview({ scrollRef }: { scrollRef: RefObject<HTMLDivEle
 }
 
 export function ImageTab({
-  schema, toneMode = false, filePath, directoryName, cppImportRevision, calculatorSourcePath, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
+  schema, toneMode = false, filePath, directoryName, cppImportRevision, calculatorSourcePath, applyMode = "all", applySingleIndex = null, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
   entries, current, selectedHeatmapPaths, onPick, onVisibleHeatmapPathsChange,
   imageDataRevision = 0,
   scrollPosition,
@@ -1092,6 +1102,8 @@ export function ImageTab({
   directoryName: string;
   cppImportRevision: number;
   calculatorSourcePath?: string | null;
+  applyMode?: "all" | "single";
+  applySingleIndex?: number | null;
   parseAllVersion?: number;
   applyAllVersion?: number;
   onParseProgress?: (progress: { done: number; total: number; error?: string } | null) => void;
@@ -1257,6 +1269,10 @@ export function ImageTab({
     version: number;
     calculate: FaceLinkTargetCalculator;
   } | null>(null);
+  type FaceLinkTargetResult = ReturnType<FaceLinkTargetCalculator>;
+  const previousCalculatedTargetsRef = useRef<Record<string, FaceLinkTargetResult>>({});
+  const baselineCalculatorRef = useRef<FaceLinkTargetCalculator | null>(null);
+  const [changedCalculationPaths, setChangedCalculationPaths] = useState<Set<string>>(() => new Set());
   const [calculatorError, setCalculatorError] = useState<{ version: number; message: string } | null>(null);
   const [parseAllError, setParseAllError] = useState<{ version: number; message: string } | null>(null);
   const requestedCalculatorPath = applyAllVersion > 0 ? calculatorSourcePath ?? null : filePath;
@@ -1264,19 +1280,63 @@ export function ImageTab({
     && faceLinkTargetState.version === applyAllVersion
     ? faceLinkTargetState.calculate
     : null;
-  const faceLinkTargetCalculator = useMemo(() => baseFaceLinkTargetCalculator
+  const activeFaceLinkTargetCalculator = useMemo(() => baseFaceLinkTargetCalculator
     ? (data: Record<string, string>, bvKey: string) => baseFaceLinkTargetCalculator(data, bvKey, useParameterFdszRaForExif)
     : null, [baseFaceLinkTargetCalculator, useParameterFdszRaForExif]);
+  const faceLinkTargetCalculator = useMemo(() => {
+    const calculator = activeFaceLinkTargetCalculator
+      ?? (applyAllVersion > 0 ? baselineCalculatorRef.current : null);
+    return calculator
+      ? (data: Record<string, string>, bvKey: string) => calculator(data, bvKey)
+      : null;
+  }, [activeFaceLinkTargetCalculator, applyAllVersion]);
+  const imageClassificationCalculator = applyMode === "single"
+    ? baselineCalculatorRef.current ?? faceLinkTargetCalculator
+    : faceLinkTargetCalculator;
   const allParsedRows = parsedTomls?.entries === entries && parsedTomls.keySignature === imageTomlKeySignature
     && parsedTomls.version === parseAllVersion
     ? parsedTomls.rows : null;
   const allTargets = useMemo(() => {
-    if (!allParsedRows || !faceLinkTargetCalculator) return null;
-    return Object.fromEntries(entries.map((entry) => [
-      entry.toml_path,
-      faceLinkTargetCalculator(allParsedRows[entry.toml_path] ?? {}, faceBvKey),
-    ]));
-  }, [allParsedRows, entries, faceBvKey, faceLinkTargetCalculator]);
+    if (!allParsedRows || !activeFaceLinkTargetCalculator) return null;
+    const result: Record<string, FaceLinkTargetResult> = {};
+    if (applyMode === "single") {
+      const path = applySingleIndex === null ? undefined : entries[applySingleIndex]?.toml_path;
+      const data = path ? allParsedRows[path] : undefined;
+      if (path && data) result[path] = activeFaceLinkTargetCalculator(data, faceBvKey);
+      return result;
+    }
+    for (const entry of entries) {
+      const path = entry.toml_path;
+      const data = allParsedRows[path];
+      if (data) {
+        result[path] = activeFaceLinkTargetCalculator(data, faceBvKey);
+      }
+    }
+    return result;
+  }, [activeFaceLinkTargetCalculator, allParsedRows, applyMode, applySingleIndex, entries, faceBvKey]);
+
+  useEffect(() => {
+    if (applyAllVersion === 0 && faceLinkTargetCalculator) {
+      const next = { ...previousCalculatedTargetsRef.current };
+      for (const [path, data] of Object.entries(tomls)) {
+        next[path] = faceLinkTargetCalculator(data, faceBvKey);
+      }
+      previousCalculatedTargetsRef.current = next;
+    }
+  }, [applyAllVersion, faceBvKey, faceLinkTargetCalculator, tomls]);
+
+  useEffect(() => {
+    if (applyMode !== "single" || applyAllVersion === 0 || !baselineCalculatorRef.current) return;
+    const baseline = baselineCalculatorRef.current;
+    const next = { ...previousCalculatedTargetsRef.current };
+    for (const entry of entries) {
+      if (next[entry.toml_path]) continue;
+      const data = tomls[entry.toml_path]
+        ?? readGlobalImageTableFields(entries, imageDataRevision, entry.toml_path, imageTomlKeySignature);
+      if (data) next[entry.toml_path] = baseline(data, faceBvKey);
+    }
+    previousCalculatedTargetsRef.current = next;
+  }, [applyAllVersion, applyMode, entries, faceBvKey, imageDataRevision, imageTomlKeySignature, tomls]);
   const applyResultRef = useRef(onApplyResult);
   applyResultRef.current = onApplyResult;
   const reportedApplyVersionRef = useRef(0);
@@ -1293,16 +1353,33 @@ export function ImageTab({
       applyResultRef.current?.({ kind: "error", title: "批量图片计算失败", detail: failure });
     } else if (allTargets && parsedTomls?.version === parseAllVersion && parseAllVersion > 0) {
       reportedApplyVersionRef.current = applyAllVersion;
-      applyResultRef.current?.({ kind: "success", title: "批量图片计算完成", detail: "已计算并刷新 " + entries.length + " 张图片" });
+      const updatedPaths = applyMode === "single" && applySingleIndex !== null
+        ? [entries[applySingleIndex]?.toml_path].filter((path): path is string => Boolean(path))
+        : entries.map((entry) => entry.toml_path);
+      const changedPaths = updatedPaths.filter((path) => {
+        const previous = previousCalculatedTargetsRef.current[path]
+          ?? (applyMode === "all" && baselineCalculatorRef.current && allParsedRows?.[path]
+            ? baselineCalculatorRef.current(allParsedRows[path], faceBvKey) : undefined);
+        return JSON.stringify(previous ?? null) !== JSON.stringify(allTargets[path] ?? null);
+      });
+      const nextSnapshot = { ...previousCalculatedTargetsRef.current };
+      for (const path of updatedPaths) {
+        const target = allTargets[path];
+        if (target) nextSnapshot[path] = target;
+      }
+      previousCalculatedTargetsRef.current = nextSnapshot;
+      setChangedCalculationPaths(new Set(changedPaths));
+      applyResultRef.current?.({ kind: "success",
+        title: applyMode === "single" ? "当前图片计算完成" : "批量图片计算完成",
+        detail: `已更新 ${updatedPaths.length} 张图片，${changedPaths.length} 行数值发生变化` });
     }
-  }, [allTargets, applyAllVersion, calculatorError, entries.length, parseAllError, parseAllVersion, parsedTomls?.version]);
+  }, [allParsedRows, allTargets, applyAllVersion, applyMode, applySingleIndex, calculatorError, entries, faceBvKey, parseAllError, parseAllVersion, parsedTomls?.version]);
   const [scrollTop, setScrollTop] = useState(() => scrollPosition?.top ?? 0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
   const [sortState, setSortState] = useState<ImageSortState | null>(null);
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
-  const [sortControlsEnabled, setSortControlsEnabled] = useState(readImageTableSortControlsEnabled);
   const openColumnSettingsWindow = async () => {
     const selectedScope = columnScopeForThumbnail(thumbnailHeaderKind);
     const label = toneMode ? "column-settings-tone" : "column-settings-isp6s";
@@ -1351,11 +1428,11 @@ export function ImageTab({
   const pendingColumnWidthsRef = useRef<Record<string, number> | null>(null);
 
   useEffect(() => {
-    if (!faceLinkTargetCalculator || toneMode || entries.length === 0) return;
+    if (applyMode === "single" || !imageClassificationCalculator || toneMode || entries.length === 0) return;
     const savedKinds = globalImageKinds.get(entries);
     if (savedKinds?.revision === imageDataRevision
       && savedKinds.keySignature === imageTomlKeySignature
-      && savedKinds.calculator === faceLinkTargetCalculator
+      && savedKinds.calculator === imageClassificationCalculator
       && !allParsedRows) {
       setImageKinds({ entries, ...savedKinds });
       setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
@@ -1365,7 +1442,7 @@ export function ImageTab({
     let cancelled = false;
     const widths: Record<string, number> = {};
     const publishKinds = (byPath: Record<string, ImageTableKind>) => {
-      const result = { keySignature: imageTomlKeySignature, revision: imageDataRevision, calculator: faceLinkTargetCalculator, byPath, widths };
+      const result = { keySignature: imageTomlKeySignature, revision: imageDataRevision, calculator: imageClassificationCalculator, byPath, widths };
       globalImageKinds.set(entries, result);
       setImageKinds({ entries, ...result });
       setMeasuredColumnWidths({ entries, keySignature: imageTomlKeySignature,
@@ -1375,7 +1452,7 @@ export function ImageTab({
     const classifyBatch = (rows: Record<string, Record<string, string>>, byPath: Record<string, ImageTableKind>) => {
       for (const [path, data] of Object.entries(rows)) {
         if (path in byPath) continue;
-        const face = imageFaceTargetValues(faceLinkTargetCalculator(data, faceBvKey));
+        const face = imageFaceTargetValues(imageClassificationCalculator(data, faceBvKey));
         byPath[path] = classifyImageTableRow(data, face, faceFdyKey, extraKeys);
         for (const column of tableColumns) {
           if (column.kind === "idx" || column.kind === "thumbnail" || column.kind === "name") continue;
@@ -1414,7 +1491,7 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [allParsedRows, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
+  }, [allParsedRows, applyMode, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageClassificationCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
 
   useEffect(() => {
     if (!toneMode || entries.length === 0) return;
@@ -1457,7 +1534,6 @@ export function ImageTab({
   const classifiedKinds = imageKinds?.entries === entries
     && imageKinds.keySignature === imageTomlKeySignature
     && imageKinds.revision === imageDataRevision
-    && imageKinds.calculator === faceLinkTargetCalculator
     ? imageKinds.byPath : null;
   const { hasScene, hasPortrait, hasNa } = useMemo(() => {
     let hasScene = false;
@@ -1559,9 +1635,10 @@ export function ImageTab({
   useEffect(() => {
     if (parseAllVersion === 0) return;
     let cancelled = false;
-    const paths = entries.map((entry) => entry.toml_path);
+    const paths = applyMode === "single" && applySingleIndex !== null
+      ? [entries[applySingleIndex]?.toml_path].filter((path): path is string => Boolean(path))
+      : entries.map((entry) => entry.toml_path);
     const keySignature = imageTomlKeySignature;
-    setParsedTomls(null);
     onParseProgress?.({ done: 0, total: paths.length });
     void (async () => {
       const rows: Record<string, Record<string, string>> = {};
@@ -1582,13 +1659,13 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [entries, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
+  }, [applyMode, applySingleIndex, entries, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }))
       .filter(({ e }) => !canFilterKinds || !classifiedKinds || activeKindFilter === "all"
         || shouldShowImageTableRow(classifiedKinds[e.toml_path] ?? "na", activeKindFilter === "scene", activeKindFilter === "portrait"));
-    if (!sortControlsEnabled || !sortState) return rows;
+    if (!sortState) return rows;
 
     return rows.slice().sort((a, b) => {
       const av = parseImageSortNumber(sortValues[a.e.toml_path]);
@@ -1600,7 +1677,7 @@ export function ImageTab({
       if (av === bv) return a.i - b.i;
       return av < bv ? -direction : direction;
     });
-  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, sortControlsEnabled, sortState, sortValues]);
+  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, sortState, sortValues]);
 
   useLayoutEffect(() => {
     scrollPositionChangeRef.current = onScrollPositionChange;
@@ -1685,10 +1762,6 @@ export function ImageTab({
     };
   }, []);
 
-  useEffect(() => {
-    writeImageTableSortControlsEnabled(sortControlsEnabled);
-  }, [sortControlsEnabled]);
-
   useEffect(() => () => {
     cancelImageTableColumnDrag();
   }, []);
@@ -1705,10 +1778,16 @@ export function ImageTab({
 
   const visibleFaceValues = useMemo(() => Object.fromEntries(visible.rows.map(({ e }) => {
     const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
-    const target = allTargets?.[e.toml_path] ?? (faceLinkTargetCalculator && e.toml_path in tomls
-      ? faceLinkTargetCalculator(data, faceBvKey) : null);
+    const isUpdatedSinglePath = applyMode === "single" && applySingleIndex !== null
+      && entries[applySingleIndex]?.toml_path === e.toml_path;
+    const target = applyMode === "single" && !isUpdatedSinglePath
+      ? (previousCalculatedTargetsRef.current[e.toml_path]
+        ?? (baselineCalculatorRef.current && e.toml_path in tomls
+          ? baselineCalculatorRef.current(data, faceBvKey) : null))
+      : allTargets?.[e.toml_path] ?? (faceLinkTargetCalculator && e.toml_path in tomls
+        ? faceLinkTargetCalculator(data, faceBvKey) : null);
     return [e.toml_path, imageFaceTargetValues(target)];
-  })), [allParsedRows, allTargets, faceBvKey, faceLinkTargetCalculator, tomls, visible.rows]);
+  })), [allParsedRows, allTargets, applyMode, applySingleIndex, entries, faceBvKey, faceLinkTargetCalculator, tomls, visible.rows]);
 
   const tableWindowPaths = useMemo(() => {
     const paths: string[] = [];
@@ -1777,19 +1856,19 @@ export function ImageTab({
   }, [entries, imageTomlKeySignature, imageDataRevision]);
 
   useEffect(() => {
-    if (!sortControlsEnabled || !sortState) return;
+    if (!sortState) return;
     const stillSortable = displayedColumns.some((column) => column.kind === "extra"
       && column.key === sortState.key);
     if (!stillSortable) {
       setSortState(null);
     }
-  }, [displayedColumns, sortControlsEnabled, sortState]);
+  }, [displayedColumns, sortState]);
 
   useEffect(() => {
     const requestId = sortRequestRef.current + 1;
     sortRequestRef.current = requestId;
 
-    if (!sortControlsEnabled || !sortState || entries.length === 0) {
+    if (!sortState || entries.length === 0) {
       setSortValues({});
       setSortLoading(false);
       return;
@@ -1825,7 +1904,7 @@ export function ImageTab({
           setSortLoading(false);
         }
       });
-  }, [entries, sortControlsEnabled, sortState]);
+  }, [entries, sortState]);
 
   function rememberTableFieldRows(batch: Record<string, Record<string, string>>) {
     const cache = tableFieldCacheRef.current;
@@ -1952,7 +2031,6 @@ export function ImageTab({
   }
 
   function toggleImageSort(column: string, key: string) {
-    if (!sortControlsEnabled) return;
     setSortState((prev) => {
       if (prev?.key === key) {
         return {
@@ -1962,18 +2040,6 @@ export function ImageTab({
         };
       }
       return { column, key, direction: "asc" };
-    });
-  }
-
-  function toggleImageSortControls() {
-    setSortControlsEnabled((prev) => {
-      const next = !prev;
-      if (!next) {
-        setSortState(null);
-        setSortValues({});
-        setSortLoading(false);
-      }
-      return next;
     });
   }
 
@@ -2210,7 +2276,6 @@ export function ImageTab({
   const fullColumnWidths = measuredColumnWidths?.entries === entries
     && measuredColumnWidths.keySignature === imageTomlKeySignature
     && measuredColumnWidths.revision === imageDataRevision
-    && measuredColumnWidths.calculator === (toneMode ? null : faceLinkTargetCalculator)
     ? measuredColumnWidths.widths : null;
   const baseColumnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -2225,7 +2290,7 @@ export function ImageTab({
       }
       const minWidth = column.kind === "idx" ? 34 : 52;
       const headerWidth = estimateImageColumnTextWidth(column.label)
-        + (column.kind === "extra" && sortControlsEnabled ? 16 : 0);
+        + (column.kind === "extra" ? 16 : 0);
       let width = Math.max(minWidth, headerWidth, fullColumnWidths?.[column.id] ?? 0);
       if (column.kind === "idx") {
         byId[column.id] = Math.max(width, estimateImageColumnTextWidth(String(entries.length)));
@@ -2240,7 +2305,7 @@ export function ImageTab({
       byId[column.id] = width;
     }
     return { byId };
-  }, [allParsedRows, classifiedKinds, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, sortControlsEnabled, tableColumns, tomls, visible.rows, visibleFaceValues]);
+  }, [allParsedRows, classifiedKinds, entries.length, fullColumnWidths, nameColumnWidth, sceneOnly, tableColumns, tomls, visible.rows, visibleFaceValues]);
 
   const columnWidths = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -2395,7 +2460,7 @@ export function ImageTab({
                     </div>
                   ) : column.kind !== "extra" ? (
                     column.label
-                  ) : sortControlsEnabled ? (
+                  ) : (
                     <ImageSortHeader
                       label={column.label}
                       align={column.align}
@@ -2405,7 +2470,7 @@ export function ImageTab({
                       onClick={() => toggleImageSort(column.label, column.key ?? "")}
                       onReset={() => setSortState(null)}
                     />
-                  ) : column.label}
+                  )}
                 </Th>
               );
             })}
@@ -2461,16 +2526,8 @@ export function ImageTab({
                      title={column.kind === "name" ? e.name : undefined}
                    >
                      {column.kind === "idx"
-                       ? <button
-                           type="button"
-                           className="inline-flex min-w-6 items-center justify-center rounded px-1 py-0.5 transition-[background-color,transform] duration-100 hover:bg-black/10 active:scale-90"
-                           style={{ color: sortControlsEnabled ? "var(--colorBrandForeground1)" : "inherit" }}
-                           title={sortControlsEnabled ? "关闭其他列排序" : "开启其他列排序"}
-                           aria-label={sortControlsEnabled ? "关闭其他列排序" : "开启其他列排序"}
-                           aria-pressed={sortControlsEnabled}
-                           onPointerDown={(event) => event.stopPropagation()}
-                           onClick={toggleImageSortControls}
-                         >{i + 1}</button>
+                       ? <span style={{ color: changedCalculationPaths.has(e.toml_path)
+                         ? "var(--colorPaletteRedForeground1)" : undefined }}>{i + 1}</span>
                        : column.kind === "thumbnail"
                          ? <ImageTableThumbnail entry={e} columnWidth={columnWidths.byId[column.id] ?? 72} />
                          : column.kind === "name"
@@ -2967,23 +3024,6 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
       ...next.filter((id) => id !== "idx" && id !== "thumbnail" && id !== "name")];
   }
   return next;
-}
-
-function readImageTableSortControlsEnabled(): boolean {
-  try {
-    const stored = window.localStorage.getItem(IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY);
-    return stored === null ? true : stored === "1";
-  } catch {
-    return true;
-  }
-}
-
-function writeImageTableSortControlsEnabled(enabled: boolean) {
-  try {
-    window.localStorage.setItem(IMAGE_TABLE_SORT_CONTROLS_STORAGE_KEY, enabled ? "1" : "0");
-  } catch {
-    // Ignore storage failures; the in-memory state still works for this mount.
-  }
 }
 
 function parseImageSortNumber(value: string | undefined): number | null {

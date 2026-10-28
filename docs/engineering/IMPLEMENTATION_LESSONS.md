@@ -1141,3 +1141,115 @@
 **验证**
 
 - `npm run version:check`、`npm run release:test`（27 项）、`npm run build`、`git diff --check` 通过。`cargo test --locked --manifest-path src-tauri/Cargo.toml` 在本机失败：并行构建遇到页面文件不足（OS error 1455），单线程重试遇到 `luxe-tauri.exe` 占用（OS error 5）。
+
+### 2026-10-28：Apply image 左右键计算与变化标识
+
+**亮点**
+
+- `TablePane.tsx` 将 Apply 按钮左键绑定全量计算、右键绑定当前图片计算；单图模式只读取一个 TOML，并复用旧计算器保留其余行结果。
+- 计算完成后只替换结果映射，变化行自动关闭 idx 与其他列排序，并使用主题警示色标记 idx 数字。
+
+**痛点**
+
+- 单图更新期间新旧计算器会短暂并存，必须保留旧计算器引用，否则未更新行会显示为空或被新参数重算。
+
+**闭坑**
+
+- 以后修改 Apply 链路需同时检查 `applyMode`、`applySingleIndex`、解析路径和 `visibleFaceValues` 的回退逻辑，禁止通过重建 `entries` 或 `tableReloadVersion` 刷新整表。
+
+**验证**
+
+- `npm run typecheck` 通过；`npm run build` 通过；`git diff --check` 通过。尚未在 Tauri 窗口实测鼠标右键交互。
+
+### 2026-10-28：移除 idx 排序开关并保持计算结果局部更新
+
+**亮点**
+
+- `TablePane.tsx` 将 idx 列数字改为纯文本，删除其排序开关、持久化状态和提示；表头排序保留，计算结果变化时清空现有排序。
+- 全量计算以旧计算器重算旧值作为缺失快照的比较基准，避免首次计算记录缺失时把所有行误标为变化；稳定行 key 使 React 仅更新变化单元格内容。
+
+**痛点**
+
+- 旧 idx 控制项通过 localStorage 记住开关状态；移除开关后需同时清掉读写逻辑，避免留下不可见但仍生效的排序门控。
+
+**闭坑**
+
+- 调整计算显示时保持图片行 `key={e.jpg_path}` 不变，勿修改 entries 顺序或增加整表 reload 状态；排序清除只处理 sortState、排序值和加载态。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在 Tauri 窗口实测右键计算交互。
+
+### 2026-10-28：避免 Apply 全量计算期间表格闪动
+
+**亮点**
+
+- `TablePane.tsx` 保留解析完成时的 `parsedTomls` 快照，直到新一轮批量解析全部成功后再一次性替换；请求期间继续以之前的 TOML 字段和旧计算器展示表格。
+- 将当前显示计算器与本次 Apply 所请求的计算器分开；新计算器异步加载期间使用基线计算器，完成回调必须等待本次版本的计算器和解析数据都就绪。
+- 计算差异不再清除排序及排序缓存，保持行顺序和滚动位置稳定。
+
+**痛点**
+
+- 之前 `applyAllVersion` 变化让旧计算器暂时不匹配，且解析 effect 立即执行 `setParsedTomls(null)`；列表分类、计算值和列宽依赖因此出现空值再恢复，形成闪动。差异时重置排序还可能改变可见行位置。
+
+**闭坑**
+
+- Apply 异步期间不要清空仍有效的解析快照；请求版本的完成判定与屏幕当前显示的回退计算器必须分开。改变计算值时保留行 key、排序态和滚动位置。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在 Tauri 窗口实测实际闪动是否消失。
+
+### 2026-10-28：Apply 时保持图片表格列设置缓存稳定
+
+**亮点**
+
+- `TablePane.tsx` 的图片类型分类和全量列宽测量缓存改为由图片数组、TOML 字段签名及数据版本判定，不再要求计算器函数对象引用相同；Apply 生成新计算器时保留列作用域和缓存宽度。
+
+**痛点**
+
+- 旧校验把 calculator 函数引用当作列缓存有效性条件。每次 Apply 的 `useMemo` 会生成不同函数对象，造成分类缓存临时失效，`columnScope` 切回 All 并切换手动宽度，随后分类完成又切回 Face/Normal，表现为整表横向闪动。
+
+**闭坑**
+
+- 派生 UI 缓存只依赖与数据内容相关的稳定签名；计算策略函数身份变化不应清空图片类型分类或列宽测量。手动宽度仍由既有作用域配置控制。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在用户的 Tauri 窗口再次实测 Apply 闪动。
+
+### 2026-10-28：单图计算隔离全表派生数据
+
+**亮点**
+
+- `TablePane.tsx` 在单图 Apply 期间继续使用基线计算器做图片分类和列宽测量，单图的新计算器只用于当前行目标值；沿用已缓存的全表分类及宽度，不触发全量派生重算。
+
+**痛点**
+
+- 单图解析原本只加载一行，但图片分类 effect 仍会因计算器函数变化重新遍历并请求全表字段，造成其他行派生值短暂变化，看起来像整表数值闪烁。
+
+**闭坑**
+
+- 单图路径必须隔离“目标行更新”与“全表分类/测宽”计算器；检查所有依赖 apply 版本或 calculator 引用的全表 effect。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在 Tauri 窗口实测单图数值刷新范围。
+
+### 2026-10-28：单图 Apply 仅替换目标行结果
+
+**亮点**
+
+- `TablePane.tsx` 的单图 `allTargets` 现在只计算当前 TOML 路径；单图 Apply 跳过全表分类与列宽测量 effect。其他可见行优先使用计算前缓存结果，单图期间不再调用新计算器重算其数值。
+
+**痛点**
+
+- 单图解析虽只有一张图片，但旧 `allTargets` 仍遍历所有 entries；`visibleFaceValues` 也在父组件更新时重新生成并调用基线计算器，造成未选行数值派生重复、用户观察为闪动。
+
+**闭坑**
+
+- 单图计算需同时限定解析路径、目标结果映射和派生缓存更新范围；不能只限制 TOML IPC 请求。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在 Tauri 窗口验证未选行不闪动。
