@@ -23,6 +23,7 @@ Thumbs.db
 /resources/state.toml.tmp
 /src-tauri/resources/state.toml
 /src-tauri/resources/state.toml.tmp
+/src-tauri/resources/state.toml.*.tmp
 .env
 .env.local
 .tauri-updater.key

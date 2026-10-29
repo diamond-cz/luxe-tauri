@@ -790,6 +790,7 @@ fn write_thumbnail_cache_file(
 
 fn thumbnail_cache_dir() -> PathBuf {
     std::env::temp_dir().join("luxe-tauri").join("image-thumbnails")
+        .join(std::process::id().to_string())
 }
 
 fn signature_modified_key(signature: &TomlSignature) -> u128 {

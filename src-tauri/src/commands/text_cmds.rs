@@ -32,7 +32,8 @@ pub fn write_temp_text_file(name_hint: String, contents: String) -> AppResult<St
         .collect::<String>();
     let stem = if stem.is_empty() { "source".into() } else { stem };
     let ext = hint.extension().and_then(|value| value.to_str()).unwrap_or("cpp");
-    let dir = std::env::temp_dir().join("luxe-tauri-drafts");
+    let dir = std::env::temp_dir().join("luxe-tauri-drafts")
+        .join(std::process::id().to_string());
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{stem}-{hash:016x}.{ext}"));
     std::fs::write(&path, contents)?;

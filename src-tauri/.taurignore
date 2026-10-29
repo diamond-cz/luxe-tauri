@@ -1,3 +1,4 @@
 # Local session writes must not restart tauri dev.
 resources/state.toml
 resources/state.toml.tmp
+resources/state.toml.*.tmp

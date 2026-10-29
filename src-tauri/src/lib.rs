@@ -32,18 +32,7 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let builder = tauri::Builder::default();
-    // A stale dev instance must not make a new `tauri dev` exit and stop its Vite server.
-    #[cfg(not(debug_assertions))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.show();
-            let _ = win.set_focus();
-            let _ = win.unminimize();
-        }
-    }));
-
-    let app = builder
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())

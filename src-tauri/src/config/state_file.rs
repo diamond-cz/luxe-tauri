@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::{Mutex as SyncMutex, RwLock};
@@ -22,6 +23,7 @@ use crate::error::{AppError, AppResult};
 
 const STATE_FILE_NAME: &str = "state.toml";
 const DEBOUNCE_MS:     u64  = 200;
+static NEXT_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub struct StateStore {
     pub root:      Arc<RwLock<StateRoot>>,
@@ -173,14 +175,29 @@ impl StateStore {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let temporary = self.path.with_extension("toml.tmp");
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
+        // Independent processes (and stores) must never truncate each other's
+        // pending writes. create_new also handles stale files after PID reuse.
+        let (temporary, mut file) = loop {
+            let id = NEXT_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+            let path = self.path.with_extension(format!("toml.{}.{id}.tmp", std::process::id()));
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => break (path, file),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        };
+        let result = (|| -> std::io::Result<()> {
+            file.write_all(text.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&temporary, &self.path)
+        })();
         // rename replaces the destination on Windows too; keep the old file
-        // intact until replacement succeeds. The writer lock serializes writes.
-        std::fs::rename(&temporary, &self.path)?;
+        // intact until replacement succeeds. The last complete snapshot wins.
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result?;
         Ok(())
     }
 

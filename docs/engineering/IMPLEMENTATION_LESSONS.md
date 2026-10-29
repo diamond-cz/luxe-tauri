@@ -26,6 +26,28 @@
 
 ## 已沉淀经验
 
+### 2026-10-29：多开进程与临时资源隔离
+
+**亮点**
+
+- `src-tauri/src/lib.rs`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 移除正式构建的单实例插件，重复启动时创建独立进程。
+- `src-tauri/src/config/state_file.rs` 使用进程 ID、递增序号和 `create_new` 创建独立状态临时文件，再原子替换配置；`image_scan/mod.rs` 和 `commands/text_cmds.rs` 按进程隔离图片缓存与源码草稿。`.gitignore` 与 `.taurignore` 同步排除新临时文件。
+- `src-tauri/tests/multi_instance.rs` 通过两个子进程并发保存配置、为同一源文件写入不同草稿和生成预览，检查内存状态独立、配置完整与缓存清理隔离。
+
+**痛点**
+
+- 原单实例插件仅在正式构建启用，导致开发环境可多开而安装包不可多开。移除插件后，原共用 `state.toml.tmp` 会被其他进程截断或移动，共用缩略图目录会被其他进程切换目录时删除，同名源码草稿会互相覆盖。
+- 持久化仍使用共用 `state.toml` 的完整快照，最后完成的保存决定重启后的状态；不会在运行中的实例间同步配置。全局快捷键遇到已注册组合时沿用原有跳过逻辑。
+
+**闭坑**
+
+- 调整启动生命周期时同时检查正式与开发构建；临时资源必须检查是否跨进程共享。状态临时文件的命名调整须同步更新 Git 忽略和 Tauri 监听排除。
+- 多开回归运行 `src-tauri/tests/multi_instance.rs`；托盘退出或重启应只作用于当前进程，不能扫描或终止其他 LUXE 进程。
+
+**验证**
+
+- `cargo check --locked --manifest-path src-tauri/Cargo.toml`、`npm run typecheck`、`npm run rust:test`、`git diff --check` 通过。Rust 全量回归包含双子进程并发保存、草稿隔离和预览缓存隔离；未在实际桌面窗口中验收双实例启动、托盘与快捷键交互。
+
 ### 2026-10-29：Apply 后保留热力图已选图片位置
 
 **亮点**
