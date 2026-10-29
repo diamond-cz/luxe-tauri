@@ -26,6 +26,24 @@
 
 ## 已沉淀经验
 
+### 2026-10-29：Apply 后保留热力图已选图片位置
+
+**亮点**
+
+- `src/views/mtk/isp6s/TablePane/TablePane.tsx` 用 `positionedHeatmapSelectionRef` 记录已经定位过的热力图选择；新命中集合仍定位首张，图片切换后 Apply 更新表格行时保留当前位置。
+
+**痛点**
+
+- 原定位 effect 同时依赖 `selectedHeatmapPaths` 和 `sortedRows`。Apply 重算分类使 `sortedRows` 引用变化，旧 effect 把列表重新滚到首张命中图片，即使命中集合与当前图片均未变化。
+
+**闭坑**
+
+- 修改图片表格的排序、分类或计算刷新时，检查滚动 effect 是否只在用户选择发生变化时定位；命中目标暂不在 `sortedRows` 时，保留稍后定位的机会。
+
+**验证**
+
+- `npm run typecheck` 通过；`git diff --check` 通过。未在 Tauri 窗口实测热力图命中、左右切换及 Apply 的完整鼠标流程。
+
 ### 2026-10-23：本地状态文档统一归档
 
 **亮点**

@@ -1122,6 +1122,7 @@ export function ImageTab({
   const preserveRestoredScrollRef = useRef(Boolean(scrollPosition));
   const previousCurrentRef = useRef(current);
   const previousKindFilterRef = useRef<string | null>(null);
+  const positionedHeatmapSelectionRef = useRef<string[] | null>(null);
   const scrollPositionChangeRef = useRef(onScrollPositionChange);
   const tableWindowPathsRef = useRef<string[]>([]);
   const tableFieldCacheRef = useRef<Record<string, Record<string, string>>>({});
@@ -2176,8 +2177,15 @@ export function ImageTab({
 
   useEffect(() => {
     const firstPath = selectedHeatmapPaths[0];
-    if (!firstPath) return;
-    ensureImageTableRowVisible(sortedRows.findIndex(({ e }) => e.toml_path === firstPath));
+    if (!firstPath) {
+      positionedHeatmapSelectionRef.current = null;
+      return;
+    }
+    if (positionedHeatmapSelectionRef.current === selectedHeatmapPaths) return;
+    const displayIndex = sortedRows.findIndex(({ e }) => e.toml_path === firstPath);
+    if (displayIndex < 0) return;
+    positionedHeatmapSelectionRef.current = selectedHeatmapPaths;
+    ensureImageTableRowVisible(displayIndex);
   }, [selectedHeatmapPaths, sortedRows]);
 
   useEffect(() => {
