@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "إخفاء بطاقة قائمة الصور",
+  "workspace_show_images": "إظهار بطاقة قائمة الصور",
+  "workspace_hide_source": "إخفاء بطاقة الشفرة المصدرية",
+  "workspace_show_source": "إظهار بطاقة الشفرة المصدرية",
   "face_fdsz_exif_source": "مصدر حساب EXIF",
   "face_fdsz_keyword": "وسم الصورة",
   "face_fdsz_parameter": "استيفاء المعلمات",

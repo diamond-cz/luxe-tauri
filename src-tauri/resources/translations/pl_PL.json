@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Ukryj kartę listy obrazów",
+  "workspace_show_images": "Pokaż kartę listy obrazów",
+  "workspace_hide_source": "Ukryj kartę kodu źródłowego",
+  "workspace_show_source": "Pokaż kartę kodu źródłowego",
   "face_fdsz_exif_source": "Źródło obliczeń EXIF",
   "face_fdsz_keyword": "Znacznik obrazu",
   "face_fdsz_parameter": "Interpolacja parametrów",

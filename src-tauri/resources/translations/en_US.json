@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Hide image list card",
+  "workspace_show_images": "Show image list card",
+  "workspace_hide_source": "Hide source code card",
+  "workspace_show_source": "Show source code card",
   "face_fdsz_exif_source": "EXIF calculation source",
   "face_fdsz_keyword": "Image tag",
   "face_fdsz_parameter": "Parameter interpolation",

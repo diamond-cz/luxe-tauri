@@ -47,6 +47,7 @@ import { columnSettingsPlacement } from "./columnSettingsPlacement";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { ScrollPosition } from "../workspaceSession";
+import { WorkspaceHideButton } from "@/views/mtk/isp6s/WorkspaceColumns";
 
 /** 空景筛选图标：线条树叶和右下角保护标记。 */
 function SceneLeafProtectIcon() {
@@ -114,6 +115,7 @@ interface Props {
   imageDataRevision: number;
   scrollPosition?: ScrollPosition | null;
   onScrollPositionChange?: (position: ScrollPosition) => void;
+  onHide?: () => void;
 }
 
 const IMG_EXTS = ["jpg", "jpeg", "png"];
@@ -323,6 +325,7 @@ export function TablePane({
   imageDataRevision,
   scrollPosition,
   onScrollPositionChange,
+  onHide,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
@@ -487,6 +490,7 @@ export function TablePane({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {onHide && <WorkspaceHideButton side="images" onHide={onHide} />}
           <Button size="small" appearance="subtle"
             style={{ width: 28, minWidth: 28, height: 28, padding: 0, color: selectionSyncEnabled ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)" }}
             icon={selectionSyncEnabled ? <LinkMultiple24Regular className="h-4 w-4" /> : <LinkDismiss24Regular className="h-4 w-4" />}

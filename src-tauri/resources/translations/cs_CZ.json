@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Skrýt kartu seznamu obrázků",
+  "workspace_show_images": "Zobrazit kartu seznamu obrázků",
+  "workspace_hide_source": "Skrýt kartu zdrojového kódu",
+  "workspace_show_source": "Zobrazit kartu zdrojového kódu",
   "face_fdsz_exif_source": "Zdroj výpočtu EXIF",
   "face_fdsz_keyword": "Značka obrázku",
   "face_fdsz_parameter": "Interpolace parametrů",

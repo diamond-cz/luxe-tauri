@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Görüntü listesi kartını gizle",
+  "workspace_show_images": "Görüntü listesi kartını göster",
+  "workspace_hide_source": "Kaynak kod kartını gizle",
+  "workspace_show_source": "Kaynak kod kartını göster",
   "face_fdsz_exif_source": "EXIF hesaplama kaynağı",
   "face_fdsz_keyword": "Görüntü etiketi",
   "face_fdsz_parameter": "Parametre enterpolasyonu",

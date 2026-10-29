@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "画像一覧カードを非表示",
+  "workspace_show_images": "画像一覧カードを表示",
+  "workspace_hide_source": "ソースコードカードを非表示",
+  "workspace_show_source": "ソースコードカードを表示",
   "face_fdsz_exif_source": "EXIF計算の参照元",
   "face_fdsz_keyword": "画像タグ",
   "face_fdsz_parameter": "パラメータ補間",

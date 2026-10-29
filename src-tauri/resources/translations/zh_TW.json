@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "隱藏圖片列表卡片",
+  "workspace_show_images": "顯示圖片列表卡片",
+  "workspace_hide_source": "隱藏原始碼卡片",
+  "workspace_show_source": "顯示原始碼卡片",
   "face_fdsz_exif_source": "EXIF 計算來源",
   "face_fdsz_keyword": "圖片關鍵字",
   "face_fdsz_parameter": "參數插值",

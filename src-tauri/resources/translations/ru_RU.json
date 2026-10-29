@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Скрыть карточку списка изображений",
+  "workspace_show_images": "Показать карточку списка изображений",
+  "workspace_hide_source": "Скрыть карточку исходного кода",
+  "workspace_show_source": "Показать карточку исходного кода",
   "face_fdsz_exif_source": "Источник расчёта EXIF",
   "face_fdsz_keyword": "Тег изображения",
   "face_fdsz_parameter": "Интерполяция параметров",

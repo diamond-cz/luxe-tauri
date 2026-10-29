@@ -16,6 +16,7 @@ export interface WorkspaceSession {
   sourceScroll: Record<string, ScrollPosition>;
   toneSourceSize: number;
   toneLceSize: number;
+  collapsedWorkspaceSide: "images" | "source" | null;
 }
 
 const sessions = new Map<string, WorkspaceSession>();
@@ -48,6 +49,7 @@ export function workspaceSession(key: string): WorkspaceSession {
     sourceScroll: {},
     toneSourceSize: 40,
     toneLceSize: 42,
+    collapsedWorkspaceSide: null,
   };
   sessions.set(key, session);
   while (sessions.size > WORKSPACE_SESSION_LIMIT) {

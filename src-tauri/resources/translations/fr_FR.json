@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Masquer la carte de liste d’images",
+  "workspace_show_images": "Afficher la carte de liste d’images",
+  "workspace_hide_source": "Masquer la carte de code source",
+  "workspace_show_source": "Afficher la carte de code source",
   "face_fdsz_exif_source": "Source du calcul EXIF",
   "face_fdsz_keyword": "Balise image",
   "face_fdsz_parameter": "Interpolation des paramètres",

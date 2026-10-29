@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Ocultar cartão da lista de imagens",
+  "workspace_show_images": "Mostrar cartão da lista de imagens",
+  "workspace_hide_source": "Ocultar cartão de código-fonte",
+  "workspace_show_source": "Mostrar cartão de código-fonte",
   "face_fdsz_exif_source": "Fonte do cálculo EXIF",
   "face_fdsz_keyword": "Tag da imagem",
   "face_fdsz_parameter": "Interpolação de parâmetros",

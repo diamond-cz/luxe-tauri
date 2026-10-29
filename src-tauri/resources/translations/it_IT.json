@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Nascondi scheda elenco immagini",
+  "workspace_show_images": "Mostra scheda elenco immagini",
+  "workspace_hide_source": "Nascondi scheda codice sorgente",
+  "workspace_show_source": "Mostra scheda codice sorgente",
   "face_fdsz_exif_source": "Origine calcolo EXIF",
   "face_fdsz_keyword": "Tag immagine",
   "face_fdsz_parameter": "Interpolazione parametri",

@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Bildlistenkarte ausblenden",
+  "workspace_show_images": "Bildlistenkarte anzeigen",
+  "workspace_hide_source": "Quellcodekarte ausblenden",
+  "workspace_show_source": "Quellcodekarte anzeigen",
   "face_fdsz_exif_source": "EXIF-Berechnungsquelle",
   "face_fdsz_keyword": "Bild-Tag",
   "face_fdsz_parameter": "Parameterinterpolation",

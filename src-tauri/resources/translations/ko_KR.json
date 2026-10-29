@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "이미지 목록 카드 숨기기",
+  "workspace_show_images": "이미지 목록 카드 표시",
+  "workspace_hide_source": "소스 코드 카드 숨기기",
+  "workspace_show_source": "소스 코드 카드 표시",
   "face_fdsz_exif_source": "EXIF 계산 소스",
   "face_fdsz_keyword": "이미지 태그",
   "face_fdsz_parameter": "매개변수 보간",

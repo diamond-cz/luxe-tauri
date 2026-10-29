@@ -19,6 +19,7 @@ import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceSession } from "./workspaceSession";
 import { isDebugParserExecutable } from "../debugParserPath";
+import { WorkspaceColumns } from "./WorkspaceColumns";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -80,7 +81,7 @@ export function Isp6sAeVisual({
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
   const reportWorkspaceDivider = useCallback(() => {
     const rect = document.getElementById(WORKSPACE_DIVIDER_ID)?.getBoundingClientRect();
-    if (rect) onWorkspaceDividerChange(rect.left + rect.width / 2);
+    if (rect && rect.width > 0) onWorkspaceDividerChange(rect.left + rect.width / 2);
   }, [onWorkspaceDividerChange]);
 
   useLayoutEffect(() => {
@@ -402,10 +403,11 @@ export function Isp6sAeVisual({
   }
 
   /* ── Table panel — wraps TablePane in standard padding. ── */
-  const renderTablePanel = () => (
+  const renderTablePanel = (onHide: () => void) => (
     <div className="h-full w-full min-w-0">
       <Suspense fallback={<PaneFallback label="正在加载图片列表..." />}>
         <TablePane
+          onHide={onHide}
           schema={schema}
           toneMode={toneMode}
           filePath={filePath}
@@ -453,10 +455,11 @@ export function Isp6sAeVisual({
   );
 
   /* ── Final layout ── */
-  const renderSourceCodePanel = () => (
+  const renderSourceCodePanel = (onHide: () => void) => (
     <div className="h-full w-full min-w-0">
       <Suspense fallback={<PaneFallback label="正在加载源代码卡片..." />}>
         <ImagePane
+          onHide={onHide}
           key={`${filePath ?? ""}|${cppImportRevision}`}
           toneMode={toneMode}
           toneParsed={toneParsed}
@@ -502,12 +505,15 @@ export function Isp6sAeVisual({
                       style={{ accentColor: "var(--colorBrandBackground)" }} aria-label="图片解析进度" />
           </div>
         )}
-        <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
-          <Panel defaultSize={100 - session.toneSourceSize} minSize={30} className="min-w-0 overflow-hidden">
+        <WorkspaceColumns session={session} sourceSize={session.toneSourceSize}
+          onSourceSizeChange={(size) => { session.toneSourceSize = size; }}
+          dividerId={WORKSPACE_DIVIDER_ID}
+          renderSource={renderSourceCodePanel}
+          renderImages={(hide) => (
             <div ref={workspaceLeftRef} className="h-full w-full min-w-0">
               <PanelGroup direction="vertical" className="h-full w-full min-w-0">
                 <Panel defaultSize={100 - session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden">
-                  {renderTablePanel()}
+                  {renderTablePanel(hide)}
                 </Panel>
                 <ResizeHandle direction="vertical" size={CARD_GAP_PX} />
                 <Panel defaultSize={session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden" onResize={(size) => {
@@ -527,14 +533,7 @@ export function Isp6sAeVisual({
                 </Panel>
               </PanelGroup>
             </div>
-          </Panel>
-          <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />
-          <Panel defaultSize={session.toneSourceSize} minSize={25} className="min-w-0 overflow-hidden" onResize={(size) => {
-            if (Number.isFinite(size) && size >= 25 && size <= 70) session.toneSourceSize = size;
-          }}>
-            {renderSourceCodePanel()}
-          </Panel>
-        </PanelGroup>
+          )} />
       </div>
     );
   }
@@ -550,12 +549,15 @@ export function Isp6sAeVisual({
                   aria-label={`图片解析 ${exifProgress.stage}`} />
       </div>
     )}
-    <PanelGroup direction="horizontal" className="min-h-0 w-full min-w-0 flex-1">
-      <Panel defaultSize={100 - sourceColumnSize} minSize={30} className="min-w-0 overflow-hidden">
+    <WorkspaceColumns session={session} sourceSize={sourceColumnSize}
+      onSourceSizeChange={updateSourceColumnSize}
+      dividerId={WORKSPACE_DIVIDER_ID}
+      renderSource={renderSourceCodePanel}
+      renderImages={(hide) => (
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
           <PanelGroup direction="vertical" className="h-full w-full min-w-0">
             <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
-              {renderTablePanel()}
+              {renderTablePanel(hide)}
             </Panel>
             <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
             <Panel ref={detailsPanelRef} defaultSize={visual.table_collapsed ? 0 : detailsSize} minSize={DETAILS_MIN_SIZE}
@@ -583,12 +585,7 @@ export function Isp6sAeVisual({
             <PanelBottomExpand20Filled />
           </button>}
         </div>
-      </Panel>
-      <ResizeHandle id={WORKSPACE_DIVIDER_ID} direction="horizontal" size={CARD_GAP_PX} />
-      <Panel defaultSize={sourceColumnSize} minSize={24} className="min-w-0 overflow-hidden" onResize={updateSourceColumnSize}>
-        {renderSourceCodePanel()}
-      </Panel>
-    </PanelGroup>
+      )} />
     </div>
   );
 

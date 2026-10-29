@@ -8,6 +8,7 @@ import { cppClearCache, type CardSourceSpec, type Isp6sSchemaRoot } from "@/ipc/
 import { readTextFile, writeTempTextFile, writeTextFile } from "@/ipc/text";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
+import { WorkspaceHideButton } from "@/views/mtk/isp6s/WorkspaceColumns";
 import { ChartMapMode, type ChartSourceJumpDetails } from "./ChartMapMode";
 import { ToneChartMapMode } from "./ToneChartMapMode";
 import { ParamMapMode, type ChartPreviewTarget, type SourceOverride } from "./ParamMapMode";
@@ -59,6 +60,7 @@ interface Props {
   onCalculatorSourcePathChange?: (path: string | null) => void;
   onSourceEditorBindingChange?: (binding: SourceEditorBinding | null) => void;
   scrollSession?: WorkspaceSession;
+  onHide?: () => void;
 }
 
 const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
@@ -225,7 +227,7 @@ function useSourceDraft(filePath: string, importRevision: number) {
 }
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession,
+  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession, onHide,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
@@ -437,6 +439,7 @@ export function ImagePane({
             );
           })}
         </div>
+        {onHide && <WorkspaceHideButton side="source" onHide={onHide} />}
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">

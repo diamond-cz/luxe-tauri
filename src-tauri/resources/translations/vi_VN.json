@@ -1,4 +1,8 @@
 {
+  "workspace_hide_images": "Ẩn thẻ danh sách ảnh",
+  "workspace_show_images": "Hiện thẻ danh sách ảnh",
+  "workspace_hide_source": "Ẩn thẻ mã nguồn",
+  "workspace_show_source": "Hiện thẻ mã nguồn",
   "face_fdsz_exif_source": "Nguồn tính EXIF",
   "face_fdsz_keyword": "Thẻ ảnh",
   "face_fdsz_parameter": "Nội suy tham số",
