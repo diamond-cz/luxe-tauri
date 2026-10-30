@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.2.13",
+    "date": "2026-10-29",
+    "items": [
+      { "type": "新增", "content": "支持同时启动多个 LUXE 实例，图片缓存与源码草稿按进程隔离。" },
+      { "type": "新增", "content": "AE Basic 与 ToneMap 支持拖动或点击图标隐藏图片列表侧、源代码卡片，并通过图标恢复之前的分割比例。" },
+      { "type": "新增", "content": "图片列表计算按钮支持右键 Apply single image，仅更新当前图片的计算结果。" },
+      { "type": "优化", "content": "优化 Apply all image 的表格刷新，保留排序、列宽与滚动位置，减少计算期间的闪动。" },
+      { "type": "修复", "content": "修复切换热力图已选图片后，Apply all image 将列表滚回首张命中图片的问题。" }
+    ]
+  },
+  {
     "version": "0.2.12",
     "date": "2026-10-27",
     "items": [
