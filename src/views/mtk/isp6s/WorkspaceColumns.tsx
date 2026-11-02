@@ -40,33 +40,47 @@ export function WorkspaceColumns({
   renderSource: (hide: () => void) => ReactNode;
 }) {
   const { t } = useTranslation();
+  const rootRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const imagesRef = useRef<ImperativePanelHandle>(null);
   const sourceRef = useRef<ImperativePanelHandle>(null);
+  const imagesContentRef = useRef<HTMLDivElement>(null);
+  const sourceContentRef = useRef<HTMLDivElement>(null);
   const showButtonRef = useRef<HTMLButtonElement>(null);
   const focusAfterCollapseRef = useRef<"images" | "source" | null>(null);
   const expandedSourceSizeRef = useRef(sourceSize);
   const [collapsedSide, setCollapsedSide] = useState(session.collapsedWorkspaceSide);
-  const { collapsing, collapse, onTransitionEnd } = usePanelCollapseTransition();
+  const [animatedPanel, setAnimatedPanel] = useState<{ side: "images" | "source"; width: number } | null>(null);
+  const { transitioning, motion, collapse, expand, onTransitionEnd } = usePanelCollapseTransition();
   const initialSide = useRef(session.collapsedWorkspaceSide).current;
   useLayoutEffect(() => {
-    if (!collapsing && collapsedSide && focusAfterCollapseRef.current === collapsedSide) {
+    if (!transitioning && collapsedSide && focusAfterCollapseRef.current === collapsedSide) {
       focusAfterCollapseRef.current = null;
       showButtonRef.current?.focus();
     }
-  }, [collapsedSide, collapsing]);
+  }, [collapsedSide, transitioning]);
+  useLayoutEffect(() => {
+    if (!transitioning && animatedPanel) setAnimatedPanel(null);
+  }, [animatedPanel, transitioning]);
   const hide = (side: "images" | "source") => {
     focusAfterCollapseRef.current = side;
+    const content = side === "images" ? imagesContentRef.current : sourceContentRef.current;
+    setAnimatedPanel({ side, width: content?.getBoundingClientRect().width ?? 0 });
     collapse(() => (side === "images" ? imagesRef : sourceRef).current?.collapse());
   };
   const restore = () => {
     const size = expandedSourceSizeRef.current;
-    groupRef.current?.setLayout([100 - size, size]);
+    if (collapsedSide) {
+      const availableWidth = Math.max(0, (rootRef.current?.clientWidth ?? 0) - 12);
+      const panelRatio = collapsedSide === "images" ? 100 - size : size;
+      setAnimatedPanel({ side: collapsedSide, width: availableWidth * panelRatio / 100 });
+    }
+    expand(() => groupRef.current?.setLayout([100 - size, size]));
   };
   const showLabel = t(collapsedSide === "images" ? "workspace_show_images" : "workspace_show_source");
 
   return (
-    <div className="relative min-h-0 w-full min-w-0 flex-1">
+    <div ref={rootRef} className="relative min-h-0 w-full min-w-0 flex-1">
       <PanelGroup ref={groupRef} direction="horizontal" className="h-full w-full min-w-0"
         onLayout={(sizes) => {
           const [images, source] = sizes;
@@ -81,24 +95,28 @@ export function WorkspaceColumns({
         }}>
         <Panel ref={imagesRef} id="workspace-images" order={1} collapsible collapsedSize={0} minSize={30}
           defaultSize={initialSide === "images" ? 0 : initialSide === "source" ? 100 : 100 - sourceSize}
-          className={`min-w-0 overflow-hidden ${collapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : ""}`}
+          className={`relative min-w-0 overflow-hidden ${transitioning ? "transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none" : ""}`}
           onTransitionEnd={onTransitionEnd}>
-          <div hidden={collapsedSide === "images" && !collapsing} className="h-full w-full min-w-0">
+          <div ref={imagesContentRef} hidden={collapsedSide === "images" && !transitioning}
+            className={`h-full min-w-0 ${animatedPanel?.side === "images" && transitioning ? "absolute inset-y-0 left-0" : "w-full"}`}
+            style={animatedPanel?.side === "images" && transitioning ? { width: animatedPanel.width } : undefined}>
             {renderImages(() => hide("images"))}
           </div>
         </Panel>
         <ResizeHandle id={dividerId} direction="horizontal" size={collapsedSide ? 0 : 12}
-          className={`overflow-hidden ${collapsing ? "transition-[width] duration-200 ease-out motion-reduce:transition-none" : ""}`} />
+          className={`overflow-hidden ${transitioning ? "transition-[width] duration-300 ease-out motion-reduce:transition-none" : ""}`} />
         <Panel ref={sourceRef} id="workspace-source" order={2} collapsible collapsedSize={0} minSize={24}
           defaultSize={initialSide === "source" ? 0 : initialSide === "images" ? 100 : sourceSize}
-          className={`min-w-0 overflow-hidden ${collapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : ""}`}
+          className={`relative min-w-0 overflow-hidden ${transitioning ? "transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none" : ""}`}
           onTransitionEnd={onTransitionEnd}>
-          <div hidden={collapsedSide === "source" && !collapsing} className="h-full w-full min-w-0">
+          <div ref={sourceContentRef} hidden={collapsedSide === "source" && !transitioning}
+            className={`h-full min-w-0 ${animatedPanel?.side === "source" && transitioning ? "absolute inset-y-0 right-0" : "w-full"}`}
+            style={animatedPanel?.side === "source" && transitioning ? { width: animatedPanel.width } : undefined}>
             {renderSource(() => hide("source"))}
           </div>
         </Panel>
       </PanelGroup>
-      {collapsedSide && !collapsing && <Button ref={showButtonRef} size="small" appearance="subtle" title={showLabel} aria-label={showLabel}
+      {collapsedSide && (!transitioning || motion === "expanding") && <Button ref={showButtonRef} size="small" appearance="subtle" title={showLabel} aria-label={showLabel}
         onClick={restore}
         icon={collapsedSide === "images" ? <PanelLeftExpand20Regular /> : <PanelRightExpand20Regular />}
         className={`absolute top-1/2 z-20 -translate-y-1/2 ${collapsedSide === "images" ? "left-1" : "right-1"}`}

@@ -21,7 +21,7 @@ import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceSession } from "./workspaceSession";
 import { isDebugParserExecutable } from "../debugParserPath";
 import { WorkspaceColumns, WorkspaceHideButton } from "./WorkspaceColumns";
-import { usePanelCollapseTransition } from "./usePanelCollapseTransition";
+import { panelMotionStyle, usePanelCollapseTransition } from "./usePanelCollapseTransition";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -367,13 +367,13 @@ export function Isp6sAeVisual({
   const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
   const detailsShowButtonRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterDetailsCollapseRef = useRef(false);
-  const { collapsing: detailsCollapsing, collapse: collapseDetails, onTransitionEnd: onDetailsTransitionEnd } = usePanelCollapseTransition();
+  const { transitioning: detailsTransitioning, motion: detailsMotion, collapse: collapseDetails, expand: expandDetails, onTransitionEnd: onDetailsTransitionEnd } = usePanelCollapseTransition();
   useLayoutEffect(() => {
-    if (visual.table_collapsed && !detailsCollapsing && focusAfterDetailsCollapseRef.current) {
+    if (visual.table_collapsed && !detailsTransitioning && focusAfterDetailsCollapseRef.current) {
       focusAfterDetailsCollapseRef.current = false;
       detailsShowButtonRef.current?.focus();
     }
-  }, [visual.table_collapsed, detailsCollapsing]);
+  }, [visual.table_collapsed, detailsTransitioning]);
   const hideDetailsPanel = useCallback(() => {
     const panel = detailsPanelRef.current;
     if (!panel) return;
@@ -569,18 +569,19 @@ export function Isp6sAeVisual({
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
           <PanelGroup direction="vertical" className="h-full w-full min-w-0">
             <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}
-              className={detailsCollapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : undefined}>
+              className={detailsTransitioning ? "transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none" : undefined}>
               {renderTablePanel(hide)}
             </Panel>
             <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX}
-              className={`overflow-hidden ${detailsCollapsing ? "transition-[height] duration-200 ease-out motion-reduce:transition-none" : ""}`} />
+              className={`overflow-hidden ${detailsTransitioning ? "transition-[height] duration-300 ease-out motion-reduce:transition-none" : ""}`} />
             <Panel ref={detailsPanelRef} defaultSize={visual.table_collapsed ? 0 : detailsSize} minSize={DETAILS_MIN_SIZE}
-              className={detailsCollapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : undefined}
+              className={detailsTransitioning ? "transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none" : undefined}
               onTransitionEnd={onDetailsTransitionEnd}
               collapsible collapsedSize={0} onCollapse={() => patchVis({ table_collapsed: true })}
               onExpand={() => patchVis({ table_collapsed: false })}
               onResize={(size) => { if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) patchVis({ workspace_details_ratio: size }); }}>
-              {(!visual.table_collapsed || detailsCollapsing) && <DetailsPanel
+              {(!visual.table_collapsed || detailsTransitioning) && <div className="h-full w-full min-h-0" style={panelMotionStyle(detailsMotion, "bottom")}>
+                <DetailsPanel
                 detailsTab={detailsTab}
                 onTabChange={handleDetailsTabChange}
                 onHide={hideDetailsPanel}
@@ -591,12 +592,13 @@ export function Isp6sAeVisual({
                 filePath={filePath}
                 cppImportRevision={cppImportRevision}
                 sourceEditorBinding={detailsTab === "bcompare" ? sourceEditorBinding : null}
-              />}
+                />
+              </div>}
             </Panel>
           </PanelGroup>
-          {visual.table_collapsed && !detailsCollapsing && <Button ref={detailsShowButtonRef} size="small" appearance="subtle"
+          {visual.table_collapsed && (!detailsTransitioning || detailsMotion === "expanding") && <Button ref={detailsShowButtonRef} size="small" appearance="subtle"
             title="显示图片详情卡片" aria-label="显示图片详情卡片"
-            onClick={() => detailsPanelRef.current?.expand(detailsSize)}
+            onClick={() => expandDetails(() => detailsPanelRef.current?.expand(detailsSize))}
             icon={<PanelBottomExpand20Regular />}
             className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2"
             style={{ width: 28, minWidth: 28, height: 28, padding: 0, border: "1px solid var(--colorNeutralStroke2)",
