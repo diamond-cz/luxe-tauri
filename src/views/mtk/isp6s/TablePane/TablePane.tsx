@@ -490,7 +490,6 @@ export function TablePane({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {onHide && <WorkspaceHideButton side="images" onHide={onHide} />}
           <Button size="small" appearance="subtle"
             style={{ width: 28, minWidth: 28, height: 28, padding: 0, color: selectionSyncEnabled ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground3)" }}
             icon={selectionSyncEnabled ? <LinkMultiple24Regular className="h-4 w-4" /> : <LinkDismiss24Regular className="h-4 w-4" />}
@@ -512,6 +511,7 @@ export function TablePane({
             }} aria-label="Apply all image" />}
           <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<FolderAdd24Regular className="h-4 w-4" />}
             title="Add image folder" onClick={pickImageDir} aria-label="Add image folder" />
+          {onHide && <WorkspaceHideButton side="images" onHide={onHide} />}
         </div>
       </div>
       <div className="hidden"

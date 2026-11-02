@@ -1,24 +1,31 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@fluentui/react-components";
 import {
   PanelLeftContract20Regular,
   PanelLeftExpand20Regular,
   PanelRightContract20Regular,
   PanelRightExpand20Regular,
+  PanelBottomContract20Regular,
 } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import { Panel, PanelGroup, type ImperativePanelGroupHandle, type ImperativePanelHandle } from "react-resizable-panels";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { WorkspaceSession } from "./workspaceSession";
+import { usePanelCollapseTransition } from "./usePanelCollapseTransition";
 
-type Side = "images" | "source";
+type Side = "images" | "source" | "details";
 
 export function WorkspaceHideButton({ side, onHide }: { side: Side; onHide: () => void }) {
   const { t } = useTranslation();
-  const label = t(side === "images" ? "workspace_hide_images" : "workspace_hide_source");
+  const [highlighted, setHighlighted] = useState(false);
+  const label = side === "details" ? "隐藏图片详情卡片" : t(side === "images" ? "workspace_hide_images" : "workspace_hide_source");
   return <Button size="small" appearance="subtle" title={label} aria-label={label}
-    icon={side === "images" ? <PanelLeftContract20Regular /> : <PanelRightContract20Regular />}
-    onClick={onHide} style={{ width: 28, minWidth: 28, height: 28, padding: 0, flexShrink: 0 }} />;
+    icon={side === "images" ? <PanelLeftContract20Regular /> : side === "source" ? <PanelRightContract20Regular /> : <PanelBottomContract20Regular />}
+    onClick={onHide} onMouseEnter={() => setHighlighted(true)} onMouseLeave={() => setHighlighted(false)}
+    onFocus={() => setHighlighted(true)} onBlur={() => setHighlighted(false)}
+    style={{ width: 28, minWidth: 28, height: 28, padding: 0, flexShrink: 0,
+      color: highlighted ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground2)",
+      transition: "color 120ms ease" }} />;
 }
 
 /** Keep both cards mounted so collapsing never discards edits or Apply results. */
@@ -36,9 +43,22 @@ export function WorkspaceColumns({
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const imagesRef = useRef<ImperativePanelHandle>(null);
   const sourceRef = useRef<ImperativePanelHandle>(null);
+  const showButtonRef = useRef<HTMLButtonElement>(null);
+  const focusAfterCollapseRef = useRef<"images" | "source" | null>(null);
   const expandedSourceSizeRef = useRef(sourceSize);
   const [collapsedSide, setCollapsedSide] = useState(session.collapsedWorkspaceSide);
+  const { collapsing, collapse, onTransitionEnd } = usePanelCollapseTransition();
   const initialSide = useRef(session.collapsedWorkspaceSide).current;
+  useLayoutEffect(() => {
+    if (!collapsing && collapsedSide && focusAfterCollapseRef.current === collapsedSide) {
+      focusAfterCollapseRef.current = null;
+      showButtonRef.current?.focus();
+    }
+  }, [collapsedSide, collapsing]);
+  const hide = (side: "images" | "source") => {
+    focusAfterCollapseRef.current = side;
+    collapse(() => (side === "images" ? imagesRef : sourceRef).current?.collapse());
+  };
   const restore = () => {
     const size = expandedSourceSizeRef.current;
     groupRef.current?.setLayout([100 - size, size]);
@@ -61,21 +81,24 @@ export function WorkspaceColumns({
         }}>
         <Panel ref={imagesRef} id="workspace-images" order={1} collapsible collapsedSize={0} minSize={30}
           defaultSize={initialSide === "images" ? 0 : initialSide === "source" ? 100 : 100 - sourceSize}
-          className="min-w-0 overflow-hidden">
-          <div hidden={collapsedSide === "images"} className="h-full w-full min-w-0">
-            {renderImages(() => imagesRef.current?.collapse())}
+          className={`min-w-0 overflow-hidden ${collapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : ""}`}
+          onTransitionEnd={onTransitionEnd}>
+          <div hidden={collapsedSide === "images" && !collapsing} className="h-full w-full min-w-0">
+            {renderImages(() => hide("images"))}
           </div>
         </Panel>
-        <ResizeHandle id={dividerId} direction="horizontal" size={collapsedSide ? 0 : 12} className="overflow-hidden" />
+        <ResizeHandle id={dividerId} direction="horizontal" size={collapsedSide ? 0 : 12}
+          className={`overflow-hidden ${collapsing ? "transition-[width] duration-200 ease-out motion-reduce:transition-none" : ""}`} />
         <Panel ref={sourceRef} id="workspace-source" order={2} collapsible collapsedSize={0} minSize={24}
           defaultSize={initialSide === "source" ? 0 : initialSide === "images" ? 100 : sourceSize}
-          className="min-w-0 overflow-hidden">
-          <div hidden={collapsedSide === "source"} className="h-full w-full min-w-0">
-            {renderSource(() => sourceRef.current?.collapse())}
+          className={`min-w-0 overflow-hidden ${collapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : ""}`}
+          onTransitionEnd={onTransitionEnd}>
+          <div hidden={collapsedSide === "source" && !collapsing} className="h-full w-full min-w-0">
+            {renderSource(() => hide("source"))}
           </div>
         </Panel>
       </PanelGroup>
-      {collapsedSide && <Button size="small" appearance="subtle" title={showLabel} aria-label={showLabel}
+      {collapsedSide && !collapsing && <Button ref={showButtonRef} size="small" appearance="subtle" title={showLabel} aria-label={showLabel}
         onClick={restore}
         icon={collapsedSide === "images" ? <PanelLeftExpand20Regular /> : <PanelRightExpand20Regular />}
         className={`absolute top-1/2 z-20 -translate-y-1/2 ${collapsedSide === "images" ? "left-1" : "right-1"}`}

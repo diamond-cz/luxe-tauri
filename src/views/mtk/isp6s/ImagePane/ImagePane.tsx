@@ -63,7 +63,7 @@ interface Props {
   onHide?: () => void;
 }
 
-const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType }[] = [
+const TABS: { id: PreviewMode; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "chart_map",   label: "图表映射", Icon: ChartMultiple24Regular },
   { id: "param_map",   label: "源码映射", Icon: Code24Regular },
 ];
@@ -241,8 +241,6 @@ export function ImagePane({
   const activeSource = caLtmActive ? caSource : toneSource;
   const activeFilePath = caLtmActive ? caLtmPath ?? "" : filePath;
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
-  const headerRef = useRef<HTMLDivElement | null>(null);
-  const [showModeLabels, setShowModeLabels] = useState(true);
   const effectiveMode: Exclude<PreviewMode, "para_check"> =
     mode === "chart_map" ? "chart_map" : "param_map";
 
@@ -322,21 +320,6 @@ export function ImagePane({
   }, [calculatorSourcePath, onCalculatorSourcePathChange]);
   void entry;
 
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!header) return;
-
-    const update = () => {
-      const next = header.getBoundingClientRect().width >= 500;
-      setShowModeLabels((current) => current === next ? current : next);
-    };
-
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, []);
-
   const handleMode = (nextMode: PreviewMode) => {
     if (nextMode === "param_map") {
       setSourceOverride(undefined);
@@ -406,8 +389,7 @@ export function ImagePane({
            borderRadius: "12px 12px 0 0",
            overflow: "hidden",
          }}>
-      <div ref={headerRef}
-           className="flex h-8 shrink-0 items-center justify-between gap-3 px-4"
+      <div className="flex h-8 shrink-0 items-center justify-between gap-3 px-4"
            style={{ borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
         <div className="flex shrink-0 items-center gap-2 text-xs"
              style={{ color: "var(--colorNeutralForeground2)" }}>
@@ -416,6 +398,7 @@ export function ImagePane({
           <span>源代码卡片</span>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
+          {onHide && <WorkspaceHideButton side="source" onHide={onHide} />}
           {TABS.map(({ id, label, Icon }) => {
             const active = id === effectiveMode;
             return (
@@ -423,23 +406,16 @@ export function ImagePane({
                 <Button
                   size="small"
                   appearance={active ? "primary" : "subtle"}
-                  icon={<Icon />}
+                  icon={<Icon className="h-4 w-4" />}
                   onClick={() => handleMode(id)}
-                  className="h-7"
-                  style={{
-                    minWidth: showModeLabels ? undefined : 32,
-                    paddingLeft: showModeLabels ? undefined : 8,
-                    paddingRight: showModeLabels ? undefined : 8,
-                    fontWeight: active ? 600 : 500,
-                  }}
-                >
-                  {showModeLabels ? label : null}
-                </Button>
+                  aria-label={label}
+                  aria-pressed={active}
+                  style={{ width: 28, minWidth: 28, height: 28, padding: 0 }}
+                />
               </HoverTooltip>
             );
           })}
         </div>
-        {onHide && <WorkspaceHideButton side="source" onHide={onHide} />}
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">

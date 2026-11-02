@@ -1,6 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@fluentui/react-components";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
-import { PanelBottomContract20Regular, PanelBottomExpand20Filled } from "@fluentui/react-icons";
+import { PanelBottomExpand20Regular } from "@fluentui/react-icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
@@ -19,7 +20,8 @@ import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceSession } from "./workspaceSession";
 import { isDebugParserExecutable } from "../debugParserPath";
-import { WorkspaceColumns } from "./WorkspaceColumns";
+import { WorkspaceColumns, WorkspaceHideButton } from "./WorkspaceColumns";
+import { usePanelCollapseTransition } from "./usePanelCollapseTransition";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -363,13 +365,23 @@ export function Isp6sAeVisual({
     ? Math.min(70, Math.max(DETAILS_MIN_SIZE, visual.workspace_details_ratio))
     : DETAILS_DEFAULT_SIZE;
   const detailsPanelRef = useRef<ImperativePanelHandle | null>(null);
+  const detailsShowButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterDetailsCollapseRef = useRef(false);
+  const { collapsing: detailsCollapsing, collapse: collapseDetails, onTransitionEnd: onDetailsTransitionEnd } = usePanelCollapseTransition();
+  useLayoutEffect(() => {
+    if (visual.table_collapsed && !detailsCollapsing && focusAfterDetailsCollapseRef.current) {
+      focusAfterDetailsCollapseRef.current = false;
+      detailsShowButtonRef.current?.focus();
+    }
+  }, [visual.table_collapsed, detailsCollapsing]);
   const hideDetailsPanel = useCallback(() => {
     const panel = detailsPanelRef.current;
     if (!panel) return;
     const size = panel.getSize();
     if (size >= DETAILS_MIN_SIZE) patchVis({ workspace_details_ratio: size });
-    panel.collapse();
-  }, [patchVis]);
+    focusAfterDetailsCollapseRef.current = true;
+    collapseDetails(() => panel.collapse());
+  }, [collapseDetails, patchVis]);
   const setPreviewMode = useCallback((m: PreviewMode) => patchVis({ preview_mode: m }), [patchVis]);
   const handleNormalPreviewMode = useCallback((mode: PreviewMode) => {
     setPreviewMode(mode);
@@ -556,15 +568,19 @@ export function Isp6sAeVisual({
       renderImages={(hide) => (
         <div ref={workspaceLeftRef} className="relative h-full w-full min-w-0">
           <PanelGroup direction="vertical" className="h-full w-full min-w-0">
-            <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}>
+            <Panel defaultSize={visual.table_collapsed ? 100 : 100 - detailsSize} minSize={30}
+              className={detailsCollapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : undefined}>
               {renderTablePanel(hide)}
             </Panel>
-            <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX} className="overflow-hidden" />
+            <ResizeHandle direction="vertical" size={visual.table_collapsed ? 0 : CARD_GAP_PX}
+              className={`overflow-hidden ${detailsCollapsing ? "transition-[height] duration-200 ease-out motion-reduce:transition-none" : ""}`} />
             <Panel ref={detailsPanelRef} defaultSize={visual.table_collapsed ? 0 : detailsSize} minSize={DETAILS_MIN_SIZE}
+              className={detailsCollapsing ? "transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none" : undefined}
+              onTransitionEnd={onDetailsTransitionEnd}
               collapsible collapsedSize={0} onCollapse={() => patchVis({ table_collapsed: true })}
               onExpand={() => patchVis({ table_collapsed: false })}
               onResize={(size) => { if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) patchVis({ workspace_details_ratio: size }); }}>
-              {!visual.table_collapsed && <DetailsPanel
+              {(!visual.table_collapsed || detailsCollapsing) && <DetailsPanel
                 detailsTab={detailsTab}
                 onTabChange={handleDetailsTabChange}
                 onHide={hideDetailsPanel}
@@ -578,12 +594,13 @@ export function Isp6sAeVisual({
               />}
             </Panel>
           </PanelGroup>
-          {visual.table_collapsed && <button type="button" title="显示图片详情卡片" aria-label="显示图片详情卡片"
+          {visual.table_collapsed && !detailsCollapsing && <Button ref={detailsShowButtonRef} size="small" appearance="subtle"
+            title="显示图片详情卡片" aria-label="显示图片详情卡片"
             onClick={() => detailsPanelRef.current?.expand(detailsSize)}
-            className="absolute bottom-1 left-1/2 z-20 flex h-7 w-7 -translate-x-1/2 items-center justify-center"
-            style={{ border: "1px solid var(--colorNeutralStroke2)", borderRadius: 8, background: "var(--colorNeutralBackground1)", color: "var(--colorBrandForeground1)" }}>
-            <PanelBottomExpand20Filled />
-          </button>}
+            icon={<PanelBottomExpand20Regular />}
+            className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2"
+            style={{ width: 28, minWidth: 28, height: 28, padding: 0, border: "1px solid var(--colorNeutralStroke2)",
+              borderRadius: 8, background: "var(--colorNeutralBackground1)", color: "var(--colorBrandForeground1)" }} />}
         </div>
       )} />
     </div>
@@ -675,9 +692,9 @@ const DetailsPanel = memo(function DetailsPanel({
             {tab.label}
           </button>;
         })}
-        <button type="button" title="隐藏图片详情卡片" aria-label="隐藏图片详情卡片"
-          onClick={onHide} className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center"
-          style={{ color: "var(--colorNeutralForeground2)" }}><PanelBottomContract20Regular /></button>
+        <div className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center">
+          <WorkspaceHideButton side="details" onHide={onHide} />
+        </div>
       </div>
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden"
            onScrollCapture={(event) => {
