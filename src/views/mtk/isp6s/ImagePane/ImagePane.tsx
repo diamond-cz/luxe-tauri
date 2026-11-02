@@ -398,7 +398,6 @@ export function ImagePane({
           <span>源代码卡片</span>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
-          {onHide && <WorkspaceHideButton side="source" onHide={onHide} />}
           {TABS.map(({ id, label, Icon }) => {
             const active = id === effectiveMode;
             return (
@@ -415,6 +414,7 @@ export function ImagePane({
               </HoverTooltip>
             );
           })}
+          {onHide && <WorkspaceHideButton side="source" onHide={onHide} />}
         </div>
       </div>
 
