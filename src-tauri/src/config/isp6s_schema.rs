@@ -18,6 +18,7 @@ pub struct Isp6sSchema {
     #[serde(default)] pub image_table: ImageTableMappings,
     #[serde(default)] pub lce:          LceSection,
     #[serde(default)] pub para_check:   ParaCheckSection,
+    #[serde(default)] pub tone_para_check: ParaCheckSection,
     #[serde(default)] pub preview_info: PreviewInfoSection,
     /// `[card_source.<CardName>]` blocks keyed by card name.
     #[serde(default)] pub card_source:  HashMap<String, CardSourceSpec>,
@@ -125,5 +126,43 @@ impl Isp6sSchema {
             }
         }
         Ok(schema)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Isp6sSchema;
+    use std::path::Path;
+
+    #[test]
+    fn ae_and_tone_comparison_mappings_are_available() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/Isp6s.toml");
+        let schema = Isp6sSchema::load(&path).expect("load Isp6s.toml");
+        let tone_rows: Vec<_> = schema.tone_para_check.items.iter()
+            .map(|item| (item.label.as_str(), item.cpp_path.as_str(), item.toml_key.as_str()))
+            .collect();
+
+        assert_eq!(tone_rows, [
+            ("LCE_FaceAEenable", "[0][0][0][4].0", "SW_LCE_FaceAEEnable"),
+            ("LCE_SmoothEnable", "[0][0][0][7].0", "SW_LCE_SmoothEnable"),
+            ("Gamma_i4CenterPt", "[1][0][1][2].1", "SW_GMA_CenterPt"),
+            ("DCE_disable_0(on)_1(off)", "[2][0].0", ""),
+            ("DCE_Smooth_Speed", "[2][0].1", "SW_DCE_dce_smooth_speed"),
+        ]);
+
+        let ae_rows: Vec<_> = schema.para_check.items.iter()
+            .map(|item| (item.label.as_str(), item.cpp_path.as_str(), item.toml_key.as_str()))
+            .collect();
+        assert_eq!(ae_rows, [
+            ("HW", "[0][0][0].0", "AE_TAG_HW_VER"),
+            ("STAT", "[0][1][0].0", "AE_TAG_STAT_VER"),
+            ("FLOW", "[0][2][0].0", "AE_TAG_FLOW_VER"),
+            ("METER", "[0][3][0].0", "AE_TAG_METER_VER"),
+            ("FACE", "[0][4][0].0", "AE_TAG_FACE_VER"),
+            ("SMOOTH", "[0][5][0].0", "AE_TAG_SMOOTH_VER"),
+            ("SYNC", "[0][6][0].0", "AE_TAG_SYNC_VER"),
+            ("HDR", "[0][7][0].0", "AE_TAG_HDR_VER"),
+            ("BV_OFFSET", "[0][2][1].9", "AE_TAG_BV_OFFSET"),
+        ]);
     }
 }

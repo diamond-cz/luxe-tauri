@@ -237,12 +237,14 @@ export function ImagePane({
   const toneSource = useSourceDraft(filePath, importRevision);
   const caSource = useSourceDraft(toneMode ? caLtmPath ?? "" : "", caLtmRevision);
   const toneTab = useIsp6sVisualStore((state) => state.visual.tone_chart_map_tab);
-  const caLtmActive = toneMode && toneTab === "CA-LTM";
+  const effectiveMode: Exclude<PreviewMode, "para_check"> =
+    mode === "chart_map" ? "chart_map" : "param_map";
+  // Tone.cpp comparison jumps must stay on Tone.cpp even while the CA-LTM chart tab is selected.
+  const caLtmActive = toneMode && toneTab === "CA-LTM"
+    && !(effectiveMode === "param_map" && sourceOverride?.filePath === filePath);
   const activeSource = caLtmActive ? caSource : toneSource;
   const activeFilePath = caLtmActive ? caLtmPath ?? "" : filePath;
   const [chartFocus, setChartFocus] = useState<{ label: string; key: number } | null>(null);
-  const effectiveMode: Exclude<PreviewMode, "para_check"> =
-    mode === "chart_map" ? "chart_map" : "param_map";
 
   useLayoutEffect(() => {
     if (effectiveMode !== "chart_map" || !scrollSession) return;
@@ -335,6 +337,11 @@ export function ImagePane({
     onMode("param_map");
   }, [activeFilePath, onMode]);
 
+  const handleToneSourceJump = useCallback((label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => {
+    setSourceOverride({ label, spec, details, filePath });
+    onMode("param_map");
+  }, [filePath, onMode]);
+
   const handleBackToChart = useCallback((target?: ChartPreviewTarget) => {
     if (target?.label) {
       setChartFocus((current) => ({
@@ -375,10 +382,11 @@ export function ImagePane({
       getText: toneSource.getText,
       onTextChange: toneSource.onTextChange,
       onSave: toneSource.onSave,
-      onSourceJump: handleSourceJump,
+      onSourceJump: toneMode ? handleToneSourceJump : handleSourceJump,
     } : null);
   }, [filePath, importRevision, toneSource.draft, toneSource.dirty, toneSource.tempReady, toneSource.resolvePath,
-    toneSource.getText, toneSource.onTextChange, toneSource.onSave, handleSourceJump, onSourceEditorBindingChange]);
+    toneSource.getText, toneSource.onTextChange, toneSource.onSave, handleSourceJump, handleToneSourceJump,
+    toneMode, onSourceEditorBindingChange]);
   useEffect(() => () => onSourceEditorBindingChange?.(null), [onSourceEditorBindingChange]);
 
   return (

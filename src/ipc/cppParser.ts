@@ -77,7 +77,8 @@ export interface Isp6sSchemaRoot {
     portrait?: Record<string, string> | null;
   };
   lce?:  { group?: any[] };
-  para_check?:   { items?: ParaCheckItem[] };
+  para_check?: { items?: ParaCheckItem[] };
+  tone_para_check?: { items?: ParaCheckItem[] };
   preview_info?: { items?: PreviewInfoItem[] };
   card_source?: Record<string, CardSourceSpec>;
 }

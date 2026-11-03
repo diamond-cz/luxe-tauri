@@ -26,6 +26,64 @@
 
 ## 已沉淀经验
 
+### 2026-11-03：修复 bcompare 与 Tone.cpp 表头列对齐
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/ParaCheckMode.tsx` 的表头行改为复用 `currentRowStyle`，AE Basic 和 ToneMap 各自的表头列宽现在与对应数据行一致。
+
+**痛点**
+
+- 两种模式的列宽改为动态 `gridTemplateColumns` 后，数据行已使用动态样式，表头仍引用不含列定义的基础 `rowStyle`，造成三个标题单元格挤入第一列。
+
+**闭坑**
+
+- 调整表格列宽时检查 `<thead>`、`<tbody>` 和占位行是否共用相同的列定义；验证 AE Basic 与 ToneMap 两种分支。
+
+**验证**
+
+- `npm run typecheck`、`git diff --check` 通过。未在 Tauri 窗口实测截图中的两个详情页面。
+
+### 2026-11-03：恢复 AE Basic 的 EXIF 与 bcompare 页面
+
+**亮点**
+
+- `Isp6sAeVisual.tsx` 恢复 AE Basic 的 EXIF/bcompare 标签和既有布局；ToneMap 继续显示原有 LCE/EXIF/Tone.cpp 标签。`ParaCheckMode.tsx` 依据 `toneMode` 分别读取 `para_check` 与 `tone_para_check`，复用编辑、保存和源码跳转逻辑。
+- `Isp6s.toml` 同时保留 AE.CPP 和 Tone.cpp 的独立映射；父组件分别向两种对比页面提供对应源码草稿绑定，CA-LTM 选中时 Tone.cpp 跳转仍定位 Tone.cpp。
+
+**痛点**
+
+- 详情标签状态类型被 AE 与 Tone 两套工作区共用，恢复 AE 的 `bcompare` 时必须保留 ToneMap 的 `tone_cpp` 状态，并在各自渲染入口按模式筛选标签。
+- 完整 `npm run rust:test` 在当前 target 产物中遇到 E0460/E0463 crate 解析错误；库测试可运行，集成测试未能验证。
+
+**闭坑**
+
+- 同一详情组件服务多个工作区时，为每个模式单独核对标签白名单、配置 section、源码文件名与 binding；恢复一个模式的旧页面不能覆盖另一个模式的当前页面。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`cargo test --manifest-path src-tauri/Cargo.toml --lib` 和 `git diff --check` 通过；Rust 库测试 16 通过、1 忽略。`npm run rust:test` 因 crate 解析错误失败；未在 Tauri 窗口实测两个详情面板的点击交互。
+
+### 2026-11-02：ToneMap 详情承接 EXIF 与 Tone.cpp 参数对比
+
+**亮点**
+
+- `src/views/mtk/isp6s/Isp6sAeVisual.tsx` 将 EXIF 和原 bcompare 从 AE Basic 详情标签移至 ToneMap 下方详情面板；EXIF 继续使用原 `ExifTable`，ToneMap 保留原 LCE 标签和面板比例。
+- `src-tauri/resources/Isp6s.toml` 的 `tone_para_check.items` 只定义五项 Tone.cpp 映射，Rust schema 与前端类型同步；无图片 3A 关键字的 DCE 开关行显示 `-`。`ParaCheckMode.tsx` 以完整字段路径匹配参数值，`ImagePane.tsx` 使对比表跳转始终打开导入的 Tone.cpp。
+
+**痛点**
+
+- 原对比表依赖 AE Basic 的 `para_check` 配置和 AE.CPP 文案；ToneMap 的 CA-LTM 子标签还会切换源码卡片当前文件，直接复用当前文件跳转会把 Tone.cpp 对比项定位到 CA-LTM.cpp。
+- 仓库没有可核对这五个字段实际数值的 Tone.cpp 样本。完整 `npm run rust:test` 在当前构建产物上出现 E0460/E0463 crate 解析错误，未得到集成测试结果。
+
+**闭坑**
+
+- 修改 Tone.cpp 对比项时同时检查 `Isp6s.toml`、`isp6s_schema.rs`、`cppParser.ts` 和 `ParaCheckMode.tsx`；字段路径必须精确相等，缺失字段显示占位符，不得匹配下级路径。核对 CA-LTM 子标签下的对比表跳转仍落在 Tone.cpp 草稿。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`cargo test --manifest-path src-tauri/Cargo.toml --lib`、`git diff --check` 通过；Rust 库测试 16 通过、1 忽略。`npm run rust:test` 因上述 crate 解析错误失败；尚未在 Tauri 窗口实测迁移后的标签、跳转和真实 Tone.cpp 字段值。
+
 ### 2026-11-02：源代码卡片隐藏按钮移至映射按钮右侧
 
 **亮点**

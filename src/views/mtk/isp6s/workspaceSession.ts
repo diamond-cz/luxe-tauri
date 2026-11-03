@@ -3,7 +3,7 @@ export interface ScrollPosition {
   left: number;
 }
 
-export type DetailsTab = "normal" | "face" | "lce" | "exif" | "bcompare";
+export type DetailsTab = "normal" | "face" | "lce" | "exif" | "bcompare" | "tone_cpp";
 
 export interface WorkspaceSession {
   imageDir: string | null;

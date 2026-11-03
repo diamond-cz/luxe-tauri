@@ -52,12 +52,17 @@ const CARD_GAP_PX      = 12;
 const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 const DETAILS_DEFAULT_SIZE = 42;
 const DETAILS_MIN_SIZE = 25;
-const DETAILS_TABS = [
+const AE_DETAILS_TABS = [
   { id: "normal", label: "Normal" },
   { id: "face", label: "Face" },
   { id: "lce", label: "LCE" },
   { id: "exif", label: "EXIF" },
   { id: "bcompare", label: "bcompare" },
+] as const;
+const TONE_DETAILS_TABS = [
+  { id: "lce", label: "LCE" },
+  { id: "exif", label: "EXIF" },
+  { id: "tone_cpp", label: "Tone.cpp" },
 ] as const;
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
@@ -68,7 +73,16 @@ export function Isp6sAeVisual({
   const session = workspaceSession(workspaceKey);
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
   const [err,    setErr]    = useState<string | null>(null);
-  const [detailsTab, setDetailsTab] = useState<DetailsTab>(() => session.detailsTab);
+  const [detailsTab, setDetailsTab] = useState<DetailsTab>(() => {
+    const saved = session.detailsTab;
+    const initial = toneMode
+      ? saved === "exif" || saved === "tone_cpp" ? saved : "lce"
+      : saved === "normal" || saved === "face" || saved === "lce" || saved === "exif" || saved === "bcompare"
+        ? saved
+        : "normal";
+    session.detailsTab = initial;
+    return initial;
+  });
   const [sourceEditorBinding, setSourceEditorBinding] = useState<SourceEditorBinding | null>(null);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [heatmapSelection, setHeatmapSelection] = useState<{ entries: ImageEntry[]; paths: string[] } | null>(null);
@@ -531,17 +545,18 @@ export function Isp6sAeVisual({
                 <Panel defaultSize={session.toneLceSize} minSize={25} className="min-h-0 overflow-hidden" onResize={(size) => {
                   if (Number.isFinite(size) && size >= 25 && size <= 75) session.toneLceSize = size;
                 }}>
-                  <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-t-lg border"
-                       style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground1)" }}>
-                    <div className="flex h-8 shrink-0 items-end border-b px-2"
-                         style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
-                      <span className="border-b-2 px-3 py-1 text-xs font-semibold"
-                            style={{ borderColor: "var(--colorBrandStroke1)", color: "var(--colorNeutralForeground1)" }}>LCE</span>
-                    </div>
-                    <div className="min-h-0 flex-1">
-                      <LceTab schema={schema} tomlData={selectedTomlData} />
-                    </div>
-                  </div>
+                  <DetailsPanel
+                    toneMode
+                    detailsTab={detailsTab}
+                    onTabChange={handleDetailsTabChange}
+                    session={session}
+                    schema={schema}
+                    tomlData={selectedTomlData}
+                    tomlPath={currentEntry?.toml_path ?? null}
+                    filePath={filePath}
+                    cppImportRevision={cppImportRevision}
+                    sourceEditorBinding={detailsTab === "tone_cpp" ? sourceEditorBinding : null}
+                  />
                 </Panel>
               </PanelGroup>
             </div>
@@ -582,6 +597,7 @@ export function Isp6sAeVisual({
               onResize={(size) => { if (size >= DETAILS_MIN_SIZE && Math.abs(size - detailsSize) > 0.05) patchVis({ workspace_details_ratio: size }); }}>
               {(!visual.table_collapsed || detailsTransitioning) && <div className="h-full w-full min-h-0" style={panelMotionStyle(detailsMotion, "bottom")}>
                 <DetailsPanel
+                toneMode={false}
                 detailsTab={detailsTab}
                 onTabChange={handleDetailsTabChange}
                 onHide={hideDetailsPanel}
@@ -611,9 +627,10 @@ export function Isp6sAeVisual({
 }
 
 interface DetailsPanelProps {
+  toneMode?: boolean;
   detailsTab: DetailsTab;
   onTabChange: (tab: DetailsTab) => void;
-  onHide: () => void;
+  onHide?: () => void;
   session: WorkspaceSession;
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
@@ -629,6 +646,7 @@ interface DetailsPanelProps {
  * large table subtree to render again when its input data has not changed.
  */
 const DetailsPanel = memo(function DetailsPanel({
+  toneMode,
   detailsTab,
   onTabChange,
   onHide,
@@ -648,7 +666,7 @@ const DetailsPanel = memo(function DetailsPanel({
   // the panel is hidden.
   useLayoutEffect(() => {
     const saved = session.detailsScroll[detailsTab];
-    if (!saved || detailsTab === "bcompare") return;
+    if (!saved || detailsTab === "bcompare" || detailsTab === "tone_cpp") return;
     const body = bodyRef.current;
     if (!body) return;
     let frame: number | null = null;
@@ -682,10 +700,10 @@ const DetailsPanel = memo(function DetailsPanel({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden"
-         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: detailsTab === "bcompare" ? 8 : "8px 8px 0 0" }}>
+         style={{ background: "var(--colorNeutralBackground1)", border: "1px solid var(--colorNeutralStroke2)", borderRadius: detailsTab === "bcompare" || detailsTab === "tone_cpp" ? 8 : "8px 8px 0 0" }}>
       <div className="flex h-8 shrink-0 items-stretch px-2"
            style={{ background: "var(--colorNeutralBackground2)", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-        {DETAILS_TABS.map((tab) => {
+        {(toneMode ? TONE_DETAILS_TABS : AE_DETAILS_TABS).map((tab) => {
           const active = detailsTab === tab.id;
           return <button key={tab.id} type="button" role="tab" aria-selected={active}
             onClick={() => onTabChange(tab.id)}
@@ -694,9 +712,9 @@ const DetailsPanel = memo(function DetailsPanel({
             {tab.label}
           </button>;
         })}
-        <div className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center">
+        {onHide && <div className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center">
           <WorkspaceHideButton side="details" onHide={onHide} />
-        </div>
+        </div>}
       </div>
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden"
            onScrollCapture={(event) => {
@@ -709,7 +727,8 @@ const DetailsPanel = memo(function DetailsPanel({
         {detailsTab === "face" && <FaceTable tomlData={tomlData} />}
         {detailsTab === "lce" && <LceTab schema={schema} tomlData={tomlData} />}
         {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} />}
-        {detailsTab === "bcompare" && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
+        {(toneMode ? detailsTab === "tone_cpp" : detailsTab === "bcompare") && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
+          toneMode={toneMode}
           sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}
       </div>
     </div>

@@ -24,9 +24,9 @@
 | 场景与风险 | 处理方法与现有入口 |
 | --- | --- |
 | 大图片列表全量挂载、解码或预加载 | `TablePane.tsx` 已实现固定行高、可视窗口切片和有限 overscan；新增列也应按窗口加载必要 TOML 字段，控制预取范围与并发，不把整目录解码结果常驻内存 |
-| 固定详情表反复渲染 | `Isp6sAeVisual.tsx` 的 `DetailsPanel` 使用 `memo` 和稳定 props 隔离图片列表、解析进度及分隔条更新；Normal、Face、LCE、bcompare 只挂载当前标签内容 |
+| 固定详情表反复渲染 | `Isp6sAeVisual.tsx` 的 `DetailsPanel` 使用 `memo` 和稳定 props 隔离图片列表、解析进度及分隔条更新；AE Basic 的 Normal/Face/LCE/EXIF/bcompare 与 ToneMap 的 LCE/EXIF/Tone.cpp 均只挂载当前标签内容 |
 | 折叠后组件和监听器仍占资源 | 详情面板折叠时卸载子树，展开时恢复滚动位置；观察器、事件监听和定时器随卸载清理，异步 IPC 返回用取消标志忽略；滚动恢复观察器找到目标后断开，等待超时或卸载时也断开 |
-| 子组件回传 binding 引发父子反馈循环 | 使用 `useCallback` 稳定父级 `onMode`，避免“父渲染 → 回调引用变化 → 子 binding effect → 父 setState → 父渲染”；effect 仍保留必要依赖，不能通过删除依赖掩盖问题；源码绑定只传给使用它的 bcompare 面板 |
+| 子组件回传 binding 引发父子反馈循环 | 使用 `useCallback` 稳定父级 `onMode`，避免“父渲染 → 回调引用变化 → 子 binding effect → 父 setState → 父渲染”；effect 仍保留必要依赖，不能通过删除依赖掩盖问题；AE.CPP 与 Tone.cpp 源码绑定只传给各自的 bcompare/Tone.cpp 对比面板 |
 | 每个单元格各自创建 tooltip 状态和节点 | Normal/Face 使用已有 `GlobalTitleTooltip` 的委托入口：`title`、`data-tooltip-position="below-start"`、`data-tooltip-wrap="true"`、`data-tooltip-max-width={520}`；需要局部 tooltip 时先评估实例数与清理成本 |
 | 尺寸观察触发布局与状态循环 | `ResizeObserver` 仅在宽高变化时更新状态；异步 schema 加载后才出现的 viewport 要重新绑定观察器，参照 `FaceTable.tsx` 的 `[schema]` 依赖 |
 

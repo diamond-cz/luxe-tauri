@@ -12,6 +12,7 @@ interface Props {
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
   sourceEditor: SourceEditorBinding | null;
+  toneMode?: boolean;
 }
 
 interface SourceSnapshot {
@@ -22,8 +23,9 @@ interface SourceSnapshot {
 }
 
 /** Comparison table: 关键字 | 图片3A (read only) | 参数文件 (shared source draft). */
-export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Props) {
-  const items = useMemo(() => schema.para_check?.items ?? [], [schema]);
+export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor, toneMode = false }: Props) {
+  const items = useMemo(() => (toneMode ? schema.tone_para_check : schema.para_check)?.items ?? [], [schema, toneMode]);
+  const sourceName = toneMode ? "Tone.cpp" : "AE.CPP";
   const [snapshot, setSnapshot] = useState<SourceSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,25 +67,28 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
   const currentSnapshot = snapshot?.filePath === filePath && snapshot.importRevision === importRevision ? snapshot : null;
   const rows = useMemo(() => items.map((item) => {
     const field = currentSnapshot?.fields.find((candidate) => candidate.path === item.cpp_path
-      || candidate.path.startsWith(`${item.cpp_path}[`) || candidate.path.startsWith(`${item.cpp_path}.`)) ?? null;
+      || !toneMode && (candidate.path.startsWith(`${item.cpp_path}[`) || candidate.path.startsWith(`${item.cpp_path}.`))) ?? null;
     const target = field && sourceText !== undefined && currentSnapshot
       ? locateParaCheckField(currentSnapshot.text, sourceText, field) : null;
     const cppValue = target?.value ?? field?.value ?? "—";
-    const tomlValue = tomlData[item.toml_key] ?? "—";
+    const tomlValue = item.toml_key ? tomlData[item.toml_key] ?? "—" : "-";
     return {
       ...item, field, cppValue, tomlValue,
       editable: Boolean(target && sourceEditor),
-      match: cppValue !== "—" && tomlValue !== "—" && cppValue === tomlValue,
+      match: toneMode && !item.toml_key || cppValue !== "—" && tomlValue !== "—" && cppValue === tomlValue,
       dirty: Boolean(field && target && sourceEditor && currentSnapshot
         && locateParaCheckField(currentSnapshot.text, sourceEditor.savedText, field)?.value !== target.value),
     };
-  }), [items, currentSnapshot, sourceText, sourceEditor, tomlData]);
+  }), [items, currentSnapshot, sourceText, sourceEditor, tomlData, toneMode]);
   const dirty = pendingEdit || rows.some((row) => row.dirty);
   const tableRowCount = 1 + rows.length + (items.length === 0 || !currentSnapshot ? 1 : 0);
   const columnTextWidth = Math.max(1, ...rows.flatMap((row) => [
-    row.label.length / 0.3, row.tomlValue.length / 0.35, row.cppValue.length / 0.35,
-  ]), 4 / 0.35);
+    row.label.length / (toneMode ? 0.42 : 0.3),
+    row.tomlValue.length / (toneMode ? 0.29 : 0.35),
+    row.cppValue.length / (toneMode ? 0.29 : 0.35),
+  ]), 4 / (toneMode ? 0.29 : 0.35));
   const tableFontSize = `min(11px, ${50 / tableRowCount}cqh, ${90 / (columnTextWidth * 0.62)}cqw)`;
+  const currentRowStyle = { ...rowStyle, gridTemplateColumns: toneMode ? "42% 29% 29%" : "30% 35% 35%" };
 
   const commitCell = (field: FieldEntry, value: string): boolean => {
     const editor = editorRef.current;
@@ -104,21 +109,21 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
     if (!editor || !currentSnapshot) return;
     const target = locateParaCheckField(currentSnapshot.text, editor.getText(), field);
     if (!target) { setError("无法定位对应源码数值，请等待源码同步后重试"); return; }
-    editor.onSourceJump(`AE.CPP.${label}`, {
+    editor.onSourceJump(`${sourceName}.${label}`, {
       paths: [field.path], line_ranges: [[field.line, field.line]], jump_to: "first", highlight: "ranges",
     }, { selection: target.selection });
   };
 
   return (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
-      <section style={cardStyle} aria-label="AE.CPP 参数对比表">
+      <section style={cardStyle} aria-label={`${sourceName} 参数对比表`}>
         <div style={headerStyle}>
-          <strong style={{ fontSize: 12, fontWeight: 900 }}>AE.CPP</strong>
+          <strong style={{ fontSize: 12, fontWeight: 900 }}>{sourceName}</strong>
           <Button
             appearance="subtle"
             size="small"
-            aria-label={saving ? "正在保存 AE.CPP" : "保存 AE.CPP 修改"}
-            title={saving ? "正在保存 AE.CPP" : "保存 AE.CPP 修改"}
+            aria-label={saving ? `正在保存 ${sourceName}` : `保存 ${sourceName} 修改`}
+            title={saving ? `正在保存 ${sourceName}` : `保存 ${sourceName} 修改`}
             disabled={!dirty || !sourceEditor || saving}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
@@ -142,11 +147,11 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", containerType: "size" }}>
         <table style={{ ...tableStyle, gridTemplateRows: `repeat(${tableRowCount}, minmax(0, 1fr))`, fontSize: tableFontSize }}>
           <thead style={{ display: "contents" }}>
-            <tr style={rowStyle}><Th>关键字</Th><Th>图片3A</Th><Th>参数文件</Th></tr>
+            <tr style={currentRowStyle}><Th>关键字</Th><Th>图片3A</Th><Th>参数文件</Th></tr>
           </thead>
           <tbody style={{ display: "contents" }}>
             {rows.map((row, rowIndex) => (
-              <tr key={row.cpp_path} style={{ ...rowStyle, background: rowIndex % 2 === 0 ? "var(--colorNeutralBackground1)" : "var(--colorNeutralBackground2)" }}>
+              <tr key={row.cpp_path} style={{ ...currentRowStyle, background: rowIndex % 2 === 0 ? "var(--colorNeutralBackground1)" : "var(--colorNeutralBackground2)" }}>
                 <td style={{ ...cellStyle, background: "var(--hs-weight-bv-bg)", color: "var(--normal-sheet-palegreen-fg)", fontWeight: 700 }}>{row.label}</td>
                 <td style={{ ...cellStyle, ...comparisonTextStyle(!row.match) }}>{row.tomlValue}</td>
                 <td style={{ ...cellStyle, padding: 0 }}>
@@ -155,6 +160,7 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
                     value={row.cppValue}
                     label={row.label}
                     imageValue={row.tomlValue}
+                    sourceName={sourceName}
                     editable={row.editable}
                     onPendingEdit={trackPendingEdit}
                     onCommit={(value) => row.field ? commitCell(row.field, value) : false}
@@ -163,9 +169,9 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr style={rowStyle}><td colSpan={3} style={{ ...cellStyle, gridColumn: "1 / -1" }}>Isp6s.toml 未配置 [[para_check.items]]</td></tr>}
-            {items.length > 0 && !currentSnapshot && <tr style={rowStyle}><td colSpan={3} style={{ ...cellStyle, gridColumn: "1 / -1", color: "var(--colorNeutralForeground3)" }}>
-              {!filePath ? "请先导入 AE.cpp 参数文件" : loading ? "正在加载参数…" : "等待源码草稿加载…"}
+            {items.length === 0 && <tr style={currentRowStyle}><td colSpan={3} style={{ ...cellStyle, gridColumn: "1 / -1" }}>Isp6s.toml 未配置 {toneMode ? "[[tone_para_check.items]]" : "[[para_check.items]]"}</td></tr>}
+            {items.length > 0 && !currentSnapshot && <tr style={currentRowStyle}><td colSpan={3} style={{ ...cellStyle, gridColumn: "1 / -1", color: "var(--colorNeutralForeground3)" }}>
+              {!filePath ? `请先导入 ${sourceName} 参数文件` : loading ? "正在加载参数…" : "等待源码草稿加载…"}
             </td></tr>}
           </tbody>
         </table>
@@ -175,10 +181,11 @@ export function ParaCheckMode({ filePath, schema, tomlData, sourceEditor }: Prop
   );
 }
 
-function ParameterCell({ value, label, imageValue, editable, onCommit, onSourceJump, onPendingEdit }: {
+function ParameterCell({ value, label, imageValue, sourceName, editable, onCommit, onSourceJump, onPendingEdit }: {
   value: string;
   label: string;
   imageValue: string;
+  sourceName: string;
   editable: boolean;
   onCommit: (value: string) => boolean;
   onSourceJump: () => void;
@@ -198,7 +205,7 @@ function ParameterCell({ value, label, imageValue, editable, onCommit, onSourceJ
   };
   return (
     <input
-      aria-label={`AE.CPP ${label} 参数文件`}
+      aria-label={`${sourceName} ${label} 参数文件`}
       value={inputValue}
       readOnly={!editable}
       tabIndex={editable ? 0 : -1}
@@ -218,7 +225,7 @@ function ParameterCell({ value, label, imageValue, editable, onCommit, onSourceJ
       style={{
         width: "100%", height: "100%", minWidth: 0, minHeight: 0, boxSizing: "border-box", padding: "0 2px",
         border: "none", outline: "none", background: "transparent", font: "inherit", textAlign: "center",
-        ...comparisonTextStyle(inputValue === "—" || imageValue === "—" || inputValue !== imageValue),
+        ...comparisonTextStyle(imageValue !== "-" && (inputValue === "—" || imageValue === "—" || inputValue !== imageValue)),
         boxShadow: focused && editable ? "inset 0 0 0 1.5px var(--colorBrandForeground1)" : undefined,
         cursor: editable ? "text" : "default",
       }}
@@ -252,7 +259,7 @@ const tableStyle: CSSProperties = {
   fontFamily: "ui-monospace, Consolas, monospace", fontVariantNumeric: "tabular-nums",
 };
 const rowStyle: CSSProperties = {
-  display: "grid", gridTemplateColumns: "30% 35% 35%", minHeight: 0, minWidth: 0,
+  display: "grid", minHeight: 0, minWidth: 0,
 };
 const cellStyle: CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0, minWidth: 0,

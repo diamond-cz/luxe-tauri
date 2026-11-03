@@ -53,7 +53,7 @@ NS_Prob     = "AE_TAG_NS_PROB"
 Link_Face   = "AE_TAG_LINK_FACE_CWR_STABLE"
 FdMinCWR    = "AE_TAG_LINK_FACE_CWR_MIN"
 
-# 参数检查：label 为名称，cpp_path 为源码路径，toml_key 为图片关键字。
+# AE Basic 参数检查：label 为名称，cpp_path 为 AE.CPP 路径，toml_key 为图片关键字。
 [[para_check.items]]
 label = "HW"
 cpp_path = "[0][0][0].0"
@@ -98,6 +98,31 @@ toml_key = "AE_TAG_HDR_VER"
 label = "BV_OFFSET"
 cpp_path = "[0][2][1].9"
 toml_key = "AE_TAG_BV_OFFSET"
+
+# Tone.cpp 参数检查：无图片 3A 对应项时省略 toml_key，界面显示 "-"。
+[[tone_para_check.items]]
+label = "LCE_FaceAEenable"
+cpp_path = "[0][0][0][4].0"
+toml_key = "SW_LCE_FaceAEEnable"
+
+[[tone_para_check.items]]
+label = "LCE_SmoothEnable"
+cpp_path = "[0][0][0][7].0"
+toml_key = "SW_LCE_SmoothEnable"
+
+[[tone_para_check.items]]
+label = "Gamma_i4CenterPt"
+cpp_path = "[1][0][1][2].1"
+toml_key = "SW_GMA_CenterPt"
+
+[[tone_para_check.items]]
+label = "DCE_disable_0(on)_1(off)"
+cpp_path = "[2][0].0"
+
+[[tone_para_check.items]]
+label = "DCE_Smooth_Speed"
+cpp_path = "[2][0].1"
+toml_key = "SW_DCE_dce_smooth_speed"
 
 # LCE 预览信息：toml_key 为单值，toml_keys 为同一行的多个值。
 [[preview_info.items]]
