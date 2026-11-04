@@ -7776,6 +7776,25 @@ function faceScatterAxisPosition(value: number, axis: readonly number[]): number
   return bounds.reduce((position, point) => position + point.index * point.weight, 0);
 }
 
+function faceScatterAxisCoordinate(value: number, axis: readonly number[]): number {
+  return (faceScatterAxisPosition(value, axis) + 0.5) / Math.max(1, axis.length) * 100;
+}
+
+function faceScatterAxisBoundaryValue(boundaryIndex: number, axis: readonly number[]): number {
+  if (axis.length === 0) return 0;
+  if (boundaryIndex <= 0) return axis[0];
+  if (boundaryIndex >= axis.length) {
+    const last = axis[axis.length - 1];
+    const previous = axis[axis.length - 2];
+    return axis.length > 1 ? last + (last - previous) / 2 : last;
+  }
+  return (axis[boundaryIndex - 1] + axis[boundaryIndex]) / 2;
+}
+
+function faceScatterAxisHeaderCoordinate(index: number, axisLength: number): number {
+  return (index + 0.5) / Math.max(1, axisLength) * 100;
+}
+
 function nearestFaceScatterPoint(
   points: readonly FaceScatterPoint[],
   xPercent: number,
@@ -7900,8 +7919,8 @@ function FaceBvDrTableCard({
   const scatterPoints = useMemo<FaceScatterPoint[]>(() => source && showScatter && source.columnHeaders.length > 0 && source.rowHeaders.length > 0
     ? eligibleHeatmapPoints.map((point) => ({
       path: point.path,
-      x: (faceScatterAxisPosition(point.dr, source.columnHeaders) + 0.5) / source.columnHeaders.length * 100,
-      y: (faceScatterAxisPosition(point.bv, source.rowHeaders) + 0.5) / source.rowHeaders.length * 100,
+      x: faceScatterAxisCoordinate(point.dr, source.columnHeaders),
+      y: faceScatterAxisCoordinate(point.bv, source.rowHeaders),
       bv: point.bv,
       dr: point.dr,
       selected: point.selected,
@@ -8250,6 +8269,53 @@ function FaceBvDrTableCard({
                 <span><b>BV</b>{formatComputedNumber(hoveredScatterPoint.bv)}</span>
                 <span><b>DR</b>{formatComputedNumber(hoveredScatterPoint.dr)}</span>
               </div>}
+            </div>}
+            {showScatter && <div className="face-bv-dr-scatter-ticks" aria-label={`${title} BV/DR 坐标刻度`} data-tooltip-disabled="true">
+              <div className="face-bv-dr-scatter-tick-area">
+                {source.columnHeaders.map((value, index) => {
+                  const x = faceScatterAxisHeaderCoordinate(index, source.columnHeaders.length);
+                  const label = `DR ${formatComputedNumber(value)}`;
+                  return <button key={`${title}:dr-axis-value:${index}`} type="button"
+                    className="face-bv-dr-scatter-tick face-bv-dr-scatter-tick-value"
+                    data-label={label} aria-label={label}
+                    style={{ left: `${x}%`, top: 0 }}
+                    onClick={(event) => event.stopPropagation()} />;
+                })}
+                {source.rowHeaders.map((value, index) => {
+                  const y = faceScatterAxisHeaderCoordinate(index, source.rowHeaders.length);
+                  const label = `BV ${formatComputedNumber(value)}`;
+                  return <button key={`${title}:bv-axis-value:${index}`} type="button"
+                    className="face-bv-dr-scatter-tick face-bv-dr-scatter-tick-value"
+                    data-label={label} aria-label={label}
+                    style={{ left: 0, top: `${y}%` }}
+                    onClick={(event) => event.stopPropagation()} />;
+                })}
+                {source.columnHeaders.length > 0 && source.rowHeaders.length > 0 && <button
+                  key={`${title}:axis-origin`} type="button"
+                  className="face-bv-dr-scatter-tick face-bv-dr-scatter-tick-origin"
+                  data-label={`BV ${formatComputedNumber(source.rowHeaders[0])}, DR ${formatComputedNumber(source.columnHeaders[0])}`}
+                  aria-label={`BV ${formatComputedNumber(source.rowHeaders[0])}, DR ${formatComputedNumber(source.columnHeaders[0])}`}
+                  style={{ left: 0, top: 0 }}
+                  onClick={(event) => event.stopPropagation()} />}
+                {Array.from({ length: source.columnHeaders.length }, (_, offset) => {
+                  const index = offset + 1;
+                  const label = `DR ${formatComputedNumber(faceScatterAxisBoundaryValue(index, source.columnHeaders))}`;
+                  return <button key={`${title}:dr-axis-boundary:${index}`} type="button"
+                    className="face-bv-dr-scatter-tick"
+                    data-label={label} aria-label={label}
+                    style={{ left: `${index / Math.max(1, source.columnHeaders.length) * 100}%`, top: 0 }}
+                    onClick={(event) => event.stopPropagation()} />;
+                })}
+                {Array.from({ length: source.rowHeaders.length }, (_, offset) => {
+                  const index = offset + 1;
+                  const label = `BV ${formatComputedNumber(faceScatterAxisBoundaryValue(index, source.rowHeaders))}`;
+                  return <button key={`${title}:bv-axis-boundary:${index}`} type="button"
+                    className="face-bv-dr-scatter-tick"
+                    data-label={label} aria-label={label}
+                    style={{ left: 0, top: `${index / Math.max(1, source.rowHeaders.length) * 100}%` }}
+                    onClick={(event) => event.stopPropagation()} />;
+                })}
+              </div>
             </div>}
           </div>
         </div>
