@@ -461,6 +461,7 @@ export function ImagePane({
               sourceBasePath={filePath}
               schema={schema}
               entries={entries}
+              currentImagePath={entry?.toml_path}
               visibleHeatmapPaths={visibleHeatmapPaths}
               selectedHeatmapPaths={selectedHeatmapPaths}
               tomlData={tomlData}

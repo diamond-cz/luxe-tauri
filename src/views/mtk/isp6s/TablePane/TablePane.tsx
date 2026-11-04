@@ -2604,6 +2604,13 @@ export function ImageTab({
                       focusPath: e.toml_path,
                     });
                   }}
+                  onContextMenu={(event) => {
+                    if (selectedHeatmapPaths.length < 2 || !selectedHeatmapPathSet.has(e.toml_path)) return;
+                    if (event.target instanceof HTMLElement && event.target.closest("input, button, [contenteditable='true']")) return;
+                    event.preventDefault();
+                    preserveRestoredScrollRef.current = false;
+                    onPick(i, { preserveHeatmapSelection: true });
+                  }}
                    style={{
                      cursor: "pointer",
                      height: IMAGE_TABLE_ROW_HEIGHT,

@@ -65,6 +65,7 @@ interface Props {
   sourceBasePath: string;
   schema:   Isp6sSchemaRoot;
   entries: ImageEntry[];
+  currentImagePath?: string;
   visibleHeatmapPaths?: string[] | null;
   selectedHeatmapPaths?: string[];
   tomlData: Record<string, string>;
@@ -349,6 +350,16 @@ interface FaceHeatmapPoint extends BvHeatmapPoint {
   faceSz: number;
   fddr: number;
   selected: boolean;
+}
+
+interface FaceScatterPoint {
+  path: string;
+  x: number;
+  y: number;
+  bv: number;
+  dr: number;
+  selected: boolean;
+  current: boolean;
 }
 
 interface FaceAxisHeatmapPoint {
@@ -834,6 +845,7 @@ export function ChartMapMode({
   sourceBasePath,
   schema,
   entries,
+  currentImagePath,
   visibleHeatmapPaths,
   selectedHeatmapPaths = [],
   tomlData,
@@ -2324,6 +2336,7 @@ export function ChartMapMode({
               focusTarget={focusTarget}
               onFocusHandled={onFocusHandled}
               imageHeatmapPoints={imageHeatmapPoints}
+              currentImagePath={currentImagePath}
               onSelectHeatmapImages={onSelectHeatmapImages}
               heatmapLoading={heatmapLoading}
               heatmapFailed={currentHeatmapRows?.failed ?? false}
@@ -6450,6 +6463,7 @@ function FaceTabContent({
   focusTarget,
   onFocusHandled,
   imageHeatmapPoints,
+  currentImagePath,
   onSelectHeatmapImages,
   heatmapLoading,
   heatmapFailed,
@@ -6490,6 +6504,7 @@ function FaceTabContent({
   focusTarget?: ChartFocusTarget | null;
   onFocusHandled?: (key: number) => void;
   imageHeatmapPoints: FaceHeatmapPoint[];
+  currentImagePath?: string;
   onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
@@ -6907,6 +6922,7 @@ function FaceTabContent({
               cardId="fdThGroup"
               faceTab={fltMode ? "Face_FLT" : "Face"}
               imageHeatmapPoints={imageHeatmapPoints}
+              currentImagePath={currentImagePath}
               onSelectHeatmapImages={onSelectHeatmapImages}
               heatmapLoading={heatmapLoading}
               heatmapFailed={heatmapFailed}
@@ -7541,6 +7557,7 @@ function FaceFbtTableGroup({
   cardId,
   faceTab,
   imageHeatmapPoints,
+  currentImagePath,
   onSelectHeatmapImages,
   heatmapLoading,
   heatmapFailed,
@@ -7572,6 +7589,7 @@ function FaceFbtTableGroup({
   cardId: FaceMetricCardId;
   faceTab: "Face" | "Face_FLT";
   imageHeatmapPoints: FaceHeatmapPoint[];
+  currentImagePath?: string;
   onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
@@ -7643,6 +7661,7 @@ function FaceFbtTableGroup({
               tableKey={table.tableKey}
               faceTab={faceTab}
               imageHeatmapPoints={imageHeatmapPoints}
+              currentImagePath={currentImagePath}
               onSelectHeatmapImages={onSelectHeatmapImages}
               heatmapLoading={heatmapLoading}
               heatmapFailed={heatmapFailed}
@@ -7757,6 +7776,29 @@ function faceScatterAxisPosition(value: number, axis: readonly number[]): number
   return bounds.reduce((position, point) => position + point.index * point.weight, 0);
 }
 
+function nearestFaceScatterPoint(
+  points: readonly FaceScatterPoint[],
+  xPercent: number,
+  yPercent: number,
+  width: number,
+  height: number,
+): FaceScatterPoint | null {
+  let nearest: FaceScatterPoint | null = null;
+  let nearestDistance = 7;
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const point = points[index];
+    const distance = Math.hypot(
+      (point.x - xPercent) * width / 100,
+      (point.y - yPercent) * height / 100,
+    );
+    if (distance < nearestDistance) {
+      nearest = point;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
 function faceAxisHeatmapData(
   source: FaceProbSource | null,
   points: FaceAxisHeatmapPoint[],
@@ -7793,6 +7835,7 @@ function FaceBvDrTableCard({
   tableKey,
   faceTab,
   imageHeatmapPoints,
+  currentImagePath,
   onSelectHeatmapImages,
   heatmapLoading,
   heatmapFailed,
@@ -7814,6 +7857,7 @@ function FaceBvDrTableCard({
   tableKey: FaceFbtTableKey;
   faceTab: "Face" | "Face_FLT";
   imageHeatmapPoints: FaceHeatmapPoint[];
+  currentImagePath?: string;
   onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
@@ -7838,7 +7882,7 @@ function FaceBvDrTableCard({
   const { t } = useTranslation();
   const scatterLayerRef = useRef<HTMLDivElement>(null);
   const scatterCanvasRef = useRef<HTMLCanvasElement>(null);
-  const canShowScatter = tableKey === "fdTh";
+  const canShowScatter = tableKey === "fdTh" || tableKey === "nsFdTh";
   const syncModes = useIsp6sVisualStore((state) => state.visual.chart_face_sync_modes);
   const syncKey = faceSyncModeKey(faceTab, tableKey);
   const syncEnabled = syncKey ? syncModes?.[syncKey] ?? false : false;
@@ -7853,7 +7897,7 @@ function FaceBvDrTableCard({
     [source, showHeatmap, eligibleHeatmapPoints],
   );
   const maxHeatmapCount = Math.max(0, ...heatmapCounts.flat());
-  const scatterPoints = useMemo(() => source && showScatter && source.columnHeaders.length > 0 && source.rowHeaders.length > 0
+  const scatterPoints = useMemo<FaceScatterPoint[]>(() => source && showScatter && source.columnHeaders.length > 0 && source.rowHeaders.length > 0
     ? eligibleHeatmapPoints.map((point) => ({
       path: point.path,
       x: (faceScatterAxisPosition(point.dr, source.columnHeaders) + 0.5) / source.columnHeaders.length * 100,
@@ -7861,7 +7905,14 @@ function FaceBvDrTableCard({
       bv: point.bv,
       dr: point.dr,
       selected: point.selected,
-    })) : [], [source, showScatter, eligibleHeatmapPoints]);
+      current: point.path === currentImagePath,
+    })) : [], [currentImagePath, source, showScatter, eligibleHeatmapPoints]);
+  const [hoveredScatterPoint, setHoveredScatterPoint] = useState<typeof scatterPoints[number] | null>(null);
+  useEffect(() => {
+    if (!showScatter || !scatterPoints.some((point) => point.path === hoveredScatterPoint?.path)) {
+      setHoveredScatterPoint(null);
+    }
+  }, [hoveredScatterPoint?.path, scatterPoints, showScatter]);
   useEffect(() => {
     const layer = scatterLayerRef.current;
     const canvas = scatterCanvasRef.current;
@@ -7899,25 +7950,63 @@ function FaceBvDrTableCard({
       context.lineTo(5, height - 7);
       context.closePath();
       context.fill();
-      const defaultPointColor = getComputedStyle(canvas).getPropertyValue("--colorPaletteRedForeground1").trim();
+      const pointColor = getComputedStyle(canvas).getPropertyValue("--colorPaletteYellowForeground2").trim();
       const selectedPointColor = getComputedStyle(canvas).getPropertyValue("--colorBrandForeground1").trim();
-      context.strokeStyle = getComputedStyle(canvas).getPropertyValue("--colorNeutralBackground1").trim();
+      const currentPointColor = getComputedStyle(canvas).getPropertyValue("--colorPaletteYellowForeground2").trim();
+      const pointOutlineColor = getComputedStyle(canvas).getPropertyValue("--colorNeutralBackground1").trim();
+      const hoveredPoint = hoveredScatterPoint
+        ? scatterPoints.find((point) => point.path === hoveredScatterPoint.path)
+        : undefined;
       for (const point of scatterPoints) {
+        if (point.path === hoveredPoint?.path) continue;
         const x = point.x / 100 * width;
         const y = point.y / 100 * height;
-        context.fillStyle = point.selected ? selectedPointColor : defaultPointColor;
+        context.fillStyle = point.selected ? selectedPointColor : pointColor;
+        context.strokeStyle = pointOutlineColor;
         context.beginPath();
-        context.arc(x, y, point.selected ? 6 : 4, 0, Math.PI * 2);
+        context.arc(x, y, point.current ? 5 : point.selected ? 4.5 : 3.5, 0, Math.PI * 2);
         context.fill();
         context.lineWidth = 1;
         context.stroke();
+        if (point.current) {
+          context.beginPath();
+          context.arc(x, y, 6, 0, Math.PI * 2);
+          context.strokeStyle = currentPointColor;
+          context.lineWidth = 1.5;
+          context.stroke();
+        }
+      }
+      if (hoveredPoint) {
+        const x = hoveredPoint.x / 100 * width;
+        const y = hoveredPoint.y / 100 * height;
+        context.beginPath();
+        context.arc(x, y, 6, 0, Math.PI * 2);
+        context.strokeStyle = hoveredPoint.selected ? selectedPointColor : pointColor;
+        context.lineWidth = 1;
+        context.globalAlpha = 0.62;
+        context.stroke();
+        context.globalAlpha = 1;
+        context.fillStyle = hoveredPoint.selected ? selectedPointColor : pointColor;
+        context.strokeStyle = pointOutlineColor;
+        context.beginPath();
+        context.arc(x, y, hoveredPoint.selected ? 5 : 3.5, 0, Math.PI * 2);
+        context.fill();
+        context.lineWidth = 1;
+        context.stroke();
+        if (hoveredPoint.current) {
+          context.beginPath();
+          context.arc(x, y, 6, 0, Math.PI * 2);
+          context.strokeStyle = currentPointColor;
+          context.lineWidth = 1.5;
+          context.stroke();
+        }
       }
     };
     const observer = new ResizeObserver(draw);
     observer.observe(layer);
     draw();
     return () => observer.disconnect();
-  }, [scatterPoints, showScatter]);
+  }, [hoveredScatterPoint?.path, scatterPoints, showScatter]);
   const rowSelection = source ? boundsForTableAxis(bv, source.rowHeaders) : { points: [] };
   const columnSelection = source ? boundsForTableAxis(dr, source.columnHeaders) : { points: [] };
   const activeRows = new Set(rowSelection.points.map((point) => point.index));
@@ -8022,6 +8111,17 @@ function FaceBvDrTableCard({
           <div
             className={showScatter ? "face-bv-dr-scatter-grid" : undefined}
             style={{ ...faceBvDrTableStyle(source.columnHeaders.length), position: "relative" }}
+            onPointerMove={showScatter ? (event) => {
+              const layer = scatterLayerRef.current;
+              if (!layer) return;
+              const rect = layer.getBoundingClientRect();
+              if (rect.width <= 0 || rect.height <= 0) return;
+              const x = (event.clientX - rect.left) / rect.width * 100;
+              const y = (event.clientY - rect.top) / rect.height * 100;
+              const nearest = nearestFaceScatterPoint(scatterPoints, x, y, rect.width, rect.height);
+              setHoveredScatterPoint((current) => current?.path === nearest?.path ? current : nearest);
+            } : undefined}
+            onPointerLeave={showScatter ? () => setHoveredScatterPoint(null) : undefined}
             onClickCapture={showScatter ? (event) => {
               const layer = scatterLayerRef.current;
               if (!layer) return;
@@ -8029,15 +8129,7 @@ function FaceBvDrTableCard({
               if (rect.width <= 0 || rect.height <= 0) return;
               const x = (event.clientX - rect.left) / rect.width * 100;
               const y = (event.clientY - rect.top) / rect.height * 100;
-              let nearest: typeof scatterPoints[number] | undefined;
-              let nearestDistance = 8;
-              for (const point of scatterPoints) {
-                const distance = Math.hypot((point.x - x) * rect.width / 100, (point.y - y) * rect.height / 100);
-                if (distance < nearestDistance) {
-                  nearest = point;
-                  nearestDistance = distance;
-                }
-              }
+              const nearest = nearestFaceScatterPoint(scatterPoints, x, y, rect.width, rect.height);
               if (nearest) {
                 event.stopPropagation();
                 onSelectHeatmapImages?.([nearest.path], { toggle: event.ctrlKey || event.metaKey, focusPath: nearest.path });
@@ -8146,6 +8238,18 @@ function FaceBvDrTableCard({
             })}
             {showScatter && <div ref={scatterLayerRef} className="face-bv-dr-scatter-layer">
               <canvas ref={scatterCanvasRef} className="face-bv-dr-scatter-canvas" aria-hidden="true" />
+              {hoveredScatterPoint && <div
+                className="face-bv-dr-scatter-tooltip"
+                style={{
+                  left: `clamp(4px, calc(${hoveredScatterPoint.x}% + 12px), calc(100% - 116px))`,
+                  top: `clamp(4px, calc(${hoveredScatterPoint.y}% - 48px), calc(100% - 42px))`,
+                }}
+                role="status"
+                aria-live="polite"
+              >
+                <span><b>BV</b>{formatComputedNumber(hoveredScatterPoint.bv)}</span>
+                <span><b>DR</b>{formatComputedNumber(hoveredScatterPoint.dr)}</span>
+              </div>}
             </div>}
           </div>
         </div>

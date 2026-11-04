@@ -1592,3 +1592,135 @@
 **验证**
 
 - `npm run typecheck`、`npm run build`、`git diff --check` 通过。尚未在 Tauri 窗口实测列标题取消排序、颜色层级和散点轴样式。
+
+### 2026-11-04：散点悬浮显示 BV/DR 数值
+
+**亮点**
+
+- `ChartMapMode.tsx` 在表格区域复用散点最近点命中逻辑，悬浮命中时显示 BV/DR 浮层并在 Canvas 中绘制品牌色环；移出图表、关闭散点或点集变化后清除悬浮状态。
+- `globals.css` 使用 Fluent 主题令牌绘制提示边框、文字、背景和阴影，提供短淡入效果并遵守 `prefers-reduced-motion`。
+
+**痛点**
+
+- 散点坐标映射到表格轴的连续位置，相同或相近 BV/DR 值会真实重叠；原悬浮和点击分别使用 8 CSS px 命中循环，等距时优先返回数组靠前但绘制在下层的点，10px 外环也会包住邻近散点。
+
+**闭坑**
+
+- 修改 Canvas 提示时维持图层不拦截单元格编辑和点击路径；悬浮与点击共用 7px 最近点判定，等距点按绘制层级优先命中顶层；悬浮外环应明显小于邻近点距离。悬浮点离开、数据失效或功能关闭后必须释放 React 引用，并保留 ResizeObserver 卸载清理。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；尚未在 Tauri 窗口实测悬浮命中、边缘提示定位和主题动效。
+
+### 2026-11-04：多选图片右键切换当前项并收敛散点悬浮标识
+
+**亮点**
+
+- `TablePane.tsx` 在多选集合内的图片行响应右键时调用 `onPick(index, { preserveHeatmapSelection: true })`，只切换当前图片；表格单元格的输入框、按钮仍保留自己的右键行为。
+- `ChartMapMode.tsx` 使用统一最近点命中结果，其他散点先绘制，悬浮点及单个小环最后绘制；每次悬浮只生成一个 hover 环。
+
+**痛点**
+
+- 图片切换默认会清理热力图集合，直接调用普通选择流程会丢失多选；重叠散点若在循环中混合绘制悬浮装饰，标识可能被后绘制的点覆盖，视觉上像多个目标。
+
+**闭坑**
+
+- 多选状态下切换当前图片要走 `preserveHeatmapSelection` 路径，不要通过替换 `selectedHeatmapPaths` 来设置焦点；Canvas 悬浮装饰按单一命中对象绘制一次并置于点集顶层。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；尚未在 Tauri 窗口实测右键保留多选和重叠散点单环。
+
+### 2026-11-04：区分散点图中的当前图片与其他多选图片
+
+**亮点**
+
+- `ImagePane.tsx` 将当前图片的 TOML 路径传给 `ChartMapMode.tsx`；散点在原有多选品牌色上增加当前图片状态，当前点以 Fluent 黄色系语义令牌描边并略微增大，其他已选点保持原颜色。
+- 悬浮点仍置于绘制顶层；当前点同时悬浮时复用同一描边圆周，避免叠出两个相似高亮环。
+
+**痛点**
+
+- 散点模型先前只有多选布尔值，没有接收当前图片路径，因此当前图片与其他多选图片显示相同品牌色。
+
+**闭坑**
+
+- 多选散点要分别表达“集合成员”和“当前焦点”；切换当前图片后应只更新当前标记，不改变多选集合，且主题区分必须使用语义令牌。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过；尚未在 Tauri 窗口实测当前点颜色对比度和多选切换。
+
+### 2026-11-04：统一散点图与笛卡尔热力颜色
+
+**亮点**
+
+- `ChartMapMode.tsx` 的 Face 散点复用 `--face-heat-high` 颜色令牌，普通点与多选点使用 `#AAC7BE`，通过点径和当前图片描边区分状态；Face、BV/DR、Tone 与 MainT 热力格统一使用该色相。
+- `globals.css` 为深浅主题配置同色系强度低值和指定高值；高强度单元格切换深色文字以保持可读性。
+
+**痛点**
+
+- 同一浅青绿色在深色与浅色背景上的对比不同，不能让深色主题高强度格继续使用白字。
+
+**闭坑**
+
+- 调整图表颜色时同步检查 Face/Tone 热力渲染器和 MainT 笛卡尔热力格；核对深浅主题文本对比，并保留当前图片与多选点的既有状态标识。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 均通过；未在 Tauri 窗口实测深浅主题视觉效果。
+
+### 2026-11-04：按主题回调散点与笛卡尔图配色
+
+**亮点**
+
+- `ChartMapMode.tsx` 的散点使用 Fluent `--colorPaletteYellowForeground2`；当前图片描边改用主题品牌色，继续与普通及多选点区分。
+- `globals.css` 恢复 Face/Tone 热力图原有深浅主题渐变；MainT 笛卡尔热力图恢复 `#f59e0b` 橙色强度渐变。
+
+**痛点**
+
+- 将不同用途的图表统一到同一青绿色会覆盖现有主题色表达，用户反馈 MainT 图表的橙色与主题更匹配。
+
+**闭坑**
+
+- 按图表类型分别沿用已建立的主题色；调整散点主色时重新检查当前图片描边与点色的区分。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 均通过；未在 Tauri 窗口实测散点黄色在深浅主题下的表现。
+
+### 2026-11-04：区分黄色普通散点与主题色选中散点
+
+**亮点**
+
+- `ChartMapMode.tsx` 按 `point.selected` 分别使用 Fluent 黄色令牌和 `--colorBrandForeground1`；悬浮重绘使用相同分支，避免悬浮时颜色状态跳变。当前图片继续使用黄色描边单独提示。
+
+**痛点**
+
+- 选中状态只增大点径时，在多选图片较多的情况下不够醒目；黄色与品牌色分层后能够同时表达普通点、已选点和当前图片。
+
+**闭坑**
+
+- 修改 Canvas 散点状态色时同时检查普通绘制和悬浮重绘分支，并确保当前图片描边不与选中填充色重复。
+
+**验证**
+
+- `npm run typecheck`、`git diff --check` 通过；未在 Tauri 窗口实测不同主题的选中点对比度。
+
+### 2026-11-04：为 ns_fd_th_tbl 复刻 Face BV/DR 散点图
+
+**亮点**
+
+- `ChartMapMode.tsx` 将 `FaceBvDrTableCard` 的散点按钮可见条件从仅 `fdTh` 扩展为 `fdTh` 与 `nsFdTh`；NS 表直接复用已有轴定位、最近点悬浮、点击选图、多选和颜色标识逻辑。
+- NS 表继续使用自身 `source` 的 BV/DR 轴和 `FaceFbtTableKey` 对应的持久化开关键，不会覆盖 `fd_th_tbl` 的散点状态。
+
+**痛点**
+
+- 散点渲染与交互已经封装在通用卡片中，原先仅由标题栏条件隐藏，容易造成 NS 表功能缺失而误以为需要复制一套 Canvas 逻辑。
+
+**闭坑**
+
+- 后续新增同类 Face BV/DR 表时，先检查 `canShowScatter`、`eligibleHeatmapPoints` 和独立 `heatmapKey`，避免重复创建 Canvas 监听器或复用错误的轴数据。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、`git diff --check` 均通过；未在 Tauri 窗口手动点击 NS 表散点按钮和散点选图。
