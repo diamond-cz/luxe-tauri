@@ -247,6 +247,28 @@ html.light .luxe-update-log-backdrop {
   gap: 10px;
 }
 
+.face-bv-dr-scatter-grid > :not(.face-bv-dr-scatter-layer) {
+  opacity: 0.55;
+  border-right-style: dashed !important;
+  border-bottom-style: dashed !important;
+}
+
+.face-bv-dr-scatter-layer {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  left: 72px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.face-bv-dr-scatter-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 @container (min-width: 640px) {
   .isp6s-info-normal-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

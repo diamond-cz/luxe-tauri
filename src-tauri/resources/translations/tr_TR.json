@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "{{table}} görüntü BV/DR dağılım grafiğini göster",
+  "chart_scatter_hide": "{{table}} dağılım grafiğini gizle",
   "workspace_hide_images": "Görüntü listesi kartını gizle",
   "workspace_show_images": "Görüntü listesi kartını göster",
   "workspace_hide_source": "Kaynak kod kartını gizle",

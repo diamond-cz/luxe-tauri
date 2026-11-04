@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Hiện biểu đồ phân tán BV/DR của ảnh cho {{table}}",
+  "chart_scatter_hide": "Ẩn biểu đồ phân tán cho {{table}}",
   "workspace_hide_images": "Ẩn thẻ danh sách ảnh",
   "workspace_show_images": "Hiện thẻ danh sách ảnh",
   "workspace_hide_source": "Ẩn thẻ mã nguồn",

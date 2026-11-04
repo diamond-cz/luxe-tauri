@@ -26,6 +26,51 @@
 
 ## 已沉淀经验
 
+### 2026-11-04：完成 Face fd_th_tbl 图片 BV/DR 散点叠加
+
+**亮点**
+
+- `ChartMapMode.tsx` 复用 Face 热力图的批量 TOML 字段读取和 `boundsForTableAxis` 权重，按表格列 DR、行 BV 的真实刻度插值定位每张图片；散点点击沿用图片列表的路径选择入口。
+- `globals.css` 仅在散点模式下将表格网格改为半透明虚线，并绘制向右、向下的坐标轴；按钮提示加入 16 份翻译资源。
+
+**痛点**
+
+- BV/DR 表头可能不等距，直接按数值范围线性映射会使点与表格插值单元格错位；空轴需要阻止坐标百分比除零。点位超出刻度范围时沿用现有表格边界钳制行为。
+- 覆盖整张表格的交互画布会拦截单元格编辑点击，且同时设置 `left` 与 `width: 100%` 会使图层超出数据区；最终画布改为不接收指针事件，只由表格捕获散点 8px 范围内的点击。
+- Canvas 本身以 `auto` 尺寸绝对定位时，绘制逻辑把 backing store 调整为设备像素会同时改变其固有布局尺寸；观察该 Canvas 会导致尺寸反馈和散点重绘闪烁。
+
+**闭坑**
+
+- 后续修改 Face 表格的刻度计算时，同步检查 `faceScatterAxisPosition` 与 `boundsForTableAxis` 的权重契约；散点层只覆盖数据区，不能改变表格行列尺寸或阻断原有编辑焦点。
+- 后续修改散点点击时，确认非点位点击仍能聚焦可编辑单元格，且图层 `top/left` 与 `FACE_BV_DR_CORNER_HEIGHT/WIDTH` 一致。
+- Canvas backing store 使用设备像素尺寸时，CSS 显示尺寸必须固定；`ResizeObserver` 观察布局容器，不能观察会被绘制逻辑改动固有尺寸的 Canvas。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`、16 份翻译 JSON 解析、`git diff --check` 及独立 target 的 `cargo test --locked --manifest-path src-tauri/Cargo.toml --test face_heatmap_state` 通过（1 项）；默认 Cargo target 测试因运行中的 `luxe-tauri.exe` 文件锁失败。修复 Canvas 尺寸反馈后尚未在 Tauri 窗口实测持续显示、散点点击、单元格编辑、不同窗口宽度和深浅主题。
+
+### 2026-11-04：Face BV/DR 散点和图片列表联动选择
+
+**亮点**
+
+- `Isp6sAeVisual.tsx` 继续复用 `heatmapSelection` 保存图片多选；散点、表格行和表格列标题共用选择回调，定位图片时保留选中集合。列标题选择通过 `loadImageTomlFieldsBatchShared` 分批读取当前列依赖字段，再筛出有值的图片。
+- `ChartMapMode.tsx` 根据共享路径集合高亮散点；普通点击替换选择，Ctrl/Command 点击切换单张图片。散点开启时 DR 表头输入落在左下、BV 表头输入落在右上，关闭时恢复默认样式。
+
+**痛点**
+
+- 图片行原先只负责切换当前图片并清空热力图选择，散点点击也只更新表格集合，导致图片列表、当前预览和散点高亮没有一致的选择状态。
+- 列表列标题与排序共用一个按钮；将标题选择与排序图标拆成独立按钮，避免列多选覆盖排序操作。
+
+**闭坑**
+
+- 后续调整多选时，保持行点击、散点点击和列标题操作使用同一组 `toml_path`，并在 modifier 操作时只切换命中的路径。
+- 调整散点轴表头时，检查输入框所在单元格的 flex 对齐和输入框自身高度；仅改表格容器对齐不会移动输入文字。
+- 列标题选择会读取全体筛选后图片的字段，保留 128 条一批的请求上限，并忽略空值和 `-`。
+
+**验证**
+
+- `npm run typecheck` 和 `npm run build` 通过，`git diff --check` 通过。尚未在 Tauri 窗口实测散点命中、Ctrl/Command 多选、列标题字段选择及轴对齐。
+
 ### 2026-11-03：修复 bcompare 与 Tone.cpp 表头列对齐
 
 **亮点**

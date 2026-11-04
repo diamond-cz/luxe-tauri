@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Zobrazit bodový graf BV/DR snímků pro {{table}}",
+  "chart_scatter_hide": "Skrýt bodový graf pro {{table}}",
   "workspace_hide_images": "Skrýt kartu seznamu obrázků",
   "workspace_show_images": "Zobrazit kartu seznamu obrázků",
   "workspace_hide_source": "Skrýt kartu zdrojového kódu",

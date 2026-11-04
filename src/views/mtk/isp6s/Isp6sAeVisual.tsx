@@ -319,12 +319,27 @@ export function Isp6sAeVisual({
     }
   };
 
-  const onSelectHeatmapImages = (paths: string[]) => {
+  const onSelectHeatmapImages = (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => {
+    const currentPaths = heatmapSelection?.entries === imageDir.entries ? heatmapSelection.paths : [];
+    const nextPaths = new Set(currentPaths);
     const matchingPaths = new Set(paths);
-    const selected = imageDir.entries.filter((entry) => matchingPaths.has(entry.toml_path));
+    if (options?.toggle) {
+      for (const path of matchingPaths) {
+        if (nextPaths.has(path)) nextPaths.delete(path);
+        else nextPaths.add(path);
+      }
+    } else {
+      nextPaths.clear();
+      matchingPaths.forEach((path) => nextPaths.add(path));
+    }
+    const selected = imageDir.entries.filter((entry) => nextPaths.has(entry.toml_path));
+    if (options?.focusPath) {
+      const focusIndex = selected.findIndex((entry) => entry.toml_path === options.focusPath);
+      if (focusIndex > 0) selected.unshift(selected.splice(focusIndex, 1)[0]);
+    }
     if (selected.length > 0) {
       const firstIndex = imageDir.entries.indexOf(selected[0]);
-      void onPickImage(firstIndex);
+      void onPickImage(firstIndex, { preserveHeatmapSelection: true });
     }
     setHeatmapSelection({ entries: imageDir.entries, paths: selected.map((entry) => entry.toml_path) });
   };
@@ -442,6 +457,7 @@ export function Isp6sAeVisual({
           entries={imageDir.entries}
           current={currentIndex}
           selectedHeatmapPaths={selectedHeatmapPaths}
+          onSelectHeatmapImages={onSelectHeatmapImages}
           onVisibleHeatmapPathsChange={handleVisibleHeatmapPathsChange}
           imageDir={imageDir.dir}
           imageDataRevision={imageDataRevision}
@@ -504,6 +520,7 @@ export function Isp6sAeVisual({
           entry={currentEntry}
           entries={imageDir.entries}
           visibleHeatmapPaths={filteredHeatmapPaths}
+          selectedHeatmapPaths={selectedHeatmapPaths}
           tomlData={selectedTomlData}
           onSelectHeatmapImages={onSelectHeatmapImages}
           onCalculatorSourcePathChange={setCalculatorSourcePath}

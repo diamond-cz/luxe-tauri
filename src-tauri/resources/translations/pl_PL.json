@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Pokaż wykres punktowy BV/DR obrazów dla {{table}}",
+  "chart_scatter_hide": "Ukryj wykres punktowy dla {{table}}",
   "workspace_hide_images": "Ukryj kartę listy obrazów",
   "workspace_show_images": "Pokaż kartę listy obrazów",
   "workspace_hide_source": "Ukryj kartę kodu źródłowego",

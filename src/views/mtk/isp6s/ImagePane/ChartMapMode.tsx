@@ -7,7 +7,7 @@ import {
   SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, LayoutColumnThree24Regular, LayoutRowThree24Regular, LayoutRowTwoSplitTop24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
+import { ArrowSync24Regular, ChevronDown24Regular, ChevronUp24Regular, Code24Regular, DataHistogram24Regular, DataScatter24Regular, LayoutColumnThree24Regular, LayoutRowThree24Regular, LayoutRowTwoSplitTop24Regular, Save24Regular, TableLink24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
 import { useTranslation } from "react-i18next";
 import { Button } from "@fluentui/react-components";
@@ -66,9 +66,10 @@ interface Props {
   schema:   Isp6sSchemaRoot;
   entries: ImageEntry[];
   visibleHeatmapPaths?: string[] | null;
+  selectedHeatmapPaths?: string[];
   tomlData: Record<string, string>;
   active?: boolean;
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   activeCard?: string;
   activeCardKey?: number;
   focusTarget?: ChartFocusTarget | null;
@@ -347,6 +348,7 @@ interface FaceHeatmapPoint extends BvHeatmapPoint {
   faceProb: number;
   faceSz: number;
   fddr: number;
+  selected: boolean;
 }
 
 interface FaceAxisHeatmapPoint {
@@ -833,6 +835,7 @@ export function ChartMapMode({
   schema,
   entries,
   visibleHeatmapPaths,
+  selectedHeatmapPaths = [],
   tomlData,
   active = true,
   onSelectHeatmapImages,
@@ -901,6 +904,7 @@ export function ChartMapMode({
   const [heatmapRows, setHeatmapRows] = useState<{
     entries: ImageEntry[];
     bvKey: string;
+    fieldsKey: string;
     rows: Record<string, Record<string, string>>;
     failed: boolean;
   } | null>(null);
@@ -954,6 +958,44 @@ export function ChartMapMode({
 
   const sourceKey = useMemo(() => tab, [tab]);
   const isFaceTab = tab === "Face" || tab === "Face_FLT";
+  const requestedHeatmapFields = useMemo(() => {
+    const fields = new Set<string>();
+    const modes = visual.chart_face_heatmap_modes ?? {};
+    if (tab === "MainT" && modes[MAIN_T_BV_HEATMAP_KEY]?.enabled) fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+    if (tab === "HS") {
+      for (const [term, key] of Object.entries(HS_AREA_HEATMAP_KEYS)) {
+        if (!modes[key]?.enabled) continue;
+        fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+        fields.add(term === "BT" ? HS_BRIGHT_EVD_KEY : term === "MT" ? HS_MIDDLE_CORR_B2M_KEY : "AE_TAG_DRV6_B2D");
+      }
+    }
+    if (isFaceTab) {
+      const drKey = tab === "Face_FLT" ? FACE_FLT_DR_KEY : FACE_FBT_DR_KEY;
+      const fddrKey = tab === "Face_FLT" ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY;
+      for (const tableKey of Object.keys(FACE_TABLE_GROUP_BY_KEY)) {
+        const mode = modes[`${tab}_${tableKey}`];
+        if (!mode?.enabled && !mode?.show_scatter) continue;
+        fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+        fields.add(drKey);
+        if (tableKey.startsWith("ns")) fields.add(NS_PROB_KEY);
+      }
+      if (modes[`${tab}_faceProb`]?.enabled) {
+        fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+        for (const key of FACE_PROB_KEYS) fields.add(key);
+      }
+      if (modes[`${tab}_fdszRa`]?.enabled) {
+        fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+        fields.add(FACE_FLT_FDSZ_KEY);
+      }
+      if (modes[`${tab}_fddrRa`]?.enabled) {
+        fields.add(schema.Image?.BV ?? "AE_TAG_REALBVX1000");
+        fields.add(drKey);
+        fields.add(fddrKey);
+      }
+    }
+    return [...fields];
+  }, [isFaceTab, schema.Image?.BV, tab, visual.chart_face_heatmap_modes]);
+  const requestedHeatmapFieldsKey = requestedHeatmapFields.join("\u0000");
   useEffect(() => {
     const heatmapKeys = tab === "MainT" ? [MAIN_T_BV_HEATMAP_KEY]
       : tab === "HS" ? Object.values(HS_AREA_HEATMAP_KEYS)
@@ -962,7 +1004,7 @@ export function ChartMapMode({
         `${tab}_faceProb`, `${tab}_fdszRa`, `${tab}_fddrRa`,
       ]
       : [];
-    if (heatmapKeys.some((key) => visual.chart_face_heatmap_modes?.[key]?.enabled)) {
+    if (heatmapKeys.some((key) => visual.chart_face_heatmap_modes?.[key]?.enabled || visual.chart_face_heatmap_modes?.[key]?.show_scatter)) {
       setHeatmapRequested(true);
     }
   }, [isFaceTab, tab, visual.chart_face_heatmap_modes]);
@@ -974,28 +1016,29 @@ export function ChartMapMode({
   }, [filePath, isFaceTab, sourceBasePath, sourceRevision, tab]);
   const heatmapBvKey = schema.Image?.BV ?? "AE_TAG_REALBVX1000";
   useEffect(() => {
-    if (!heatmapRequested || entries.length === 0) return;
+    if (!heatmapRequested || requestedHeatmapFields.length === 0 || entries.length === 0) return;
     let cancelled = false;
     loadImageTomlFieldsBatchShared(
       entries.map((entry) => entry.toml_path),
-      [heatmapBvKey, FACE_FBT_DR_KEY, FACE_FLT_DR_KEY, NS_PROB_KEY,
-        ...FACE_PROB_KEYS, FACE_FLT_FDSZ_KEY, FACE_FBT_FDDR_KEY, FACE_FLT_FDDR_KEY,
-        HS_BRIGHT_EVD_KEY, HS_MIDDLE_CORR_B2M_KEY, "AE_TAG_DRV6_B2D"],
+      requestedHeatmapFields,
     ).then((rows) => {
-      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, rows, failed: false });
+      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows, failed: false });
     }).catch(() => {
-      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, rows: {}, failed: true });
+      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows: {}, failed: true });
     });
     return () => { cancelled = true; };
-  }, [entries, heatmapBvKey, heatmapRequested, heatmapRetry]);
+  }, [entries, heatmapBvKey, heatmapRequested, heatmapRetry, requestedHeatmapFields, requestedHeatmapFieldsKey]);
   const currentHeatmapRows = heatmapRows?.entries === entries && heatmapRows.bvKey === heatmapBvKey
+    && heatmapRows.fieldsKey === requestedHeatmapFieldsKey
     ? heatmapRows
     : null;
+  const heatmapLoading = heatmapRequested && requestedHeatmapFields.length > 0 && entries.length > 0 && !currentHeatmapRows;
   const visibleHeatmapPathSet = useMemo(() => visibleHeatmapPaths === null || visibleHeatmapPaths === undefined
     ? null : new Set(visibleHeatmapPaths), [visibleHeatmapPaths]);
   const visibleHeatmapEntries = useMemo(() => visibleHeatmapPathSet
     ? entries.filter((entry) => visibleHeatmapPathSet.has(entry.toml_path)) : entries,
   [entries, visibleHeatmapPathSet]);
+  const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
   const imageHeatmapPoints = useMemo<FaceHeatmapPoint[]>(() => {
     const rows = currentHeatmapRows?.rows;
     if (!rows) return [];
@@ -1010,10 +1053,10 @@ export function ChartMapMode({
       const fddrKey = tab === "Face_FLT" ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY;
       const fddr = parseFiniteNumber(readTomlValue(data, fddrKey));
       return [bv, faceProb, faceSz, fddr].some(Number.isFinite)
-        ? [{ path: entry.toml_path, bv, dr, nsProb, faceProb, faceSz, fddr }]
+        ? [{ path: entry.toml_path, bv, dr, nsProb, faceProb, faceSz, fddr, selected: selectedHeatmapPathSet.has(entry.toml_path) }]
         : [];
     });
-  }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey, tab]);
+  }, [currentHeatmapRows, visibleHeatmapEntries, heatmapBvKey, selectedHeatmapPathSet, tab]);
   const bvHeatmapPoints = useMemo<BvHeatmapPoint[]>(() => {
     const rows = currentHeatmapRows?.rows;
     if (!rows) return [];
@@ -1841,7 +1884,7 @@ export function ChartMapMode({
             onSourceJump={onSourceJump}
             bvHeatmapPoints={bvHeatmapPoints}
             onSelectHeatmapImages={onSelectHeatmapImages}
-            heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+            heatmapLoading={heatmapLoading}
             heatmapFailed={currentHeatmapRows?.failed ?? false}
             onHeatmapRequest={() => {
               if (currentHeatmapRows?.failed) {
@@ -1960,7 +2003,7 @@ export function ChartMapMode({
           onSourceJump={onSourceJump}
           heatmapPoints={hsAreaHeatmapPoints.BT}
           onSelectHeatmapImages={onSelectHeatmapImages}
-          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapLoading={heatmapLoading}
           heatmapFailed={currentHeatmapRows?.failed ?? false}
           onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsBrightThdValue}
@@ -1994,7 +2037,7 @@ export function ChartMapMode({
           onSourceJump={onSourceJump}
           heatmapPoints={hsAreaHeatmapPoints.MT}
           onSelectHeatmapImages={onSelectHeatmapImages}
-          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapLoading={heatmapLoading}
           heatmapFailed={currentHeatmapRows?.failed ?? false}
           onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsMiddleThdValue}
@@ -2028,7 +2071,7 @@ export function ChartMapMode({
           onSourceJump={onSourceJump}
           heatmapPoints={hsAreaHeatmapPoints.DT}
           onSelectHeatmapImages={onSelectHeatmapImages}
-          heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+          heatmapLoading={heatmapLoading}
           heatmapFailed={currentHeatmapRows?.failed ?? false}
           onHeatmapRequest={requestImageHeatmap}
           onInterpolatedChange={updateLiveHsDarkThdValue}
@@ -2282,7 +2325,7 @@ export function ChartMapMode({
               onFocusHandled={onFocusHandled}
               imageHeatmapPoints={imageHeatmapPoints}
               onSelectHeatmapImages={onSelectHeatmapImages}
-              heatmapLoading={heatmapRequested && entries.length > 0 && !currentHeatmapRows}
+              heatmapLoading={heatmapLoading}
               heatmapFailed={currentHeatmapRows?.failed ?? false}
               onHeatmapRequest={() => {
                 if (currentHeatmapRows?.failed) {
@@ -3704,16 +3747,28 @@ function useChartTableHeatmapMode(heatmapKey: string, defaultShowHitCounts = fal
   const mode = useIsp6sVisualStore((state) => state.visual.chart_face_heatmap_modes?.[heatmapKey]);
   const showHeatmap = mode?.enabled ?? false;
   const showHitCounts = mode?.show_hit_counts ?? defaultShowHitCounts;
+  const showScatter = mode?.show_scatter ?? false;
   const updateHeatmapMode = useCallback((enabled: boolean, show_hit_counts: boolean) => {
     const { visual, patch } = useIsp6sVisualStore.getState();
     patch({
       chart_face_heatmap_modes: {
         ...visual.chart_face_heatmap_modes,
-        [heatmapKey]: { enabled, show_hit_counts },
+        [heatmapKey]: { ...visual.chart_face_heatmap_modes?.[heatmapKey], enabled, show_hit_counts },
       },
     });
   }, [heatmapKey]);
-  return { showHeatmap, showHitCounts, updateHeatmapMode };
+  const updateScatterMode = useCallback((show_scatter: boolean) => {
+    const { visual, patch } = useIsp6sVisualStore.getState();
+    patch({ chart_face_heatmap_modes: {
+      ...visual.chart_face_heatmap_modes,
+      [heatmapKey]: {
+        enabled: visual.chart_face_heatmap_modes?.[heatmapKey]?.enabled ?? false,
+        show_hit_counts: visual.chart_face_heatmap_modes?.[heatmapKey]?.show_hit_counts ?? defaultShowHitCounts,
+        show_scatter,
+      },
+    } });
+  }, [defaultShowHitCounts, heatmapKey]);
+  return { showHeatmap, showHitCounts, showScatter, updateHeatmapMode, updateScatterMode };
 }
 
 function MainTargetThresholdCard({
@@ -3767,7 +3822,7 @@ function MainTargetThresholdCard({
   onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   bvHeatmapPoints: BvHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -6433,7 +6488,7 @@ function FaceTabContent({
   focusTarget?: ChartFocusTarget | null;
   onFocusHandled?: (key: number) => void;
   imageHeatmapPoints: FaceHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -6996,7 +7051,7 @@ function FaceProbTableCard({
   bv: number;
   editable: boolean;
   heatmapPoints: FaceAxisHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -7139,7 +7194,7 @@ function FaceFdszTableCard({
   onToggleExifSource: () => void;
   editable: boolean;
   heatmapPoints: FaceAxisHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -7276,7 +7331,7 @@ function FaceFddrTableCard({
   editable: boolean;
   embedded?: boolean;
   heatmapPoints: FaceAxisHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -7515,7 +7570,7 @@ function FaceFbtTableGroup({
   cardId: FaceMetricCardId;
   faceTab: "Face" | "Face_FLT";
   imageHeatmapPoints: FaceHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -7695,6 +7750,11 @@ function faceBvDrHitPaths(
   ).map(({ path }) => path))];
 }
 
+function faceScatterAxisPosition(value: number, axis: readonly number[]): number {
+  const bounds = boundsForTableAxis(value, axis).points;
+  return bounds.reduce((position, point) => position + point.index * point.weight, 0);
+}
+
 function faceAxisHeatmapData(
   source: FaceProbSource | null,
   points: FaceAxisHeatmapPoint[],
@@ -7752,7 +7812,7 @@ function FaceBvDrTableCard({
   tableKey: FaceFbtTableKey;
   faceTab: "Face" | "Face_FLT";
   imageHeatmapPoints: FaceHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -7772,7 +7832,11 @@ function FaceBvDrTableCard({
 }) {
   const patchVis = useIsp6sVisualStore((state) => state.patch);
   const heatmapKey = `${faceTab}_${tableKey}`;
-  const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode(heatmapKey, true);
+  const { showHeatmap, showHitCounts, showScatter, updateHeatmapMode, updateScatterMode } = useChartTableHeatmapMode(heatmapKey, true);
+  const { t } = useTranslation();
+  const scatterLayerRef = useRef<HTMLDivElement>(null);
+  const scatterCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canShowScatter = tableKey === "fdTh";
   const syncModes = useIsp6sVisualStore((state) => state.visual.chart_face_sync_modes);
   const syncKey = faceSyncModeKey(faceTab, tableKey);
   const syncEnabled = syncKey ? syncModes?.[syncKey] ?? false : false;
@@ -7787,6 +7851,71 @@ function FaceBvDrTableCard({
     [source, showHeatmap, eligibleHeatmapPoints],
   );
   const maxHeatmapCount = Math.max(0, ...heatmapCounts.flat());
+  const scatterPoints = useMemo(() => source && showScatter && source.columnHeaders.length > 0 && source.rowHeaders.length > 0
+    ? eligibleHeatmapPoints.map((point) => ({
+      path: point.path,
+      x: (faceScatterAxisPosition(point.dr, source.columnHeaders) + 0.5) / source.columnHeaders.length * 100,
+      y: (faceScatterAxisPosition(point.bv, source.rowHeaders) + 0.5) / source.rowHeaders.length * 100,
+      bv: point.bv,
+      dr: point.dr,
+      selected: point.selected,
+    })) : [], [source, showScatter, eligibleHeatmapPoints]);
+  useEffect(() => {
+    const layer = scatterLayerRef.current;
+    const canvas = scatterCanvasRef.current;
+    if (!layer || !canvas || !showScatter) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const draw = () => {
+      const { width, height } = canvas.getBoundingClientRect();
+      if (width <= 0 || height <= 0) return;
+      const ratio = window.devicePixelRatio || 1;
+      const pixelWidth = Math.round(width * ratio);
+      const pixelHeight = Math.round(height * ratio);
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      context.strokeStyle = getComputedStyle(canvas).getPropertyValue("--colorBrandForeground1").trim();
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(0, 1);
+      context.lineTo(width - 1, 1);
+      context.moveTo(1, 0);
+      context.lineTo(1, height - 1);
+      context.stroke();
+      context.fillStyle = context.strokeStyle;
+      context.beginPath();
+      context.moveTo(width, 1);
+      context.lineTo(width - 7, -3);
+      context.lineTo(width - 7, 5);
+      context.closePath();
+      context.fill();
+      context.beginPath();
+      context.moveTo(1, height);
+      context.lineTo(-3, height - 7);
+      context.lineTo(5, height - 7);
+      context.closePath();
+      context.fill();
+      const defaultPointColor = getComputedStyle(canvas).getPropertyValue("--colorPaletteRedForeground1").trim();
+      const selectedPointColor = getComputedStyle(canvas).getPropertyValue("--colorBrandForeground1").trim();
+      context.strokeStyle = getComputedStyle(canvas).getPropertyValue("--colorNeutralBackground1").trim();
+      for (const point of scatterPoints) {
+        const x = point.x / 100 * width;
+        const y = point.y / 100 * height;
+        context.fillStyle = point.selected ? selectedPointColor : defaultPointColor;
+        context.beginPath();
+        context.arc(x, y, point.selected ? 6 : 4, 0, Math.PI * 2);
+        context.fill();
+        context.lineWidth = 1;
+        context.stroke();
+      }
+    };
+    const observer = new ResizeObserver(draw);
+    observer.observe(layer);
+    draw();
+    return () => observer.disconnect();
+  }, [scatterPoints, showScatter]);
   const rowSelection = source ? boundsForTableAxis(bv, source.rowHeaders) : { points: [] };
   const columnSelection = source ? boundsForTableAxis(dr, source.columnHeaders) : { points: [] };
   const activeRows = new Set(rowSelection.points.map((point) => point.index));
@@ -7821,6 +7950,20 @@ function FaceBvDrTableCard({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
         <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
+        {canShowScatter && <button
+          type="button"
+          style={{ ...groupSourceButtonStyle(Boolean(source)), background: showScatter ? "var(--colorBrandBackground2)" : undefined }}
+          title={t(showScatter ? "chart_scatter_hide" : "chart_scatter_show", { table: title })}
+          aria-label={t(showScatter ? "chart_scatter_hide" : "chart_scatter_show", { table: title })}
+          aria-pressed={showScatter}
+          disabled={!source}
+          onClick={() => {
+            if (!showScatter) onHeatmapRequest();
+            updateScatterMode(!showScatter);
+          }}
+        >
+          <DataScatter24Regular className="h-4 w-4" />
+        </button>}
         <button
           type="button"
           style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
@@ -7874,7 +8017,31 @@ function FaceBvDrTableCard({
       </div>
       {source ? (
         <div style={faceBvDrTableScrollStyle}>
-          <div style={faceBvDrTableStyle(source.columnHeaders.length)}>
+          <div
+            className={showScatter ? "face-bv-dr-scatter-grid" : undefined}
+            style={{ ...faceBvDrTableStyle(source.columnHeaders.length), position: "relative" }}
+            onClickCapture={showScatter ? (event) => {
+              const layer = scatterLayerRef.current;
+              if (!layer) return;
+              const rect = layer.getBoundingClientRect();
+              if (rect.width <= 0 || rect.height <= 0) return;
+              const x = (event.clientX - rect.left) / rect.width * 100;
+              const y = (event.clientY - rect.top) / rect.height * 100;
+              let nearest: typeof scatterPoints[number] | undefined;
+              let nearestDistance = 8;
+              for (const point of scatterPoints) {
+                const distance = Math.hypot((point.x - x) * rect.width / 100, (point.y - y) * rect.height / 100);
+                if (distance < nearestDistance) {
+                  nearest = point;
+                  nearestDistance = distance;
+                }
+              }
+              if (nearest) {
+                event.stopPropagation();
+                onSelectHeatmapImages?.([nearest.path], { toggle: event.ctrlKey || event.metaKey, focusPath: nearest.path });
+              }
+            } : undefined}
+          >
             <div style={faceBvDrCornerCellStyle} title="BV / DR">
               <svg
                 aria-hidden="true"
@@ -7900,6 +8067,7 @@ function FaceBvDrTableCard({
                   active={activeColumns.has(columnIndex)}
                   ariaLabel={`${title}.columnHeader.${columnIndex}${field ? `.${field.path}` : ""}`}
                   variant="columnHeader"
+                  scatterAxisAlignment={showScatter}
                   historyDelta={sourceFieldDelta(sourceInitialText, field, source.fields, formatComputedNumber(value))}
                   onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
                   onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
@@ -7921,6 +8089,7 @@ function FaceBvDrTableCard({
                     active={activeRows.has(rowIndex)}
                     ariaLabel={`${title}.rowHeader.${rowIndex}${rowField ? `.${rowField.path}` : ""}`}
                     variant="rowHeader"
+                    scatterAxisAlignment={showScatter}
                     historyDelta={sourceFieldDelta(sourceInitialText, rowField, source.fields, formatComputedNumber(rowValue))}
                     onPreview={(nextValue) => onCellPreview?.(tableKey, rowTarget, nextValue)}
                     onCommit={(nextValue) => onCellCommit?.(tableKey, rowTarget, nextValue)}
@@ -7973,6 +8142,9 @@ function FaceBvDrTableCard({
                 </Fragment>
               );
             })}
+            {showScatter && <div ref={scatterLayerRef} className="face-bv-dr-scatter-layer">
+              <canvas ref={scatterCanvasRef} className="face-bv-dr-scatter-canvas" aria-hidden="true" />
+            </div>}
           </div>
         </div>
       ) : (
@@ -7989,6 +8161,7 @@ function FaceBvDrEditableCell({
   ariaLabel,
   domId,
   variant,
+  scatterAxisAlignment = false,
   historyDelta,
   heatmapStyle,
   onPreview,
@@ -8001,6 +8174,7 @@ function FaceBvDrEditableCell({
   ariaLabel: string;
   domId?: string;
   variant: "columnHeader" | "rowHeader" | "value";
+  scatterAxisAlignment?: boolean;
   historyDelta?: number;
   heatmapStyle?: CSSProperties;
   onPreview?: (value: string) => void;
@@ -8012,6 +8186,10 @@ function FaceBvDrEditableCell({
     : variant === "rowHeader"
       ? faceBvDrRowHeaderStyle(active)
       : heatmapStyle ?? hsDarkAreaDataCellStyle(active);
+  const axisFrameStyle = scatterAxisAlignment && variant !== "value"
+    ? { ...baseStyle, display: "flex", justifyContent: variant === "columnHeader" ? "flex-start" : "flex-end",
+      alignItems: variant === "columnHeader" ? "flex-end" : "flex-start" }
+    : baseStyle;
 
   return (
     <EditableNumberTableCell
@@ -8020,9 +8198,9 @@ function FaceBvDrEditableCell({
       active={active}
       ariaLabel={ariaLabel}
       domId={domId}
-      frameStyle={({ focused }) => editableCellFrameStyle(baseStyle, focused)}
+      frameStyle={({ focused }) => editableCellFrameStyle(axisFrameStyle, focused)}
       inputStyle={({ editable: cellEditable }) => ({
-        ...faceBvDrCellInputStyle(cellEditable, variant),
+        ...faceBvDrCellInputStyle(cellEditable, variant, scatterAxisAlignment),
         ...(historyDelta === undefined || historyDelta === 0 ? {}
           : { color: historyDelta > 0 ? "var(--colorPaletteRedForeground1)" : "var(--colorPaletteBlueForeground2)" }),
       })}
@@ -9225,7 +9403,7 @@ function HsAreaCard({
   onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   heatmapPoints: HsAreaHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onHeatmapRequest: () => void;
@@ -9430,7 +9608,7 @@ function HsAreaGrid({
   showHeatmap: boolean;
   showHitCounts: boolean;
   heatmapPoints: HsAreaHeatmapPoint[];
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   heatmapLoading: boolean;
   heatmapFailed: boolean;
   onCellPreview?: (target: HsAreaCellTarget, value: string) => void;
@@ -15557,16 +15735,22 @@ function faceBvDrColumnHeaderStyle(active: boolean): CSSProperties {
 function faceBvDrRowHeaderStyle(active: boolean): CSSProperties {
   return {
     ...hsDarkAreaRowHeaderStyle(active),
-    justifyContent: "flex-start",
   };
 }
 
 function faceBvDrCellInputStyle(
   editable: boolean,
   variant: "columnHeader" | "rowHeader" | "value",
+  scatterAxisAlignment = false,
 ): CSSProperties {
   const base = hsWeightCellInputStyle(editable);
-  if (variant === "rowHeader") return { ...base, textAlign: "left", padding: "0 8px" };
+  if (scatterAxisAlignment && variant === "columnHeader") {
+    return { ...base, textAlign: "left", height: "auto", alignSelf: "flex-end", padding: "0 4px 2px" };
+  }
+  if (scatterAxisAlignment && variant === "rowHeader") {
+    return { ...base, textAlign: "right", height: "auto", alignSelf: "flex-start", padding: "2px 6px 0" };
+  }
+  if (variant === "rowHeader") return { ...base, textAlign: "center", padding: "0 8px" };
   return base;
 }
 

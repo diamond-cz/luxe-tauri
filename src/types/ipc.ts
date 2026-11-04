@@ -61,7 +61,7 @@ export interface Isp6sAeVisual {
   chart_ns_card_order:         string[];
   chart_ns_card_collapsed:     string[];
   chart_face_card_collapsed:   string[];
-  chart_face_heatmap_modes:    Record<string, { enabled: boolean; show_hit_counts: boolean }>;
+  chart_face_heatmap_modes:    Record<string, { enabled: boolean; show_hit_counts: boolean; show_scatter?: boolean }>;
   chart_face_sync_modes:       Record<string, boolean>;
   chart_face_flt_exif_use_parameter_fdsz_ra: boolean;
   chart_main_t_mid_chart_mode: string;

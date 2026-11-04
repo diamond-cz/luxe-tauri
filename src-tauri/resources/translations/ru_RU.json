@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Показать диаграмму рассеяния BV/DR изображений для {{table}}",
+  "chart_scatter_hide": "Скрыть диаграмму рассеяния для {{table}}",
   "workspace_hide_images": "Скрыть карточку списка изображений",
   "workspace_show_images": "Показать карточку списка изображений",
   "workspace_hide_source": "Скрыть карточку исходного кода",

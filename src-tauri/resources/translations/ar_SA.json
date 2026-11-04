@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "عرض مخطط تشتت BV/DR للصور في {{table}}",
+  "chart_scatter_hide": "إخفاء مخطط التشتت لـ {{table}}",
   "workspace_hide_images": "إخفاء بطاقة قائمة الصور",
   "workspace_show_images": "إظهار بطاقة قائمة الصور",
   "workspace_hide_source": "إخفاء بطاقة الشفرة المصدرية",

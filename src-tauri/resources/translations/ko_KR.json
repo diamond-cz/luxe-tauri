@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "{{table}} 이미지 BV/DR 산점도 표시",
+  "chart_scatter_hide": "{{table}} 산점도 닫기",
   "workspace_hide_images": "이미지 목록 카드 숨기기",
   "workspace_show_images": "이미지 목록 카드 표시",
   "workspace_hide_source": "소스 코드 카드 숨기기",

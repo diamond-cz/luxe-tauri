@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "顯示 {{table}} 圖片 BV/DR 散點圖",
+  "chart_scatter_hide": "關閉 {{table}} 散點圖",
   "workspace_hide_images": "隱藏圖片列表卡片",
   "workspace_show_images": "顯示圖片列表卡片",
   "workspace_hide_source": "隱藏原始碼卡片",

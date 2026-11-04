@@ -321,10 +321,11 @@ impl Default for Isp6sAeVisual {
 pub struct FaceHeatmapMode {
     #[serde(default)] pub enabled: bool,
     #[serde(default = "default_true")] pub show_hit_counts: bool,
+    #[serde(default)] pub show_scatter: bool,
 }
 
 impl Default for FaceHeatmapMode {
-    fn default() -> Self { Self { enabled: false, show_hit_counts: true } }
+    fn default() -> Self { Self { enabled: false, show_hit_counts: true, show_scatter: false } }
 }
 
 #[cfg(test)]

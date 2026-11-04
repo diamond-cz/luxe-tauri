@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "{{table}} の画像 BV/DR 散布図を表示",
+  "chart_scatter_hide": "{{table}} の散布図を閉じる",
   "workspace_hide_images": "画像一覧カードを非表示",
   "workspace_show_images": "画像一覧カードを表示",
   "workspace_hide_source": "ソースコードカードを非表示",

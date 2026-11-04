@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
 import {
@@ -99,6 +99,7 @@ interface Props {
   entries:   ImageEntry[];
   current:   number;
   selectedHeatmapPaths: string[];
+  onSelectHeatmapImages: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   onVisibleHeatmapPathsChange?: (entries: ImageEntry[], paths: string[] | null) => void;
   imageDir:  string | null;
   onPickImage: (idx: number, options?: { preserveHeatmapSelection?: boolean }) => void;
@@ -309,6 +310,7 @@ export function TablePane({
   entries,
   current,
   selectedHeatmapPaths,
+  onSelectHeatmapImages,
   onVisibleHeatmapPathsChange,
   imageDir,
   onPickImage,
@@ -579,7 +581,8 @@ export function TablePane({
           cppImportRevision={cppImportRevision}
           scrollPosition={scrollPosition}
           onScrollPositionChange={onScrollPositionChange}
-          entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths} onPick={onPickImage}
+          entries={entries} current={current} selectedHeatmapPaths={selectedHeatmapPaths}
+          onSelectHeatmapImages={onSelectHeatmapImages} onPick={onPickImage}
           onVisibleHeatmapPathsChange={onVisibleHeatmapPathsChange} />
       </div>
     </div>
@@ -1095,7 +1098,7 @@ function ImageTableHoverPreview({ scrollRef }: { scrollRef: RefObject<HTMLDivEle
 
 export function ImageTab({
   schema, toneMode = false, filePath, directoryName, cppImportRevision, calculatorSourcePath, applyMode = "all", applySingleIndex = null, parseAllVersion = 0, applyAllVersion = 0, onParseProgress, onApplyResult,
-  entries, current, selectedHeatmapPaths, onPick, onVisibleHeatmapPathsChange,
+  entries, current, selectedHeatmapPaths, onSelectHeatmapImages, onPick, onVisibleHeatmapPathsChange,
   imageDataRevision = 0,
   scrollPosition,
   onScrollPositionChange,
@@ -1118,8 +1121,9 @@ export function ImageTab({
   entries:  ImageEntry[];
   current:  number;
   selectedHeatmapPaths: string[];
+  onSelectHeatmapImages: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   onVisibleHeatmapPathsChange?: (entries: ImageEntry[], paths: string[] | null) => void;
-  onPick:   (idx: number) => void;
+  onPick:   (idx: number, options?: { preserveHeatmapSelection?: boolean }) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const restoreScrollRef = useRef(scrollPosition);
@@ -1140,6 +1144,7 @@ export function ImageTab({
   const tableViewportFrameRef = useRef<number | null>(null);
   const pendingViewportReloadRef = useRef(false);
   const sortRequestRef = useRef(0);
+  const columnSelectionRequestRef = useRef(0);
   const extraCols = useMemo(
     () => {
       if (!toneMode) return imageTableExtraColumns(schema);
@@ -1725,6 +1730,39 @@ export function ImageTab({
   const firstRowVisible = sortedRows.length > 0 && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT
     && scrollTop < IMAGE_TABLE_ROW_HEIGHT;
   const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
+  const selectImageColumn = async (column: ImageTableColumn, toggle: boolean) => {
+    const requestId = ++columnSelectionRequestRef.current;
+    let rows = allParsedRows;
+    if (!rows && imageTomlKeys.length > 0) {
+      try {
+        const loaded: Record<string, Record<string, string>> = {};
+        const paths = sortedRows.map(({ e }) => e.toml_path);
+        for (let start = 0; start < paths.length; start += 128) {
+          Object.assign(loaded, await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys));
+          if (requestId !== columnSelectionRequestRef.current) return;
+        }
+        rows = loaded;
+      } catch (error) {
+        console.warn("Load image table column selection", error);
+        return;
+      }
+    }
+    if (requestId !== columnSelectionRequestRef.current) return;
+    const paths = sortedRows.filter(({ e }) => {
+      if (column.kind === "idx" || column.kind === "thumbnail" || column.kind === "name") return true;
+      const data = rows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
+      const isUpdatedSinglePath = applyMode === "single" && applySingleIndex !== null
+        && entries[applySingleIndex]?.toml_path === e.toml_path;
+      const targetResult = applyMode === "single" && !isUpdatedSinglePath
+        ? previousCalculatedTargetsRef.current[e.toml_path] ?? baselineCalculatorRef.current?.(data, faceBvKey)
+        : allTargets?.[e.toml_path] ?? faceLinkTargetCalculator?.(data, faceBvKey);
+      const target = imageFaceTargetValues(targetResult ?? null);
+      const rowIsScene = sceneOnly || classifiedKinds?.[e.toml_path] === "scene";
+      const value = imageTableColumnText(column, data, target, rowIsScene).trim();
+      return value !== "" && value !== "-";
+    }).map(({ e }) => e.toml_path);
+    onSelectHeatmapImages(paths, { toggle });
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -2416,6 +2454,11 @@ export function ImageTab({
           <tr>
             {displayedColumns.map((column) => {
               const active = column.kind === "extra" && sortState?.key === column.key;
+              const selectColumn = (event: ReactMouseEvent) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void selectImageColumn(column, event.ctrlKey || event.metaKey);
+              };
               const minWidth = column.kind === "idx"
                 ? 34
                 : column.kind === "thumbnail"
@@ -2434,7 +2477,8 @@ export function ImageTab({
                   onResizeStart={startColumnResize(column.id, columnWidths.byId[column.id], minWidth)}
                 >
                   {column.kind === "idx" ? (
-                    <span>idx</span>
+                    <button type="button" className="border-0 bg-transparent p-0 font-semibold text-inherit"
+                      title="选择此列图片；Ctrl/Command 点击可追加或取消选择" onClick={selectColumn}>idx</button>
                   ) : column.kind === "thumbnail" ? (
                     <span className="inline-flex items-center justify-center gap-1">
                       <button
@@ -2465,13 +2509,15 @@ export function ImageTab({
                     </span>
                   ) : column.kind === "name" ? (
                     <div className="flex w-full min-w-0 items-center justify-between gap-1">
-                      <span className="min-w-0 truncate text-left font-semibold normal-case" title={directoryName}>{directoryName || column.label}</span>
+                      <button type="button" className="min-w-0 truncate border-0 bg-transparent p-0 text-left font-semibold normal-case text-inherit"
+                        title={directoryName || "选择此列图片；Ctrl/Command 点击可追加或取消选择"} onClick={selectColumn}>{directoryName || column.label}</button>
                       <button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90" title="表格列设置" aria-label="表格列设置" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void openColumnSettingsWindow(); }}>
                         <Settings24Regular className="h-4 w-4" />
                       </button>
                     </div>
                   ) : column.kind !== "extra" ? (
-                    column.label
+                    <button type="button" className="border-0 bg-transparent p-0 font-semibold text-inherit"
+                      title="选择此列图片；Ctrl/Command 点击可追加或取消选择" onClick={selectColumn}>{column.label}</button>
                   ) : (
                     <ImageSortHeader
                       label={column.label}
@@ -2481,6 +2527,7 @@ export function ImageTab({
                       loading={active && sortLoading}
                       onClick={() => toggleImageSort(column.label, column.key ?? "")}
                       onReset={() => setSortState(null)}
+                      onSelect={selectColumn}
                     />
                   )}
                 </Th>
@@ -2512,10 +2559,13 @@ export function ImageTab({
             return (
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
-                  onClick={() => {
+                  onClick={(event) => {
                     preserveRestoredScrollRef.current = false;
                     scrollRef.current?.focus({ preventScroll: true });
-                    onPick(i);
+                    onSelectHeatmapImages([e.toml_path], {
+                      toggle: event.ctrlKey || event.metaKey,
+                      focusPath: e.toml_path,
+                    });
                   }}
                    style={{
                      cursor: "pointer",
@@ -3058,6 +3108,7 @@ function ImageSortHeader({
   loading,
   onClick,
   onReset,
+  onSelect,
 }: {
   label: string;
   align: "left" | "center";
@@ -3066,29 +3117,21 @@ function ImageSortHeader({
   loading: boolean;
   onClick: () => void;
   onReset: () => void;
+  onSelect: (event: ReactMouseEvent) => void;
 }) {
   const tooltip = `${label} 数值${active && direction === "desc" ? "逆序" : "正序"}排序，右键恢复 IDX 顺序`;
   return (
-    <HoverTooltip content={tooltip} positioning="below-center" inline>
-      <button
-        type="button"
-        className="flex w-full items-center gap-1 rounded px-0.5 py-0 text-xs font-semibold uppercase transition-colors"
-        style={{
-          background: "transparent",
-          border: 0,
-          cursor: "pointer",
-          justifyContent: align === "center" ? "center" : "flex-start",
-          color: active ? "var(--colorBrandForeground1)" : "inherit",
-          opacity: loading ? 0.68 : 1,
-        }}
-        aria-label={tooltip}
-        onClick={onClick}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          onReset();
-        }}
-      >
-        <span className="min-w-0 truncate">{label}</span>
+    <HoverTooltip content={`${tooltip}；点击标题选择该列图片，Ctrl/Command 点击追加或取消选择`} positioning="below-center" inline>
+      <div className="flex w-full items-center gap-1 text-xs font-semibold uppercase" style={{ opacity: loading ? 0.68 : 1 }}>
+        <button type="button" className="min-w-0 truncate border-0 bg-transparent p-0 text-inherit"
+          style={{ textAlign: align, cursor: "pointer", flex: 1 }}
+          aria-label={`${label} 列图片选择`} onClick={onSelect}>{label}</button>
+        <button type="button" className="flex shrink-0 items-center gap-0 border-0 bg-transparent p-0 text-inherit"
+          style={{ color: active ? "var(--colorBrandForeground1)" : "inherit", cursor: "pointer" }}
+          aria-label={tooltip} title={tooltip} onClick={onClick} onContextMenu={(event) => {
+            event.preventDefault();
+            onReset();
+          }}>
         <span className="flex shrink-0 flex-col leading-none" aria-hidden="true">
           <ChevronUp24Regular
             className="h-2.5 w-2.5"
@@ -3099,7 +3142,8 @@ function ImageSortHeader({
             style={{ marginTop: -3, opacity: active && direction === "desc" ? 1 : 0.32 }}
           />
         </span>
-      </button>
+        </button>
+      </div>
     </HoverTooltip>
   );
 }

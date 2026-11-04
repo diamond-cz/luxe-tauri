@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Afficher le nuage de points BV/DR des images pour {{table}}",
+  "chart_scatter_hide": "Masquer le nuage de points pour {{table}}",
   "workspace_hide_images": "Masquer la carte de liste d’images",
   "workspace_show_images": "Afficher la carte de liste d’images",
   "workspace_hide_source": "Masquer la carte de code source",

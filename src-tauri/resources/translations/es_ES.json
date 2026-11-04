@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Mostrar el gráfico de dispersión BV/DR de imágenes de {{table}}",
+  "chart_scatter_hide": "Ocultar el gráfico de dispersión de {{table}}",
   "workspace_hide_images": "Ocultar tarjeta de lista de imágenes",
   "workspace_show_images": "Mostrar tarjeta de lista de imágenes",
   "workspace_hide_source": "Ocultar tarjeta de código fuente",

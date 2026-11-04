@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "Show {{table}} image BV/DR scatter plot",
+  "chart_scatter_hide": "Hide {{table}} scatter plot",
   "workspace_hide_images": "Hide image list card",
   "workspace_show_images": "Show image list card",
   "workspace_hide_source": "Hide source code card",

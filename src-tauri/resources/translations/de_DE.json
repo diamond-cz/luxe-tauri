@@ -1,4 +1,6 @@
 {
+  "chart_scatter_show": "BV/DR-Streudiagramm der Bilder für {{table}} anzeigen",
+  "chart_scatter_hide": "Streudiagramm für {{table}} schließen",
   "workspace_hide_images": "Bildlistenkarte ausblenden",
   "workspace_show_images": "Bildlistenkarte anzeigen",
   "workspace_hide_source": "Quellcodekarte ausblenden",

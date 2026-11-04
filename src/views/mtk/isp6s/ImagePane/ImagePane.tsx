@@ -55,8 +55,9 @@ interface Props {
   entry:       ImageEntry | undefined;
   entries:     ImageEntry[];
   visibleHeatmapPaths?: string[] | null;
+  selectedHeatmapPaths?: string[];
   tomlData:    Record<string, string>;
-  onSelectHeatmapImages?: (paths: string[]) => void;
+  onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
   onCalculatorSourcePathChange?: (path: string | null) => void;
   onSourceEditorBindingChange?: (binding: SourceEditorBinding | null) => void;
   scrollSession?: WorkspaceSession;
@@ -227,7 +228,7 @@ function useSourceDraft(filePath: string, importRevision: number) {
 }
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession, onHide,
+  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, selectedHeatmapPaths = [], tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession, onHide,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
@@ -461,6 +462,7 @@ export function ImagePane({
               schema={schema}
               entries={entries}
               visibleHeatmapPaths={visibleHeatmapPaths}
+              selectedHeatmapPaths={selectedHeatmapPaths}
               tomlData={tomlData}
               active={effectiveMode === "chart_map"}
               onSelectHeatmapImages={onSelectHeatmapImages}
