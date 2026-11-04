@@ -247,7 +247,7 @@ html.light .luxe-update-log-backdrop {
   gap: 10px;
 }
 
-.face-bv-dr-scatter-grid > :not(.face-bv-dr-scatter-layer) {
+.face-bv-dr-scatter-grid > :not(.face-bv-dr-scatter-layer):not(.face-bv-dr-scatter-axis-header) {
   opacity: 0.55;
   border-right-style: dashed !important;
   border-bottom-style: dashed !important;

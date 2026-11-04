@@ -5419,6 +5419,7 @@ interface EditableTableCellStyleState {
 }
 
 interface EditableNumberTableCellProps {
+  className?: string;
   value: string;
   editable: boolean;
   active?: boolean;
@@ -5434,6 +5435,7 @@ interface EditableNumberTableCellProps {
 }
 
 function EditableNumberTableCell({
+  className,
   value,
   editable,
   active = false,
@@ -5486,7 +5488,7 @@ function EditableNumberTableCell({
   };
 
   return (
-    <div id={domId} style={frameStyle(state)}>
+    <div id={domId} className={className} style={frameStyle(state)}>
       <input
         aria-label={ariaLabel}
         value={draftValue}
@@ -8067,7 +8069,7 @@ function FaceBvDrTableCard({
                   active={activeColumns.has(columnIndex)}
                   ariaLabel={`${title}.columnHeader.${columnIndex}${field ? `.${field.path}` : ""}`}
                   variant="columnHeader"
-                  scatterAxisAlignment={showScatter}
+                  scatterAxisHeader={showScatter}
                   historyDelta={sourceFieldDelta(sourceInitialText, field, source.fields, formatComputedNumber(value))}
                   onPreview={(nextValue) => onCellPreview?.(tableKey, target, nextValue)}
                   onCommit={(nextValue) => onCellCommit?.(tableKey, target, nextValue)}
@@ -8089,7 +8091,7 @@ function FaceBvDrTableCard({
                     active={activeRows.has(rowIndex)}
                     ariaLabel={`${title}.rowHeader.${rowIndex}${rowField ? `.${rowField.path}` : ""}`}
                     variant="rowHeader"
-                    scatterAxisAlignment={showScatter}
+                    scatterAxisHeader={showScatter}
                     historyDelta={sourceFieldDelta(sourceInitialText, rowField, source.fields, formatComputedNumber(rowValue))}
                     onPreview={(nextValue) => onCellPreview?.(tableKey, rowTarget, nextValue)}
                     onCommit={(nextValue) => onCellCommit?.(tableKey, rowTarget, nextValue)}
@@ -8161,7 +8163,7 @@ function FaceBvDrEditableCell({
   ariaLabel,
   domId,
   variant,
-  scatterAxisAlignment = false,
+  scatterAxisHeader = false,
   historyDelta,
   heatmapStyle,
   onPreview,
@@ -8174,7 +8176,7 @@ function FaceBvDrEditableCell({
   ariaLabel: string;
   domId?: string;
   variant: "columnHeader" | "rowHeader" | "value";
-  scatterAxisAlignment?: boolean;
+  scatterAxisHeader?: boolean;
   historyDelta?: number;
   heatmapStyle?: CSSProperties;
   onPreview?: (value: string) => void;
@@ -8186,21 +8188,17 @@ function FaceBvDrEditableCell({
     : variant === "rowHeader"
       ? faceBvDrRowHeaderStyle(active)
       : heatmapStyle ?? hsDarkAreaDataCellStyle(active);
-  const axisFrameStyle = scatterAxisAlignment && variant !== "value"
-    ? { ...baseStyle, display: "flex", justifyContent: variant === "columnHeader" ? "flex-start" : "flex-end",
-      alignItems: variant === "columnHeader" ? "flex-end" : "flex-start" }
-    : baseStyle;
-
   return (
     <EditableNumberTableCell
+      className={scatterAxisHeader ? "face-bv-dr-scatter-axis-header" : undefined}
       value={value}
       editable={editable}
       active={active}
       ariaLabel={ariaLabel}
       domId={domId}
-      frameStyle={({ focused }) => editableCellFrameStyle(axisFrameStyle, focused)}
+      frameStyle={({ focused }) => editableCellFrameStyle(baseStyle, focused)}
       inputStyle={({ editable: cellEditable }) => ({
-        ...faceBvDrCellInputStyle(cellEditable, variant, scatterAxisAlignment),
+        ...faceBvDrCellInputStyle(cellEditable, variant),
         ...(historyDelta === undefined || historyDelta === 0 ? {}
           : { color: historyDelta > 0 ? "var(--colorPaletteRedForeground1)" : "var(--colorPaletteBlueForeground2)" }),
       })}
@@ -15741,15 +15739,8 @@ function faceBvDrRowHeaderStyle(active: boolean): CSSProperties {
 function faceBvDrCellInputStyle(
   editable: boolean,
   variant: "columnHeader" | "rowHeader" | "value",
-  scatterAxisAlignment = false,
 ): CSSProperties {
   const base = hsWeightCellInputStyle(editable);
-  if (scatterAxisAlignment && variant === "columnHeader") {
-    return { ...base, textAlign: "left", height: "auto", alignSelf: "flex-end", padding: "0 4px 2px" };
-  }
-  if (scatterAxisAlignment && variant === "rowHeader") {
-    return { ...base, textAlign: "right", height: "auto", alignSelf: "flex-start", padding: "2px 6px 0" };
-  }
   if (variant === "rowHeader") return { ...base, textAlign: "center", padding: "0 8px" };
   return base;
 }

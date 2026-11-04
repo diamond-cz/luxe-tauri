@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@fluentui/react-components";
 import {
@@ -131,7 +131,8 @@ const IMAGE_THUMBNAIL_IDLE_DELAY = 0;
 const IMAGE_TABLE_HEADER_HEIGHT = 36;
 // Keep the corner cell in sync with faceBvDrCornerCellStyle in ChartMapMode.
 const IMAGE_TABLE_CORNER_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 35%, var(--colorNeutralBackground2))";
-const IMAGE_TABLE_SELECTED_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 55%, var(--colorNeutralBackground1))";
+const IMAGE_TABLE_CURRENT_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 84%, var(--colorNeutralBackground1))";
+const IMAGE_TABLE_MULTI_SELECTED_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 34%, var(--colorNeutralBackground1))";
 const IMAGE_TABLE_SELECTED_COLUMN_STROKE = "color-mix(in srgb, var(--colorBrandStroke1) 60%, var(--colorNeutralStroke1))";
 const IMAGE_TABLE_ROW_HEIGHT = 54;
 const IMAGE_TABLE_THUMBNAIL_SIZE = 48;
@@ -1144,7 +1145,6 @@ export function ImageTab({
   const tableViewportFrameRef = useRef<number | null>(null);
   const pendingViewportReloadRef = useRef(false);
   const sortRequestRef = useRef(0);
-  const columnSelectionRequestRef = useRef(0);
   const extraCols = useMemo(
     () => {
       if (!toneMode) return imageTableExtraColumns(schema);
@@ -1388,8 +1388,18 @@ export function ImageTab({
   const [viewportHeight, setViewportHeight] = useState(0);
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
   const [sortState, setSortState] = useState<ImageSortState | null>(null);
+  const [sortEnabled, setSortEnabled] = useState(false);
   const [sortValues, setSortValues] = useState<Record<string, string>>({});
   const [sortLoading, setSortLoading] = useState(false);
+  const [rangePreviewPaths, setRangePreviewPaths] = useState<Set<string> | null>(null);
+  const selectionGestureRef = useRef<{
+    anchor: number;
+    end: number;
+    pointerId: number;
+    ctrl: boolean;
+    moved: boolean;
+  } | null>(null);
+  const suppressRowClickRef = useRef(false);
   const openColumnSettingsWindow = async () => {
     const selectedScope = columnScopeForThumbnail(thumbnailHeaderKind);
     const label = toneMode ? "column-settings-tone" : "column-settings-isp6s";
@@ -1730,39 +1740,62 @@ export function ImageTab({
   const firstRowVisible = sortedRows.length > 0 && viewportHeight > IMAGE_TABLE_HEADER_HEIGHT
     && scrollTop < IMAGE_TABLE_ROW_HEIGHT;
   const selectedHeatmapPathSet = useMemo(() => new Set(selectedHeatmapPaths), [selectedHeatmapPaths]);
-  const selectImageColumn = async (column: ImageTableColumn, toggle: boolean) => {
-    const requestId = ++columnSelectionRequestRef.current;
-    let rows = allParsedRows;
-    if (!rows && imageTomlKeys.length > 0) {
-      try {
-        const loaded: Record<string, Record<string, string>> = {};
-        const paths = sortedRows.map(({ e }) => e.toml_path);
-        for (let start = 0; start < paths.length; start += 128) {
-          Object.assign(loaded, await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys));
-          if (requestId !== columnSelectionRequestRef.current) return;
-        }
-        rows = loaded;
-      } catch (error) {
-        console.warn("Load image table column selection", error);
-        return;
-      }
-    }
-    if (requestId !== columnSelectionRequestRef.current) return;
-    const paths = sortedRows.filter(({ e }) => {
-      if (column.kind === "idx" || column.kind === "thumbnail" || column.kind === "name") return true;
-      const data = rows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
-      const isUpdatedSinglePath = applyMode === "single" && applySingleIndex !== null
-        && entries[applySingleIndex]?.toml_path === e.toml_path;
-      const targetResult = applyMode === "single" && !isUpdatedSinglePath
-        ? previousCalculatedTargetsRef.current[e.toml_path] ?? baselineCalculatorRef.current?.(data, faceBvKey)
-        : allTargets?.[e.toml_path] ?? faceLinkTargetCalculator?.(data, faceBvKey);
-      const target = imageFaceTargetValues(targetResult ?? null);
-      const rowIsScene = sceneOnly || classifiedKinds?.[e.toml_path] === "scene";
-      const value = imageTableColumnText(column, data, target, rowIsScene).trim();
-      return value !== "" && value !== "-";
-    }).map(({ e }) => e.toml_path);
-    onSelectHeatmapImages(paths, { toggle });
+  const startRowSelection = (displayIndex: number, event: ReactPointerEvent<HTMLTableCellElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    selectionGestureRef.current = {
+      anchor: displayIndex, end: displayIndex, pointerId: event.pointerId,
+      ctrl: event.ctrlKey || event.metaKey, moved: false,
+    };
   };
+  const extendRowSelection = (displayIndex: number, pointerId: number) => {
+    const gesture = selectionGestureRef.current;
+    if (!gesture || gesture.pointerId !== pointerId) return;
+    gesture.end = displayIndex;
+    gesture.moved = gesture.moved || displayIndex !== gesture.anchor;
+    const start = Math.min(gesture.anchor, gesture.end);
+    const end = Math.max(gesture.anchor, gesture.end);
+    const paths = sortedRows.slice(start, end + 1).map(({ e }) => e.toml_path);
+    if (gesture.ctrl) selectedHeatmapPaths.forEach((path) => paths.push(path));
+    setRangePreviewPaths(new Set(paths));
+  };
+  const selectionFinishRef = useRef<(pointerId: number) => void>(() => undefined);
+  selectionFinishRef.current = (pointerId) => {
+    const gesture = selectionGestureRef.current;
+    if (!gesture || gesture.pointerId !== pointerId) return;
+    selectionGestureRef.current = null;
+    setRangePreviewPaths(null);
+    const start = Math.min(gesture.anchor, gesture.end);
+    const end = Math.max(gesture.anchor, gesture.end);
+    const rows = sortedRows.slice(start, end + 1);
+    if (rows.length === 0) return;
+    const paths = rows.map(({ e }) => e.toml_path);
+    const focusPath = sortedRows[gesture.end]?.e.toml_path;
+    const clickedPath = sortedRows[gesture.anchor]?.e.toml_path;
+    suppressRowClickRef.current = true;
+    if (!gesture.moved && gesture.ctrl && clickedPath) {
+      onSelectHeatmapImages([clickedPath], { toggle: true, focusPath: clickedPath });
+    } else {
+      if (gesture.ctrl) selectedHeatmapPaths.forEach((path) => paths.push(path));
+      onSelectHeatmapImages(paths, { focusPath });
+    }
+    window.setTimeout(() => { suppressRowClickRef.current = false; }, 0);
+  };
+  useEffect(() => {
+    const finish = (event: PointerEvent) => selectionFinishRef.current(event.pointerId);
+    const cancel = (event: PointerEvent) => {
+      if (selectionGestureRef.current?.pointerId !== event.pointerId) return;
+      selectionGestureRef.current = null;
+      setRangePreviewPaths(null);
+    };
+    document.addEventListener("pointerup", finish);
+    document.addEventListener("pointercancel", cancel);
+    return () => {
+      document.removeEventListener("pointerup", finish);
+      document.removeEventListener("pointercancel", cancel);
+      selectionGestureRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -2073,17 +2106,14 @@ export function ImageTab({
     }
   }
 
-  function toggleImageSort(column: string, key: string) {
-    setSortState((prev) => {
-      if (prev?.key === key) {
-        return {
-          column,
-          key,
-          direction: prev.direction === "asc" ? "desc" : "asc",
-        };
-      }
-      return { column, key, direction: "asc" };
-    });
+  function setImageSortDirection(column: string, key: string, direction: ImageSortDirection) {
+    if (!sortEnabled) return;
+    setSortState({ column, key, direction });
+  }
+
+  function toggleImageSortEnabled() {
+    if (sortEnabled) setSortState(null);
+    setSortEnabled(!sortEnabled);
   }
 
   function cancelImageTableColumnDrag() {
@@ -2454,11 +2484,6 @@ export function ImageTab({
           <tr>
             {displayedColumns.map((column) => {
               const active = column.kind === "extra" && sortState?.key === column.key;
-              const selectColumn = (event: ReactMouseEvent) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void selectImageColumn(column, event.ctrlKey || event.metaKey);
-              };
               const minWidth = column.kind === "idx"
                 ? 34
                 : column.kind === "thumbnail"
@@ -2478,7 +2503,14 @@ export function ImageTab({
                 >
                   {column.kind === "idx" ? (
                     <button type="button" className="border-0 bg-transparent p-0 font-semibold text-inherit"
-                      title="选择此列图片；Ctrl/Command 点击可追加或取消选择" onClick={selectColumn}>idx</button>
+                      title={sortEnabled
+                        ? "左键选择全部图片；右键关闭列排序；Ctrl/Command 可追加或取消选择"
+                        : "左键选择全部图片；右键开启列排序；Ctrl/Command 可追加或取消选择"}
+                      aria-pressed={sortEnabled}
+                      onContextMenu={(event) => { event.preventDefault(); toggleImageSortEnabled(); }}
+                      onClick={(event) => onSelectHeatmapImages(sortedRows.map(({ e }) => e.toml_path), {
+                        toggle: event.ctrlKey || event.metaKey,
+                      })}>idx</button>
                   ) : column.kind === "thumbnail" ? (
                     <span className="inline-flex items-center justify-center gap-1">
                       <button
@@ -2509,15 +2541,15 @@ export function ImageTab({
                     </span>
                   ) : column.kind === "name" ? (
                     <div className="flex w-full min-w-0 items-center justify-between gap-1">
-                      <button type="button" className="min-w-0 truncate border-0 bg-transparent p-0 text-left font-semibold normal-case text-inherit"
-                        title={directoryName || "选择此列图片；Ctrl/Command 点击可追加或取消选择"} onClick={selectColumn}>{directoryName || column.label}</button>
+                      <span className="min-w-0 truncate text-left font-semibold normal-case" title={directoryName}>
+                        {directoryName || column.label}
+                      </span>
                       <button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-black/10 active:scale-90" title="表格列设置" aria-label="表格列设置" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void openColumnSettingsWindow(); }}>
                         <Settings24Regular className="h-4 w-4" />
                       </button>
                     </div>
                   ) : column.kind !== "extra" ? (
-                    <button type="button" className="border-0 bg-transparent p-0 font-semibold text-inherit"
-                      title="选择此列图片；Ctrl/Command 点击可追加或取消选择" onClick={selectColumn}>{column.label}</button>
+                    column.label
                   ) : (
                     <ImageSortHeader
                       label={column.label}
@@ -2525,9 +2557,9 @@ export function ImageTab({
                       active={active}
                       direction={active && sortState ? sortState.direction : "asc"}
                       loading={active && sortLoading}
-                      onClick={() => toggleImageSort(column.label, column.key ?? "")}
-                      onReset={() => setSortState(null)}
-                      onSelect={selectColumn}
+                      sortEnabled={sortEnabled}
+                      onCancelSort={() => setSortState(null)}
+                      onSortDirection={(direction) => setImageSortDirection(column.label, column.key ?? "", direction)}
                     />
                   )}
                 </Th>
@@ -2541,8 +2573,8 @@ export function ImageTab({
               <td colSpan={colSpan} style={{ height: topPadding, padding: 0, border: 0 }} />
             </tr>
           )}
-          {visible.rows.map(({ e, i }) => {
-            const heatmapSelected = selectedHeatmapPathSet.has(e.toml_path);
+          {visible.rows.map(({ e, i }, visibleRowIndex) => {
+            const heatmapSelected = rangePreviewPaths?.has(e.toml_path) ?? selectedHeatmapPathSet.has(e.toml_path);
             const data = allParsedRows?.[e.toml_path] ?? tomls[e.toml_path] ?? {};
             const target = visibleFaceValues[e.toml_path];
             const rowIsScene = sceneOnly || classifiedKinds?.[e.toml_path] === "scene";
@@ -2555,11 +2587,16 @@ export function ImageTab({
             const aeGainPair = parseMetricPair(aeGainText ?? "");
             const baseBackground = i % 2 === 0 ? "var(--colorNeutralBackground1)"
               : "color-mix(in srgb, var(--colorNeutralForeground1) 2%, var(--colorNeutralBackground1))";
-            const rowBackground = heatmapSelected ? "var(--colorPaletteGreenBackground1)" : baseBackground;
+            const rowBackground = i === current ? IMAGE_TABLE_CURRENT_BACKGROUND
+              : heatmapSelected ? IMAGE_TABLE_MULTI_SELECTED_BACKGROUND : baseBackground;
             return (
               <tr key={e.jpg_path}
                   aria-selected={heatmapSelected || i === current}
                   onClick={(event) => {
+                    if (suppressRowClickRef.current) {
+                      suppressRowClickRef.current = false;
+                      return;
+                    }
                     preserveRestoredScrollRef.current = false;
                     scrollRef.current?.focus({ preventScroll: true });
                     onSelectHeatmapImages([e.toml_path], {
@@ -2571,7 +2608,7 @@ export function ImageTab({
                      cursor: "pointer",
                      height: IMAGE_TABLE_ROW_HEIGHT,
                      background: rowBackground,
-                     color: i === current ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
+                     color: heatmapSelected || i === current ? "var(--colorBrandForeground1)" : "var(--colorNeutralForeground1)",
                    }}>
                  {displayedColumns.map((column, columnIndex) => (
                    <Td
@@ -2579,13 +2616,18 @@ export function ImageTab({
                      align={column.align}
                      compact={column.kind === "thumbnail"}
                      stickyLeft={column.kind === "idx" ? 0 : column.kind === "thumbnail" ? columnWidths.byId.idx ?? 34 : column.kind === "name" ? (columnWidths.byId.idx ?? 34) + (columnWidths.byId.thumbnail ?? IMAGE_TABLE_THUMBNAIL_COLUMN_WIDTH) : undefined}
-                     stickyBackground={column.kind === "idx" && i === current ? baseBackground
-                     : i === current ? IMAGE_TABLE_SELECTED_BACKGROUND : rowBackground}
+                     stickyBackground={rowBackground}
                      selected={column.kind === "idx" && i === current}
+                     onPointerDown={column.kind === "idx"
+                       ? (event) => startRowSelection(visible.start + visibleRowIndex, event) : undefined}
+                     onPointerEnter={column.kind === "idx"
+                       ? (event) => { if (event.buttons & 1) extendRowSelection(visible.start + visibleRowIndex, event.pointerId); }
+                       : undefined}
                      selectedBody={column.kind !== "idx" && i === current}
                      selectedOutlineStart={column.kind === "thumbnail"}
                      selectedOutlineEnd={columnIndex === displayedColumns.length - 1}
-                     title={column.kind === "name" ? e.name : undefined}
+                     title={column.kind === "name" ? e.name : column.kind === "idx"
+                       ? "按住鼠标左键上下拖动可范围多选；Ctrl/Command 点击追加或取消选择" : undefined}
                    >
                      {column.kind === "idx"
                        ? <span style={{ color: changedCalculationPaths.has(e.toml_path)
@@ -2663,7 +2705,7 @@ export function ImageTab({
         type="button"
         className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border shadow-md transition-transform hover:scale-105"
         style={{
-          background: IMAGE_TABLE_SELECTED_BACKGROUND,
+          background: IMAGE_TABLE_CURRENT_BACKGROUND,
           color: "var(--colorBrandForeground1)",
           borderColor: "var(--colorBrandStroke1)",
           opacity: 0.7,
@@ -3106,43 +3148,42 @@ function ImageSortHeader({
   active,
   direction,
   loading,
-  onClick,
-  onReset,
-  onSelect,
+  sortEnabled,
+  onCancelSort,
+  onSortDirection,
 }: {
   label: string;
   align: "left" | "center";
   active: boolean;
   direction: ImageSortDirection;
   loading: boolean;
-  onClick: () => void;
-  onReset: () => void;
-  onSelect: (event: ReactMouseEvent) => void;
+  sortEnabled: boolean;
+  onCancelSort: () => void;
+  onSortDirection: (direction: ImageSortDirection) => void;
 }) {
-  const tooltip = `${label} 数值${active && direction === "desc" ? "逆序" : "正序"}排序，右键恢复 IDX 顺序`;
+  const sortTooltip = `${label} 列排序`;
   return (
-    <HoverTooltip content={`${tooltip}；点击标题选择该列图片，Ctrl/Command 点击追加或取消选择`} positioning="below-center" inline>
+    <HoverTooltip content={sortTooltip} positioning="below-center" inline>
       <div className="flex w-full items-center gap-1 text-xs font-semibold uppercase" style={{ opacity: loading ? 0.68 : 1 }}>
-        <button type="button" className="min-w-0 truncate border-0 bg-transparent p-0 text-inherit"
-          style={{ textAlign: align, cursor: "pointer", flex: 1 }}
-          aria-label={`${label} 列图片选择`} onClick={onSelect}>{label}</button>
-        <button type="button" className="flex shrink-0 items-center gap-0 border-0 bg-transparent p-0 text-inherit"
-          style={{ color: active ? "var(--colorBrandForeground1)" : "inherit", cursor: "pointer" }}
-          aria-label={tooltip} title={tooltip} onClick={onClick} onContextMenu={(event) => {
-            event.preventDefault();
-            onReset();
-          }}>
-        <span className="flex shrink-0 flex-col leading-none" aria-hidden="true">
-          <ChevronUp24Regular
-            className="h-2.5 w-2.5"
-            style={{ opacity: active && direction === "asc" ? 1 : 0.32 }}
-          />
-          <ChevronDown24Regular
-            className="h-2.5 w-2.5"
-            style={{ marginTop: -3, opacity: active && direction === "desc" ? 1 : 0.32 }}
-          />
-        </span>
-        </button>
+        {active
+          ? <button type="button" className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 font-inherit text-inherit"
+              style={{ textAlign: align }} aria-label={`${label} 取消排序`} title={`${label} 取消排序`}
+              onClick={onCancelSort}>{label}</button>
+          : <span className="min-w-0 flex-1 truncate" style={{ textAlign: align }}>{label}</span>}
+        {sortEnabled && <span className="flex h-5 w-3 shrink-0 flex-col items-center justify-center leading-none">
+          <button type="button" className="flex h-2.5 w-3 items-center justify-center border-0 bg-transparent p-0 text-inherit"
+            style={{ color: active && direction === "asc" ? "var(--colorBrandForeground1)" : "inherit", opacity: active && direction === "asc" ? 1 : 0.48 }}
+            aria-label={`${label} 正序排序`} title={`${label} 正序排序`}
+            aria-pressed={active && direction === "asc"} onClick={() => onSortDirection("asc")}>
+            <ChevronUp24Regular className="h-2.5 w-2.5" />
+          </button>
+          <button type="button" className="flex h-2.5 w-3 items-center justify-center border-0 bg-transparent p-0 text-inherit"
+            style={{ color: active && direction === "desc" ? "var(--colorBrandForeground1)" : "inherit", opacity: active && direction === "desc" ? 1 : 0.48 }}
+            aria-label={`${label} 逆序排序`} title={`${label} 逆序排序`}
+            aria-pressed={active && direction === "desc"} onClick={() => onSortDirection("desc")}>
+            <ChevronDown24Regular className="h-2.5 w-2.5" />
+          </button>
+        </span>}
       </div>
     </HoverTooltip>
   );
@@ -3219,6 +3260,8 @@ function Td({
   selectedOutlineStart = false,
   selectedOutlineEnd = false,
   title,
+  onPointerDown,
+  onPointerEnter,
 }: {
   children: React.ReactNode;
   align?: "left" | "center";
@@ -3230,9 +3273,13 @@ function Td({
   selectedOutlineStart?: boolean;
   selectedOutlineEnd?: boolean;
   title?: string;
+  onPointerDown?: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
+  onPointerEnter?: (event: ReactPointerEvent<HTMLTableCellElement>) => void;
 }) {
   return (
     <td className={`${compact ? "px-px" : "px-2"} ${selectedBody ? "py-px" : "py-0.5"}`}
+        onPointerDown={onPointerDown}
+        onPointerEnter={onPointerEnter}
         style={{
           borderTop: selectedBody ? "2px dashed var(--colorBrandStroke1)" : undefined,
           borderRight: selectedBody
