@@ -231,7 +231,8 @@ export function SourceCodeView({
 
   const jumpToLine = (line: number) => {
     const nextLine = clampNumber(line, 1, lineCount);
-    scrollerRef.current?.scrollTo({ top: Math.max(0, (nextLine - 6) * LINE_H), behavior: "auto" });
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollTo({ top: centeredLineScrollTop(scroller, nextLine), behavior: "auto" });
     setActiveLine(nextLine);
     setActiveColumn(0);
   };
@@ -312,8 +313,8 @@ export function SourceCodeView({
 
   useLayoutEffect(() => {
     if (!jumpLine || !scrollerRef.current) return;
-    const top = (jumpLine - 6) * LINE_H;
-    scrollerRef.current.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+    const scroller = scrollerRef.current;
+    scroller.scrollTo({ top: centeredLineScrollTop(scroller, jumpLine), behavior: "auto" });
   }, [jumpLine, jumpKey, draft?.loadVersion]);
 
   useLayoutEffect(() => {
@@ -339,11 +340,28 @@ export function SourceCodeView({
     const start = lineOffset + tokenStart;
     textareaRef.current.focus({ preventScroll: true });
     textareaRef.current.setSelectionRange(start, lineOffset + tokenEnd);
-    scrollerRef.current?.scrollTo({
-      top: Math.max(0, (sourceSelection.line - 6) * LINE_H),
-      left: Math.max(0, (tokenStart - 12) * 7),
-      behavior: "auto",
-    });
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      const tokenText = lineText.slice(tokenStart, tokenEnd);
+      const prefixWidth = measureSourceTextWidth(textareaRef.current, lineText.slice(0, tokenStart));
+      const tokenWidth = measureSourceTextWidth(textareaRef.current, tokenText);
+      const gutterWidth = 56;
+      const codePaddingLeft = 8;
+      const tokenLeft = gutterWidth + codePaddingLeft + prefixWidth;
+      const tokenRight = tokenLeft + tokenWidth;
+      const visibleCodeLeft = scroller.scrollLeft + gutterWidth;
+      const visibleRight = scroller.scrollLeft + scroller.clientWidth;
+      const visibleCodeWidth = scroller.clientWidth - gutterWidth;
+      let left = scroller.scrollLeft;
+      if (tokenWidth > visibleCodeWidth) left = tokenLeft - gutterWidth;
+      else if (tokenLeft < visibleCodeLeft) left = tokenLeft - gutterWidth;
+      else if (tokenRight > visibleRight) left = tokenRight - scroller.clientWidth;
+      scroller.scrollTo({
+        top: centeredLineScrollTop(scroller, sourceSelection.line),
+        left: clampNumber(left, 0, Math.max(0, scroller.scrollWidth - scroller.clientWidth)),
+        behavior: "auto",
+      });
+    }
     setActiveLine(sourceSelection.line);
     setActiveColumn(sourceSelection.columnStart ?? new TextEncoder().encode(lineText.slice(0, tokenStart)).length);
   }, [jumpKey, draft?.loadVersion, sourceSelection]);
@@ -565,6 +583,18 @@ const LINE_PATH_BADGE_H = 30;
 const CARD_JUMP_BUTTON_H = 30;
 const SOURCE_AREA_BUTTON_COLUMN_W = 172;
 const SOURCE_HIGHLIGHT_BACKGROUND = "color-mix(in srgb, var(--colorBrandBackground2) 46%, transparent)";
+
+function centeredLineScrollTop(scroller: HTMLElement, line: number): number {
+  const lineCenter = (line - 1) * LINE_H + LINE_H / 2;
+  return clampNumber(lineCenter - scroller.clientHeight / 2, 0, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+}
+
+function measureSourceTextWidth(textarea: HTMLTextAreaElement, value: string): number {
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) return value.length * 7.2;
+  context.font = getComputedStyle(textarea).font;
+  return context.measureText(value).width;
+}
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
