@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.2.15",
+    "date": "2026-11-05",
+    "items": [
+      { "type": "新增", "content": "ISP6S Face 页面新增 FaceProb 参数插值计算，SZ Prob 与 Loc Prob 图表根据当前图片关键字实时计算并参与 Back Scene Target 公式。" },
+      { "type": "新增", "content": "Face 表格支持散点图刻度提示，并将图片列表多选状态与散点高亮联动。" },
+      { "type": "优化", "content": "优化散点坐标刻度、悬浮提示和参数插值映射卡片布局，改善窄宽度下的表格与图表显示。" },
+      { "type": "优化", "content": "优化 ISP6S 卡片隐藏与恢复交互，并在 ToneMap 图片详情中增加 EXIF 和 Tone.cpp 标签页。" },
+      { "type": "修复", "content": "修复参数映射表格右键跳转源码位置偏移，以及 FaceProb 插值结果未贯通图片列表计算的问题。" }
+    ]
+  },
+  {
     "version": "0.2.13",
     "date": "2026-10-29",
     "items": [
