@@ -22,6 +22,24 @@
 
 - 发布前验证记录见本次交付；GitHub Actions 构建、签名和 Release 资产状态须在 tag 推送后确认。
 
+### 2026-11-05：统一 Face 参数表标题单元格主题色
+
+**亮点**
+
+- `ChartMapMode.tsx` 中 FaceProb、Face FDSZ_RA/FDDR_RA 的横轴标题格共用 `FACE_AXIS_HEADER_BACKGROUND`；该背景和标题行标签改为读取 `--hs-weight-bv-bg`、`--hs-weight-cell-fg`，使其与 Face 表格 BV 行标题配色一致，并跟随浅色/深色主题令牌切换。参数插值结果映射表的行标题也改用同一令牌。
+
+**痛点**
+
+- 标题格背景原来固定使用浅色主题 `#E1F5D1`，深色主题仍渲染浅底；标签文字也固定深色，造成主题反差不一致。
+
+**闭坑**
+
+- Face 参数表新增标题或行标题样式时复用 `--hs-weight-bv-bg` 和 `--hs-weight-cell-fg`；轴标题的选中状态继续使用品牌前景色，不覆盖背景令牌。
+
+**验证**
+
+- `npm run typecheck`、`git diff --check` 通过；未在 Tauri 窗口实际切换浅色/深色主题验收。
+
 ## 记录模板
 
 ### YYYY-MM-DD：主题

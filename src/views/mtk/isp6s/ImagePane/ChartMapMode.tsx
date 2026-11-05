@@ -14242,8 +14242,8 @@ const faceProbabilityValuesRowLabelStyle: CSSProperties = {
   padding: "4px 4px",
   borderRight: "1px solid var(--colorNeutralStroke2)",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
-  background: "#E1F5D1",
-  color: "var(--colorNeutralForeground1)",
+  background: "var(--hs-weight-bv-bg)",
+  color: "var(--hs-weight-cell-fg)",
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -16164,7 +16164,9 @@ function faceProbTableStyle(columnCount: number, hasAxisHeader = false): CSSProp
   };
 }
 
-const FACE_AXIS_HEADER_BACKGROUND = "#E1F5D1";
+// Share the Face table's BV header token so axis headers follow the active
+// light/dark palette instead of keeping the light theme's pale green in dark mode.
+const FACE_AXIS_HEADER_BACKGROUND = "var(--hs-weight-bv-bg)";
 
 const faceProbTableLabelStyle: CSSProperties = {
   display: "flex",
@@ -16175,7 +16177,7 @@ const faceProbTableLabelStyle: CSSProperties = {
   borderRight: HS_WEIGHT_MAJOR_BORDER,
   borderBottom: HS_WEIGHT_GRID_BORDER,
   background: FACE_AXIS_HEADER_BACKGROUND,
-  color: "#202020",
+  color: "var(--hs-weight-cell-fg)",
   fontWeight: 800,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -16193,7 +16195,7 @@ function faceProbTableAxisHeaderStyle(active: boolean): CSSProperties {
     borderRight: HS_WEIGHT_GRID_BORDER,
     borderBottom: HS_WEIGHT_MAJOR_BORDER,
     background: FACE_AXIS_HEADER_BACKGROUND,
-    color: active ? "var(--colorBrandForeground1)" : "#202020",
+    color: active ? "var(--colorBrandForeground1)" : "var(--hs-weight-cell-fg)",
     fontWeight: 900,
   };
 }
