@@ -385,6 +385,12 @@ interface FaceProbSource {
   fields: FieldEntry[];
 }
 
+interface FaceProbabilityAxis {
+  x0: number;
+  x1: number;
+  fields: FieldEntry[];
+}
+
 interface FaceFbtSource {
   fdTh: FaceBvDrTableSource;
   nsFdTh: FaceBvDrTableSource;
@@ -395,6 +401,8 @@ interface FaceFbtSource {
   faceProb: FaceProbSource;
   fddrRa: FaceProbSource;
   fdszRa: FaceProbSource;
+  faceStsSize: FaceProbabilityAxis;
+  faceStsLoc: FaceProbabilityAxis;
   fields: FieldEntry[];
 }
 
@@ -500,6 +508,8 @@ const MTWV_WEIGHT_TABLE_PATH = "[0][3][1][20]" as const;
 const FACE_CWV_KEYS = ["AE_TAG_FACE_20_CWV", "AE_TAG_CWV"] as const;
 const FACE_FBT_FDY_KEY = "AE_TAG_FBT_FDY";
 const FACE_PROB_KEYS = ["AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE"] as const;
+const FACE_STS_SIZE_KEY = "AE_TAG_FACE_STS_SIZE";
+const FACE_STS_LOC_KEY = "AE_TAG_FACE_STS_LOC";
 const FACE_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
 const FACE_FBT_OE_SYS_KEY = "AE_TAG_FBT_OE_SYS";
 const FACE_FBT_TARGET_KEY = "AE_TAG_FBT_TARGET";
@@ -1146,10 +1156,6 @@ export function ChartMapMode({
   );
   const faceFbtFdyValue = useMemo(
     () => readTomlValue(tomlData, FACE_FBT_FDY_KEY),
-    [tomlData],
-  );
-  const faceProbValue = useMemo(
-    () => readFirstTomlValue(tomlData, FACE_PROB_KEYS),
     [tomlData],
   );
   const faceExifProbValue = useMemo(
@@ -2351,7 +2357,9 @@ export function ChartMapMode({
               bvValue={imageBvValue}
               cwvValue={faceCwvValue}
               fdyValue={tab === "Face_FLT" ? faceFltFdyValue : faceFbtFdyValue}
-              faceProbValue={faceProbValue}
+              faceProbValue={faceExifProbValue}
+              faceStsSizeValue={readTomlValue(tomlData, FACE_STS_SIZE_KEY)}
+              faceStsLocValue={readTomlValue(tomlData, FACE_STS_LOC_KEY)}
               faceProbExifValue={faceExifProbValue}
               fdszValue={faceFltFdszValue}
               fdszRaValue={faceFltFdszRaValue}
@@ -2904,7 +2912,7 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
   const fdRowHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
   const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
   const nsRowHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
-  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth, faceProb, fddrRa, fdszRa] = await Promise.all([
+  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth, faceProb, fddrRa, fdszRa, faceStsSize, faceStsLoc] = await Promise.all([
     loadFaceBvDrTableSource(filePath, "fd_th_tbl", fltMode ? FACE_FLT_FDTH_TABLE_PATH : FACE_FBT_FDTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", fltMode ? FACE_FLT_NS_FDTH_TABLE_PATH : FACE_FBT_NS_FDTH_TABLE_PATH, nsColumnHeaderPath, nsRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "fd_minth_tbl", fltMode ? FACE_FLT_FDMINTH_TABLE_PATH : FACE_FBT_FDMINTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
@@ -2914,6 +2922,8 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
     loadFaceProbSource(filePath),
     loadFaceFddrSource(filePath, fltMode),
     fltMode ? loadFaceAxisRows(filePath, FACE_FLT_FDSZ_TABLE_ROWS) : Promise.resolve({ rows: [], fields: [] }),
+    loadFaceProbabilityAxis(filePath, "[0][4][1][3]"),
+    loadFaceProbabilityAxis(filePath, "[0][4][1][5]"),
   ]);
   return {
     fdTh,
@@ -2925,6 +2935,8 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
     faceProb,
     fddrRa,
     fdszRa,
+    faceStsSize,
+    faceStsLoc,
     fields: [
       ...fdTh.fields,
       ...nsFdTh.fields,
@@ -2935,8 +2947,20 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
       ...faceProb.fields,
       ...fddrRa.fields,
       ...fdszRa.fields,
+      ...faceStsSize.fields,
+      ...faceStsLoc.fields,
     ].sort(compareFieldEntries),
   };
+}
+
+async function loadFaceProbabilityAxis(filePath: string, path: string): Promise<FaceProbabilityAxis> {
+  const [x0Fields, x1Fields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, `${path}.0`),
+    loadFieldEntriesAtPath(filePath, `${path}.1`),
+  ]);
+  const x0 = firstNumericFieldEntry(x0Fields);
+  const x1 = firstNumericFieldEntry(x1Fields);
+  return { x0: parseFiniteNumber(x0?.value), x1: parseFiniteNumber(x1?.value), fields: [x0, x1].filter((field): field is FieldEntry => Boolean(field)) };
 }
 
 export async function loadFaceLinkTargetCalculator(filePath: string | null) {
@@ -3030,7 +3054,9 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       ...common,
       dr: value(FACE_FBT_DR_KEY),
       fdy: value(FACE_FBT_FDY_KEY),
-      faceProb: parseFiniteNumber(readFirstTomlValue(tomlData, FACE_PROB_KEYS)),
+      faceProb: parseFiniteNumber(readTomlValue(tomlData, "AE_TAG_FACE_PROB")),
+      faceStsSize: value(FACE_STS_SIZE_KEY),
+      faceStsLoc: value(FACE_STS_LOC_KEY),
       oeSys: value(FACE_FBT_OE_SYS_KEY),
       fddr: value(FACE_FBT_FDDR_KEY),
       fdsz: NaN,
@@ -3044,6 +3070,8 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       dr: value(FACE_FLT_DR_KEY),
       fdy: value(FACE_FLT_FDY_KEY),
       faceProb: NaN,
+      faceStsSize: NaN,
+      faceStsLoc: NaN,
       oeSys: value(FACE_FLT_OE_SYS_KEY),
       fddr: value(FACE_FLT_FDDR_KEY),
       fdsz: value(FACE_FLT_FDSZ_KEY),
@@ -3167,6 +3195,8 @@ function rebuildFaceFbtFields(source: FaceFbtSource): FieldEntry[] {
     ...source.faceProb.fields,
     ...source.fddrRa.fields,
     ...source.fdszRa.fields,
+    ...source.faceStsSize.fields,
+    ...source.faceStsLoc.fields,
   ].sort(compareFieldEntries);
 }
 
@@ -3305,6 +3335,28 @@ function updateFaceFbtFaceProbSourceField(
     ...nextSource,
     fields: rebuildFaceFbtFields(nextSource),
   };
+}
+
+function updateFaceFbtProbabilityAxisField(
+  source: FaceFbtSource,
+  axisKey: "faceStsSize" | "faceStsLoc",
+  field: FieldEntry,
+  value: string,
+): FaceFbtSource {
+  const axis = source[axisKey];
+  const numericValue = parseFiniteNumber(value);
+  if (!Number.isFinite(numericValue)) return source;
+  const firstField = axis.fields[0] ?? null;
+  const secondField = axis.fields[1] ?? null;
+  const nextAxis: FaceProbabilityAxis = {
+    ...axis,
+    x0: firstField && sameFieldEntry(firstField, field) ? numericValue : axis.x0,
+    x1: secondField && sameFieldEntry(secondField, field) ? numericValue : axis.x1,
+    fields: axis.fields.map((item) => sameFieldEntry(item, field) ? { ...item, value } : item),
+  };
+  if (nextAxis.x0 === axis.x0 && nextAxis.x1 === axis.x1 && !axis.fields.some((item) => sameFieldEntry(item, field))) return source;
+  const nextSource = { ...source, [axisKey]: nextAxis };
+  return { ...nextSource, fields: rebuildFaceFbtFields(nextSource) };
 }
 
 function updateFaceFbtSourceField(
@@ -5141,7 +5193,7 @@ function NsProbabilityCard({
       </div>
       {expanded && <div style={nsProbabilityBodyStyle}>
         <div style={nsProbabilityChartGridStyle}>
-          <div style={nsProbabilityChartCardStyle}>
+          <div style={faceProbabilityCurveCardStyle}>
             <div style={nsNorTPanelHeaderStyle}>
               <span>BV Prob</span>
               <strong>{formatOneDecimalNumber(bvProb)}</strong>
@@ -6343,6 +6395,8 @@ interface FaceTargetInputs {
   cwv: number;
   fdy: number;
   faceProb: number;
+  faceStsSize: number;
+  faceStsLoc: number;
   nsProb: number;
   normalTarget: number;
   oeSys: number;
@@ -6359,7 +6413,7 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const fddrRa = selectFaceFddrRa(source?.fddrRa ?? null, input.fddr).result;
   const faceWeight = fltMode
     ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz).result
-    : input.faceProb;
+    : calculateFaceProbFromParameters(source, input.bv, input.faceStsSize, input.faceStsLoc);
   const exifWeight = fltMode
     ? input.useParameterFdszRaForExif ? faceWeight : input.exifFdszRa
     : input.faceProb;
@@ -6398,6 +6452,27 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
     computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFaceTarget,
     thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
   };
+}
+
+function interpolateFaceProbabilityAxis(axis: FaceProbabilityAxis, value: number, y0: number, y1: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(axis.x0) || !Number.isFinite(axis.x1) || axis.x0 === axis.x1) return NaN;
+  const ratio = Math.max(0, Math.min(1, (value - axis.x0) / (axis.x1 - axis.x0)));
+  return y0 + ratio * (y1 - y0);
+}
+
+function calculateFaceProbFromParameters(source: FaceFbtSource | null, bv: number, faceStsSize: number, faceStsLoc: number): number {
+  return calculateFaceProbabilityDetails(source, bv, faceStsSize, faceStsLoc).final;
+}
+
+function calculateFaceProbabilityDetails(source: FaceFbtSource | null, bv: number, faceStsSize: number, faceStsLoc: number) {
+  if (!source) return { tableValues: [], szProb: NaN, locProb: NaN, final: NaN };
+  const rows = source.faceProb.rows;
+  const axis = rows[0]?.values.map(parseFiniteNumber) ?? [];
+  const points = Number.isFinite(bv) ? boundsForTableAxis(bv, axis).points : [];
+  const values = interpolateFaceProbRows(rows, points);
+  const szProb = interpolateFaceProbabilityAxis(source.faceStsSize, faceStsSize, values[0], values[1]);
+  const locProb = interpolateFaceProbabilityAxis(source.faceStsLoc, faceStsLoc, values[2], values[3]);
+  return { tableValues: values, szProb, locProb, final: Number.isFinite(szProb) && Number.isFinite(locProb) ? szProb * locProb / 1024 : NaN };
 }
 
 function FaceDerivedTargetCard({
@@ -6473,6 +6548,8 @@ function FaceTabContent({
   cwvValue,
   fdyValue,
   faceProbValue,
+  faceStsSizeValue,
+  faceStsLocValue,
   faceProbExifValue,
   fdszValue,
   fdszRaValue,
@@ -6514,6 +6591,8 @@ function FaceTabContent({
   cwvValue: string | null;
   fdyValue: string | null;
   faceProbValue: string | null;
+  faceStsSizeValue: string | null;
+  faceStsLocValue: string | null;
   faceProbExifValue: string | null;
   fdszValue: string | null;
   fdszRaValue: string | null;
@@ -6564,6 +6643,12 @@ function FaceTabContent({
         if (value !== null && value !== field.value) next = updateFaceFbtFaceProbSourceField(next, axisKey, field, value);
       }
     }
+    for (const axisKey of ["faceStsSize", "faceStsLoc"] as const) {
+      for (const field of source[axisKey].fields) {
+        const value = sourceFieldToken(sourceDraftText, field, source.fields);
+        if (value !== null && value !== field.value) next = updateFaceFbtProbabilityAxisField(next, axisKey, field, value);
+      }
+    }
     setEditableSource(next);
   }, [source, sourceDraftText]);
   useEffect(() => {
@@ -6591,6 +6676,8 @@ function FaceTabContent({
     thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
   } = calculateFaceTargetMetrics(currentSource, {
     bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys,
+    faceStsSize: parseFiniteNumber(faceStsSizeValue),
+    faceStsLoc: parseFiniteNumber(faceStsLocValue),
     fddr: parseFiniteNumber(fddrValue),
     fdsz: parseFiniteNumber(fdszValue),
     exifFdszRa: parseFiniteNumber(fdszRaValue),
@@ -6719,6 +6806,29 @@ function FaceTabContent({
     return true;
   };
 
+  const previewFaceProbabilityAxisField = (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return;
+    // Persist each valid input keystroke into the shared draft. This makes the
+    // card save action react while editing, instead of waiting for blur/commit.
+    updateFaceProbabilityAxisField(axisKey, field, trimmed);
+  };
+
+  const updateFaceProbabilityAxisField = (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, nextValue: string): boolean => {
+    if (!editableSource) return false;
+    const trimmed = nextValue.trim();
+    if (!isSourceNumberText(trimmed)) return false;
+    const sourceFieldValue = sourceFieldToken(sourceDraftTextRef.current, field, editableSource.fields);
+    if (sourceFieldValue === trimmed) return true;
+    const sourceField = sourceFieldValue === null ? field : { ...field, value: sourceFieldValue };
+    const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, sourceField, trimmed);
+    if (nextText === null) return false;
+    sourceDraftTextRef.current = nextText;
+    onSourceDraftTextChange?.(nextText);
+    setEditableSource((current) => current ? updateFaceFbtProbabilityAxisField(current, axisKey, field, trimmed) : current);
+    return true;
+  };
+
   const fbtTargetExpanded = !collapsed.has("fbtTarget");
   const normalTargetExpanded = !collapsed.has("normalTarget");
   const fbtThExpanded = !collapsed.has("fbtTh");
@@ -6829,6 +6939,11 @@ function FaceTabContent({
                 source={currentSource?.faceProb ?? null}
                 exifValue={faceProbExifValue}
                 bv={bv}
+                faceStsSize={parseFiniteNumber(faceStsSizeValue)}
+                faceStsLoc={parseFiniteNumber(faceStsLocValue)}
+                faceStsSizeAxis={currentSource?.faceStsSize ?? null}
+                faceStsLocAxis={currentSource?.faceStsLoc ?? null}
+                faceProbability={faceWeight}
                 editable={canEdit}
                 heatmapPoints={faceProbHeatmapPoints}
                 onSelectHeatmapImages={onSelectHeatmapImages}
@@ -6837,6 +6952,8 @@ function FaceTabContent({
                 onHeatmapRequest={onHeatmapRequest}
                 onCellPreview={(target, value) => previewFaceAxisCell("faceProb", target, value)}
                 onCellCommit={(target, value) => updateFaceAxisCell("faceProb", target, value)}
+                onProbabilityAxisPreview={previewFaceProbabilityAxisField}
+                onProbabilityAxisCommit={updateFaceProbabilityAxisField}
                 onSourceJump={onSourceJump}
                 sourceInitialText={historicalSourceText}
                 sourceDraftText={currentSourceText}
@@ -7046,10 +7163,147 @@ function jumpToFaceAxisCellSource(
   });
 }
 
+function FaceProbabilityCurveChart({
+  title, axisLabel, currentLabel, currentValue, x0, x1, y0, y1, result,
+}: {
+  title: string;
+  axisLabel: string;
+  currentLabel: string;
+  currentValue: number;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  result: number;
+}) {
+  const width = 520;
+  const height = 224;
+  const left = 58;
+  const right = 30;
+  const top = 28;
+  // Reserve enough room for endpoint tick labels; the current coordinate is
+  // drawn inside the plot with a background stroke so it remains legible.
+  const bottom = 34;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+  const isSzAxis = axisLabel === "sz";
+  // Keep the real values for interpolation, but reserve visual margins so the
+  // two endpoint markers remain readable even when their numeric range is tiny.
+  const endpointStartRatio = isSzAxis ? 0.28 : 0.22;
+  const endpointEndRatio = isSzAxis ? 0.70 : 0.78;
+  const endpointStartX = left + plotW * endpointStartRatio;
+  const endpointEndX = left + plotW * endpointEndRatio;
+  const x = (value: number) => {
+    if (value === 0) return left;
+    if (!Number.isFinite(value) || !Number.isFinite(x0) || !Number.isFinite(x1) || x0 === x1) return left;
+    const ratio = (value - x0) / (x1 - x0);
+    return clamp(endpointStartX + ratio * (endpointEndX - endpointStartX), left + 4, width - right - 4);
+  };
+  const maxY = Math.max(1024, y0, y1, result, 1) * 1.24;
+  const y = (value: number) => top + (1 - value / maxY) * plotH;
+  const current = Number.isFinite(currentValue) && Number.isFinite(x0) && Number.isFinite(x1)
+    ? interpolateFaceProbabilityAxis({ x0, x1, fields: [] }, currentValue, y0, y1) : NaN;
+  const axisY = height - bottom;
+  const axisRight = width - right;
+  const currentX = x(currentValue);
+  const currentY = Number.isFinite(current) ? y(current) : axisY;
+  const xAxisTitleWidth = axisLabel.length * 8 + 12;
+  const currentGuideX = currentX >= axisRight - xAxisTitleWidth - 8 ? currentX - 32 : currentX;
+  const probabilityLabel = `P:${formatComputedNumber(current)}`;
+  const probabilityLabelWidth = Math.max(48, probabilityLabel.length * 7.2);
+  const probabilityLabelX = clamp(currentGuideX, left + probabilityLabelWidth / 2 + 6, axisRight - probabilityLabelWidth / 2 - 6);
+  const probabilityLabelY = clamp(currentY - 12, top + 14, axisY - 28);
+  const currentAxisText = `${currentLabel}:${formatComputedNumber(currentValue)}`;
+  const currentAxisTextWidth = Math.max(48, currentAxisText.length * 6.8);
+  const currentLabelX = clamp(currentGuideX, left + currentAxisTextWidth / 2 + 6, axisRight - currentAxisTextWidth / 2 - 6);
+  const currentLabelY = axisY - 7;
+  const chartStyle: CSSProperties = { ...chartSvgStyle, minHeight: 0, maxWidth: "none", height: "auto" };
+  return <div style={faceProbabilityChartWrapStyle}>
+  <svg viewBox={`0 0 ${width} ${height}`} style={chartStyle} role="img" aria-label={`${title} chart`}>
+    <line x1={left} y1={axisY} x2={left} y2={top + 5} style={faceProbabilityAxisLineStyle} />
+    <line x1={left} y1={axisY} x2={axisRight + 10} y2={axisY} style={faceProbabilityAxisLineStyle} />
+    <path d={`M ${left} ${top - 2} L ${left - 6} ${top + 9} L ${left + 6} ${top + 9} Z`} style={b2dArrowStyle} />
+    <path d={`M ${axisRight + 16} ${axisY} L ${axisRight + 5} ${axisY - 6} L ${axisRight + 5} ${axisY + 6} Z`} style={b2dArrowStyle} />
+    {Number.isFinite(x0) && Number.isFinite(x1) && Number.isFinite(y0) && Number.isFinite(y1) && <>
+      <line x1={left} y1={y(y0)} x2={x(x0)} y2={y(y0)} style={nsProbabilityCurrentGuideLineStyle} />
+      <line x1={x(x0)} y1={y(y0)} x2={x(x0)} y2={axisY} style={nsProbabilityCurrentGuideLineStyle} />
+      <line x1={left} y1={y(y1)} x2={x(x1)} y2={y(y1)} style={nsProbabilityCurrentGuideLineStyle} />
+      <line x1={x(x1)} y1={y(y1)} x2={x(x1)} y2={axisY} style={nsProbabilityCurrentGuideLineStyle} />
+      <path d={`M ${x(x0)} ${y(y0)} L ${x(x1)} ${y(y1)}`} style={nsProbabilityCurveStyle} />
+      <circle cx={x(x0)} cy={y(y0)} r={3} style={nsProbabilityEndpointPointStyle} />
+      <circle cx={x(x1)} cy={y(y1)} r={3} style={nsProbabilityEndpointPointStyle} />
+      {Number.isFinite(current) && <>
+        <line x1={left} y1={currentY} x2={currentGuideX} y2={currentY} style={nsProbabilityCurrentGuideLineStyle} />
+        <line x1={currentGuideX} y1={currentY} x2={currentGuideX} y2={axisY} style={nsProbabilityCurrentGuideLineStyle} />
+        <circle cx={currentGuideX} cy={currentY} r={4} style={nsProbabilityCurrentPointStyle} />
+        <text x={currentLabelX} y={currentLabelY} textAnchor="middle" style={{ ...nsProbabilityCurrentValueTextStyle, ...faceProbabilityPointTextStyle }}>
+          {currentAxisText}
+        </text>
+        <text x={probabilityLabelX} y={probabilityLabelY} textAnchor="middle" style={{ ...nsProbabilityCurrentValueTextStyle, fontSize: 13 }}>
+          {probabilityLabel}
+        </text>
+      </>}
+      <text x={x(x0)} y={axisY + 17} textAnchor="middle" style={{ ...chartAxisTextStyle, fontSize: 12 }}>{formatComputedNumber(x0)}</text>
+      <text x={x(x1)} y={axisY + 17} textAnchor="middle" style={{ ...chartAxisTextStyle, fontSize: 12 }}>{formatComputedNumber(x1)}</text>
+      <text x={axisRight + 4} y={axisY - 9} textAnchor="end" style={{ ...b2dXAxisLabelStyle, fontSize: 13 }}>{axisLabel}</text>
+    </>}
+  </svg>
+  </div>;
+}
+
+function FaceProbabilityAxisValuesTable({
+  title, axisKey, axis, y0, y1, editable, onPreview, onCommit, onSourceJump,
+}: {
+  title: string;
+  axisKey: "faceStsSize" | "faceStsLoc";
+  axis: FaceProbabilityAxis | null;
+  y0: number;
+  y1: number;
+  editable: boolean;
+  onPreview?: (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, value: string) => void;
+  onCommit?: (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
+}) {
+  const fields = [axis?.fields[0] ?? null, axis?.fields[1] ?? null];
+  const values = [axis?.x0 ?? NaN, axis?.x1 ?? NaN];
+  const probabilities = [y0, y1];
+  const probabilityLabels = axisKey === "faceStsSize" ? ["sz_small", "sz_big"] : ["loc_near", "loc_far"];
+  return <div style={faceProbabilityValuesTableStyle} aria-label={`${title} interpolation values`}>
+    <div style={faceProbabilityValuesRowLabelStyle}>{title}</div>
+    {fields.map((field, index) => <FaceProbEditableCell
+      key={`${title}:x:${index}`}
+      value={field?.value ?? formatComputedNumber(values[index])}
+      editable={editable && Boolean(field)}
+      active={false}
+      axisHeader={false}
+      ariaLabel={`${title} ${index + 1} x value`}
+      onPreview={(value) => { if (field) onPreview?.(axisKey, field, value); }}
+      onCommit={(value) => field ? onCommit?.(axisKey, field, value) : false}
+      onSourceJump={field && onSourceJump ? (value) => onSourceJump(
+        `Face.FaceProb.${title}`,
+        { paths: [field.path], jump_to: "first", highlight: "ranges" },
+        { selection: { line: field.line, value, ordinal: index } },
+      ) : undefined}
+    />)}
+    <div style={faceProbabilityValuesRowLabelStyle}>Prob</div>
+    {probabilities.map((value, index) => <div
+      key={`${title}:prob:${index}`}
+      aria-label={`${title} interpolated probability ${index + 1}: ${formatComputedNumber(value)}`}
+      title={`${probabilityLabels[index]}: ${formatComputedNumber(value)}`}
+      style={faceProbabilityValuesReadOnlyStyle}
+    >{formatComputedNumber(value)}</div>)}
+  </div>;
+}
+
 function FaceProbTableCard({
   source,
   exifValue,
   bv,
+  faceStsSize,
+  faceStsLoc,
+  faceStsSizeAxis,
+  faceStsLocAxis,
+  faceProbability,
   editable,
   heatmapPoints,
   onSelectHeatmapImages,
@@ -7058,6 +7312,8 @@ function FaceProbTableCard({
   onHeatmapRequest,
   onCellPreview,
   onCellCommit,
+  onProbabilityAxisPreview,
+  onProbabilityAxisCommit,
   onSourceJump,
   sourceInitialText,
   sourceDraftText,
@@ -7067,6 +7323,11 @@ function FaceProbTableCard({
   source: FaceProbSource | null;
   exifValue: string | null;
   bv: number;
+  faceStsSize: number;
+  faceStsLoc: number;
+  faceStsSizeAxis: FaceProbabilityAxis | null;
+  faceStsLocAxis: FaceProbabilityAxis | null;
+  faceProbability: number;
   editable: boolean;
   heatmapPoints: FaceAxisHeatmapPoint[];
   onSelectHeatmapImages?: (paths: string[], options?: { toggle?: boolean; focusPath?: string }) => void;
@@ -7075,13 +7336,16 @@ function FaceProbTableCard({
   onHeatmapRequest: () => void;
   onCellPreview?: (target: FaceProbCellTarget, value: string) => void;
   onCellCommit?: (target: FaceProbCellTarget, value: string) => boolean | void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onProbabilityAxisPreview?: (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, value: string) => void;
+  onProbabilityAxisCommit?: (axisKey: "faceStsSize" | "faceStsLoc", field: FieldEntry, value: string) => boolean | void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   sourceInitialText?: string | null;
   sourceDraftText?: string | null;
   sourceSavedText?: string | null;
   onSaveSourceDraft?: () => Promise<void>;
 }) {
   const [tableExpanded, setTableExpanded] = useState(true);
+  const [axisMappingExpanded, setAxisMappingExpanded] = useState(true);
   const tableId = "face-prob-table";
   const rows = source?.rows ?? FACE_PROB_TABLE_ROWS.map(({ label, path }) => ({
     label,
@@ -7094,11 +7358,16 @@ function FaceProbTableCard({
   const bvSelection = Number.isFinite(bv) ? boundsForTableAxis(bv, bvAxis) : { points: [] };
   const activeColumns = selectFaceProbActiveColumns(bv, bvAxis, bvSelection.points);
   const interpolatedValues = interpolateFaceProbRows(rows, bvSelection.points);
-  const resultText = interpolatedValues.map((value) => formatComputedNumber(value)).join("|");
+  const szProb = interpolateFaceProbabilityAxis(faceStsSizeAxis ?? { x0: NaN, x1: NaN, fields: [] }, faceStsSize, interpolatedValues[0], interpolatedValues[1]);
+  const locProb = interpolateFaceProbabilityAxis(faceStsLocAxis ?? { x0: NaN, x1: NaN, fields: [] }, faceStsLoc, interpolatedValues[2], interpolatedValues[3]);
   const sourcePaths = FACE_PROB_TABLE_ROWS.map(({ path }) => path);
   const canJumpToSource = Boolean(onSourceJump);
   const canEdit = editable && Boolean(source);
   const tableDirty = faceTableHasUnsavedChanges(source, sourceDraftText, sourceSavedText);
+  // The axis fields share one source draft with the other Face parameters. Use
+  // the draft/save baseline as the dirty signal so edits remain visible even
+  // while the editable source model is reconciling a blur commit.
+  const axisMappingDirty = Boolean(sourceDraftText && sourceSavedText && sourceDraftText !== sourceSavedText);
   const { showHeatmap, showHitCounts, updateHeatmapMode } = useChartTableHeatmapMode("Face_faceProb", true);
   const heatmap = useMemo(
     () => showHeatmap && tableExpanded ? faceAxisHeatmapData(source, heatmapPoints) : { counts: [], paths: [], maxCount: 0 },
@@ -7111,11 +7380,15 @@ function FaceProbTableCard({
         <div style={faceMetricGroupTitleStyle}>
           <span style={faceProbTableTitleStyle}>FaceProb</span>
           <span style={faceMetricSourceStyle}>
-            EXIF: <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(parseFiniteNumber(exifValue))}</strong>
+            AE_TAG_FACE_PROB: <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(parseFiniteNumber(exifValue))}</strong>
+            <span aria-hidden="true"> | </span>
+            bv: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(bv)}</strong>
           </span>
         </div>
         <div className="face-target-header-actions" style={faceProbTableHeaderActionsStyle}>
-          <strong title={resultText} style={faceProbTableHeaderResultStyle}>{resultText}</strong>
+          <strong style={faceProbTableHeaderResultStyle}>
+            最终计算结果: {formatComputedNumber(faceProbability)}
+          </strong>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <button type="button" style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
             title={showHeatmap
@@ -7145,6 +7418,60 @@ function FaceProbTableCard({
           <FaceAxisTableCollapseButton title="FaceProb" expanded={tableExpanded} tableId={tableId} onToggle={() => setTableExpanded((current) => !current)} />
         </div>
       </div>
+      {tableExpanded && <div style={faceProbFormulaStyle}>
+        <div>BV 插值结果 (sz_small | sz_big | loc_near | loc_far): {interpolatedValues.map((value, index) => <Fragment key={index}>
+          {index > 0 ? " | " : " "}<strong>{formatComputedNumber(value)}</strong>
+        </Fragment>)}</div>
+        <div><strong>FaceProb</strong> = sz_prob × loc_prob / 1024 = {formatComputedNumber(szProb)} × {formatComputedNumber(locProb)} / 1024 = <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceProbability)}</strong></div>
+      </div>}
+      {tableExpanded && <div style={faceProbabilityCurveGridStyle}>
+        <div style={faceProbabilityCurveCardStyle}>
+          <div style={faceProbabilityCurveHeaderStyle}>
+            <span>SZ Prob</span>
+            <span style={faceMetricSourceStyle}>AE_TAG_FACE_STS_SIZE: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceStsSize)}</strong></span>
+            <strong style={faceProbabilityCurrentResultStyle}>{formatComputedNumber(szProb)}</strong>
+          </div>
+          {axisMappingExpanded && <FaceProbabilityCurveChart title="SZ Prob" axisLabel="sz" currentLabel="sz" currentValue={faceStsSize}
+            x0={faceStsSizeAxis?.x0 ?? NaN} x1={faceStsSizeAxis?.x1 ?? NaN}
+            y0={interpolatedValues[0]} y1={interpolatedValues[1]} result={szProb} />}
+        </div>
+        <div style={faceProbabilityAxisTablesStyle}>
+          <div style={faceProbabilityAxisTablesHeaderStyle}>
+            <span>参数插值结果映射</span>
+            <div style={faceCardHeaderActionsStyle}>
+            <FaceTableSaveButton dirty={tableDirty || axisMappingDirty} onSave={onSaveSourceDraft} />
+            <button
+              type="button"
+              style={sourceButtonStyle(true)}
+              title={axisMappingExpanded ? "折叠概率图表和参数插值结果映射" : "展开概率图表和参数插值结果映射"}
+              aria-label={axisMappingExpanded ? "折叠概率图表和参数插值结果映射" : "展开概率图表和参数插值结果映射"}
+              aria-expanded={axisMappingExpanded}
+              onClick={() => setAxisMappingExpanded((expanded) => !expanded)}
+            >
+              {axisMappingExpanded ? <ChevronUp24Regular className="h-4 w-4" /> : <ChevronDown24Regular className="h-4 w-4" />}
+            </button>
+            </div>
+          </div>
+          {axisMappingExpanded && <div style={faceProbabilityAxisTablesBodyStyle}>
+            <FaceProbabilityAxisValuesTable title="SZ_Small2Big" axisKey="faceStsSize" axis={faceStsSizeAxis}
+              y0={interpolatedValues[0]} y1={interpolatedValues[1]} editable={canEdit}
+              onPreview={onProbabilityAxisPreview} onCommit={onProbabilityAxisCommit} onSourceJump={onSourceJump} />
+            <FaceProbabilityAxisValuesTable title="Loc_Near2Far" axisKey="faceStsLoc" axis={faceStsLocAxis}
+              y0={interpolatedValues[2]} y1={interpolatedValues[3]} editable={canEdit}
+              onPreview={onProbabilityAxisPreview} onCommit={onProbabilityAxisCommit} onSourceJump={onSourceJump} />
+          </div>}
+        </div>
+        <div style={faceProbabilityCurveCardStyle}>
+          <div style={faceProbabilityCurveHeaderStyle}>
+            <span>Loc Prob</span>
+            <span style={faceMetricSourceStyle}>AE_TAG_FACE_STS_LOC: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceStsLoc)}</strong></span>
+            <strong style={faceProbabilityCurrentResultStyle}>{formatComputedNumber(locProb)}</strong>
+          </div>
+          {axisMappingExpanded && <FaceProbabilityCurveChart title="Loc Prob" axisLabel="loc" currentLabel="loc" currentValue={faceStsLoc}
+            x0={faceStsLocAxis?.x0 ?? NaN} x1={faceStsLocAxis?.x1 ?? NaN}
+            y0={interpolatedValues[2]} y1={interpolatedValues[3]} result={locProb} />}
+        </div>
+      </div>}
       {tableExpanded && <div id={tableId} style={faceProbTableBodyStyle}>
         <div style={faceProbTableScrollStyle}>
           <div style={faceProbTableStyle(columnCount, true)}>
@@ -7164,31 +7491,27 @@ function FaceProbTableCard({
                   const value = row.values[columnIndex] ?? "-";
                   const active = activeColumns.has(columnIndex);
                   const target: FaceProbCellTarget = { rowIndex, columnIndex };
-                  return (
-                    <FaceProbEditableCell
-                      key={`${row.path}:${columnIndex}`}
-                      value={value}
-                      editable={canEdit && Boolean(field)}
-                      active={active}
-                      axisHeader={rowIndex === 0}
-                      heatmapStyle={showHeatmap && rowIndex > 0 ? faceAxisHeatCellStyle(heatmap.counts[columnIndex] ?? 0, heatmap.maxCount, active) : undefined}
-                      heatmapCount={showHeatmap ? heatmap.counts[columnIndex] : undefined}
-                      showHeatmapCount={showHeatmap && showHitCounts && rowIndex > 0}
-                      heatmapLoading={heatmapLoading}
-                      heatmapFailed={heatmapFailed}
-                      onSelectHeatmapImages={showHeatmap && !heatmapLoading && !heatmapFailed
-                        ? () => onSelectHeatmapImages?.(heatmap.paths[columnIndex] ?? []) : undefined}
-                      historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], value)}
-                      ariaLabel={`FaceProb.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
-                      onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
-                      onCommit={(nextValue) => onCellCommit?.(target, nextValue)}
-                      onSourceJump={field && onSourceJump
-                        ? (currentValue) => jumpToFaceAxisCellSource(
-                            onSourceJump, `Face.FaceProb.${row.label}`, source, field, currentValue,
-                          )
-                        : undefined}
-                    />
-                  );
+                  return <FaceProbEditableCell
+                    key={`${row.path}:${columnIndex}`}
+                    value={value}
+                    editable={canEdit && Boolean(field)}
+                    active={active}
+                    axisHeader={rowIndex === 0}
+                    heatmapStyle={showHeatmap && rowIndex > 0 ? faceAxisHeatCellStyle(heatmap.counts[columnIndex] ?? 0, heatmap.maxCount, active) : undefined}
+                    heatmapCount={showHeatmap ? heatmap.counts[columnIndex] : undefined}
+                    showHeatmapCount={showHeatmap && showHitCounts && rowIndex > 0}
+                    heatmapLoading={heatmapLoading}
+                    heatmapFailed={heatmapFailed}
+                    onSelectHeatmapImages={showHeatmap && !heatmapLoading && !heatmapFailed
+                      ? () => onSelectHeatmapImages?.(heatmap.paths[columnIndex] ?? []) : undefined}
+                    historyDelta={sourceFieldDelta(sourceInitialText, field, source?.fields ?? [], value)}
+                    ariaLabel={`FaceProb.${row.label}.${columnIndex}${field ? `.${field.path}` : ""}`}
+                    onPreview={(nextValue) => onCellPreview?.(target, nextValue)}
+                    onCommit={(nextValue) => onCellCommit?.(target, nextValue)}
+                    onSourceJump={field && onSourceJump
+                      ? (currentValue) => jumpToFaceAxisCellSource(onSourceJump, `Face.FaceProb.${row.label}`, source, field, currentValue)
+                      : undefined}
+                  />;
                 })}
               </Fragment>
             ))}
@@ -7389,8 +7712,11 @@ function FaceFddrTableCard({
       <div style={faceFddrHeaderStyle}>
         <div style={faceMetricGroupTitleStyle}>
           <span style={thresholdTitleStyle}>FDDR_RA</span>
-          <span style={faceMetricSourceStyle}>{fltMode ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY}: {fddrValue ?? "-"}</span>
-          <span style={faceMetricSourceStyle}>{fltMode ? FACE_FLT_FDDR_RA_KEY : FACE_FBT_FDDR_RA_KEY}: {fddrRaValue ?? "-"}</span>
+          <span style={faceMetricSourceStyle}>
+            {fltMode ? FACE_FLT_FDDR_KEY : FACE_FBT_FDDR_KEY}: <strong style={faceFormulaCalculationResultStyle}>{fddrValue ?? "-"}</strong>
+            <span aria-hidden="true"> | </span>
+            {fltMode ? FACE_FLT_FDDR_RA_KEY : FACE_FBT_FDDR_RA_KEY}: <strong style={faceFormulaCalculationResultStyle}>{fddrRaValue ?? "-"}</strong>
+          </span>
         </div>
         <div style={faceCardHeaderActionsStyle}>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
@@ -11358,13 +11684,11 @@ function selectFaceProbActiveColumns(
   const selectedOrder = finitePoints.findIndex((point) => point.index === selectedIndex);
   if (selectedOrder < 0) return active;
 
-  if (value <= finitePoints[0].value) {
-    active.add(finitePoints[1].index);
-  } else if (value >= finitePoints[finitePoints.length - 1].value) {
-    active.add(finitePoints[finitePoints.length - 2].index);
-  } else {
-    active.add(finitePoints[Math.min(selectedOrder + 1, finitePoints.length - 1)].index);
-  }
+  // Outside the table range there is no interpolation interval: only the
+  // nearest boundary column should be highlighted. Interior values retain the
+  // two columns used for interpolation.
+  if (value <= finitePoints[0].value || value >= finitePoints[finitePoints.length - 1].value) return active;
+  active.add(finitePoints[Math.min(selectedOrder + 1, finitePoints.length - 1)].index);
 
   return active;
 }
@@ -13814,6 +14138,164 @@ const nsProbabilityChartGridStyle: CSSProperties = {
   minWidth: 0,
 };
 
+const FACE_PROBABILITY_CARD_GAP = 6;
+const FACE_PROBABILITY_TABLE_GAP = 12;
+
+const faceProbabilityCurveGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 4fr) minmax(0, 2fr) minmax(0, 4fr)",
+  alignItems: "stretch",
+  gap: FACE_PROBABILITY_CARD_GAP,
+  padding: 0,
+  background: "transparent",
+  minWidth: 0,
+};
+
+const faceProbabilityCurveCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  minWidth: 0,
+  overflow: "hidden",
+  background: "var(--colorNeutralBackground1)",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: "8px 8px 0 0",
+};
+
+const faceProbabilityAxisTablesStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "flex-start",
+  minWidth: 0,
+  overflow: "hidden",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: "8px 8px 0 0",
+  background: "var(--colorNeutralBackground1)",
+};
+
+const faceProbabilityAxisTablesBodyStyle: CSSProperties = {
+  display: "grid",
+  flex: "1 1 auto",
+  gridTemplateRows: "auto auto",
+  alignContent: "space-between",
+  rowGap: FACE_PROBABILITY_TABLE_GAP,
+  minHeight: 0,
+  minWidth: 0,
+  padding: "14% 0 15%",
+};
+
+const faceProbabilityAxisTablesHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  height: 38,
+  minHeight: 38,
+  boxSizing: "border-box",
+  padding: "4px 9px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 20%, var(--colorNeutralBackground2))",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  flex: "0 0 38px",
+};
+
+const faceProbabilityChartWrapStyle: CSSProperties = {
+  minWidth: 0,
+};
+
+const faceProbabilityPointTextStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  strokeWidth: 4,
+  paintOrder: "stroke",
+};
+
+const faceProbabilityValuesTableStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(122px, 1.2fr) repeat(2, minmax(0, 1fr))",
+  alignSelf: "center",
+  minWidth: 0,
+  width: "100%",
+  overflow: "hidden",
+  border: "1px solid var(--colorNeutralStroke2)",
+  borderRadius: 4,
+  fontSize: 11,
+  fontVariantNumeric: "tabular-nums",
+};
+
+const faceProbabilityValuesRowLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  minWidth: 0,
+  padding: "4px 7px",
+  borderRight: "1px solid var(--colorNeutralStroke2)",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "#E1F5D1",
+  color: "var(--colorNeutralForeground1)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const faceProbabilityValuesReadOnlyStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  minWidth: 0,
+  padding: "4px 3px",
+  borderRight: "1px solid var(--colorNeutralStroke2)",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 38%, var(--colorNeutralBackground1))",
+  color: "var(--colorBrandForeground1)",
+  fontWeight: 700,
+  fontSize: 11,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const faceProbabilityCurveHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  height: 38,
+  minHeight: 38,
+  padding: "4px 9px",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "color-mix(in srgb, var(--colorBrandBackground2) 20%, var(--colorNeutralBackground2))",
+  color: "var(--colorNeutralForeground1)",
+  fontSize: 12,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+};
+
+const faceProbabilityCurrentResultStyle: CSSProperties = {
+  marginLeft: "auto",
+  color: "var(--colorBrandForeground1)",
+  fontVariantNumeric: "tabular-nums",
+  whiteSpace: "nowrap",
+};
+
+const faceProbFormulaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 3,
+  padding: "7px 10px",
+  borderTop: "1px solid var(--colorNeutralStroke2)",
+  borderBottom: "1px solid var(--colorNeutralStroke2)",
+  background: "var(--colorNeutralBackground1)",
+  color: "var(--colorNeutralForeground2)",
+  fontFamily: thresholdFormulaStyle.fontFamily,
+  fontSize: thresholdFormulaStyle.fontSize,
+  lineHeight: thresholdFormulaStyle.lineHeight,
+  overflowWrap: "anywhere",
+};
+
 const nsProbabilityChartCardStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -15222,6 +15704,11 @@ const b2dAxisLineStyle: CSSProperties = {
   strokeLinecap: "round",
 };
 
+const faceProbabilityAxisLineStyle: CSSProperties = {
+  ...b2dAxisLineStyle,
+  strokeWidth: 2,
+};
+
 const b2dArrowStyle: CSSProperties = {
   fill: "color-mix(in srgb, var(--colorPaletteMarigoldForeground2) 78%, #5f3b00)",
 };
@@ -15667,7 +16154,7 @@ function faceProbTableStyle(columnCount: number, hasAxisHeader = false): CSSProp
   };
 }
 
-const FACE_AXIS_HEADER_BACKGROUND = "rgb(225, 245, 209)";
+const FACE_AXIS_HEADER_BACKGROUND = "#E1F5D1";
 
 const faceProbTableLabelStyle: CSSProperties = {
   display: "flex",
