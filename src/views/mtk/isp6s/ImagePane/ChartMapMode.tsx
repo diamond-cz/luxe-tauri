@@ -7178,19 +7178,19 @@ function FaceProbabilityCurveChart({
 }) {
   const width = 520;
   const height = 224;
-  const left = 58;
-  const right = 30;
-  const top = 28;
+  const left = 42;
+  const right = 22;
+  const top = 20;
   // Reserve enough room for endpoint tick labels; the current coordinate is
   // drawn inside the plot with a background stroke so it remains legible.
-  const bottom = 34;
+  const bottom = 29;
   const plotW = width - left - right;
   const plotH = height - top - bottom;
   const isSzAxis = axisLabel === "sz";
   // Keep the real values for interpolation, but reserve visual margins so the
   // two endpoint markers remain readable even when their numeric range is tiny.
-  const endpointStartRatio = isSzAxis ? 0.28 : 0.22;
-  const endpointEndRatio = isSzAxis ? 0.70 : 0.78;
+  const endpointStartRatio = isSzAxis ? 0.20 : 0.14;
+  const endpointEndRatio = isSzAxis ? 0.80 : 0.86;
   const endpointStartX = left + plotW * endpointStartRatio;
   const endpointEndX = left + plotW * endpointEndRatio;
   const x = (value: number) => {
@@ -14221,7 +14221,9 @@ const faceProbabilityPointTextStyle: CSSProperties = {
 
 const faceProbabilityValuesTableStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(122px, 1.2fr) repeat(2, minmax(0, 1fr))",
+  // Keep labels on one line while reserving equal minimum shares for both
+  // numeric columns. Labels may ellipsize at the narrowest card sizes.
+  gridTemplateColumns: "minmax(0, 2fr) repeat(2, minmax(0, 1fr))",
   alignSelf: "center",
   minWidth: 0,
   width: "100%",
@@ -14229,7 +14231,7 @@ const faceProbabilityValuesTableStyle: CSSProperties = {
   border: "1px solid var(--colorNeutralStroke1)",
   borderRadius: 4,
   boxShadow: "0 0 0 1px color-mix(in srgb, var(--colorNeutralStroke2) 35%, transparent)",
-  fontSize: 11,
+  fontSize: 10,
   fontVariantNumeric: "tabular-nums",
 };
 
@@ -14237,7 +14239,7 @@ const faceProbabilityValuesRowLabelStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   minWidth: 0,
-  padding: "4px 7px",
+  padding: "4px 4px",
   borderRight: "1px solid var(--colorNeutralStroke2)",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
   background: "#E1F5D1",
@@ -14245,7 +14247,7 @@ const faceProbabilityValuesRowLabelStyle: CSSProperties = {
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
-  fontSize: 11,
+  fontSize: 9,
   fontWeight: 800,
 };
 
@@ -14254,15 +14256,14 @@ const faceProbabilityValuesReadOnlyStyle: CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   minWidth: 0,
-  padding: "4px 3px",
+  padding: "4px 1px",
   borderRight: "1px solid var(--colorNeutralStroke2)",
   borderBottom: "1px solid var(--colorNeutralStroke2)",
   background: "color-mix(in srgb, var(--colorBrandBackground2) 38%, var(--colorNeutralBackground1))",
   color: "var(--colorBrandForeground1)",
   fontWeight: 700,
-  fontSize: 11,
+  fontSize: 10,
   overflow: "hidden",
-  textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
 
