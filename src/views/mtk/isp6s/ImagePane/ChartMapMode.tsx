@@ -7209,7 +7209,7 @@ function FaceProbabilityCurveChart({
   const currentY = Number.isFinite(current) ? y(current) : axisY;
   const xAxisTitleWidth = axisLabel.length * 8 + 12;
   const currentGuideX = currentX >= axisRight - xAxisTitleWidth - 8 ? currentX - 32 : currentX;
-  const probabilityLabel = `P:${formatComputedNumber(current)}`;
+  const probabilityLabel = `P:${formatOneDecimalNumber(current)}`;
   const probabilityLabelWidth = Math.max(48, probabilityLabel.length * 7.2);
   const probabilityLabelX = clamp(currentGuideX, left + probabilityLabelWidth / 2 + 6, axisRight - probabilityLabelWidth / 2 - 6);
   const probabilityLabelY = clamp(currentY - 12, top + 14, axisY - 28);
@@ -7217,9 +7217,9 @@ function FaceProbabilityCurveChart({
   const currentAxisTextWidth = Math.max(48, currentAxisText.length * 6.8);
   const currentLabelX = clamp(currentGuideX, left + currentAxisTextWidth / 2 + 6, axisRight - currentAxisTextWidth / 2 - 6);
   const currentLabelY = axisY - 7;
-  const chartStyle: CSSProperties = { ...chartSvgStyle, minHeight: 0, maxWidth: "none", height: "auto" };
+  const chartStyle: CSSProperties = { ...chartSvgStyle, minHeight: 0, maxWidth: "none", width: "100%", height: "100%", margin: 0, flex: "1 1 auto" };
   return <div style={faceProbabilityChartWrapStyle}>
-  <svg viewBox={`0 0 ${width} ${height}`} style={chartStyle} role="img" aria-label={`${title} chart`}>
+  <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" style={chartStyle} role="img" aria-label={`${title} chart`}>
     <line x1={left} y1={axisY} x2={left} y2={top + 5} style={faceProbabilityAxisLineStyle} />
     <line x1={left} y1={axisY} x2={axisRight + 10} y2={axisY} style={faceProbabilityAxisLineStyle} />
     <path d={`M ${left} ${top - 2} L ${left - 6} ${top + 9} L ${left + 6} ${top + 9} Z`} style={b2dArrowStyle} />
@@ -7288,10 +7288,10 @@ function FaceProbabilityAxisValuesTable({
     <div style={faceProbabilityValuesRowLabelStyle}>Prob</div>
     {probabilities.map((value, index) => <div
       key={`${title}:prob:${index}`}
-      aria-label={`${title} interpolated probability ${index + 1}: ${formatComputedNumber(value)}`}
-      title={`${probabilityLabels[index]}: ${formatComputedNumber(value)}`}
+      aria-label={`${title} interpolated probability ${index + 1}: ${formatOneDecimalNumber(value)}`}
+      title={`${probabilityLabels[index]}: ${formatOneDecimalNumber(value)}`}
       style={faceProbabilityValuesReadOnlyStyle}
-    >{formatComputedNumber(value)}</div>)}
+    >{formatOneDecimalNumber(value)}</div>)}
   </div>;
 }
 
@@ -7387,7 +7387,7 @@ function FaceProbTableCard({
         </div>
         <div className="face-target-header-actions" style={faceProbTableHeaderActionsStyle}>
           <strong style={faceProbTableHeaderResultStyle}>
-            最终计算结果: {formatComputedNumber(faceProbability)}
+            {formatOneDecimalNumber(faceProbability)}
           </strong>
           <FaceTableSaveButton dirty={tableDirty} hideWhenClean onSave={onSaveSourceDraft} />
           <button type="button" style={{ ...groupSourceButtonStyle(Boolean(source)), background: showHeatmap ? "var(--colorBrandBackground2)" : undefined }}
@@ -7419,17 +7419,17 @@ function FaceProbTableCard({
         </div>
       </div>
       {tableExpanded && <div style={faceProbFormulaStyle}>
-        <div>BV 插值结果 (sz_small | sz_big | loc_near | loc_far): {interpolatedValues.map((value, index) => <Fragment key={index}>
-          {index > 0 ? " | " : " "}<strong>{formatComputedNumber(value)}</strong>
+        <div><strong>BV 插值结果</strong> (sz_small | sz_big | loc_near | loc_far): {interpolatedValues.map((value, index) => <Fragment key={index}>
+          {index > 0 ? " | " : " "}<strong>{formatOneDecimalNumber(value)}</strong>
         </Fragment>)}</div>
-        <div><strong>FaceProb</strong> = sz_prob × loc_prob / 1024 = {formatComputedNumber(szProb)} × {formatComputedNumber(locProb)} / 1024 = <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceProbability)}</strong></div>
+        <div><strong>FaceProb</strong> = sz_prob × loc_prob / 1024 = {formatOneDecimalNumber(szProb)} × {formatOneDecimalNumber(locProb)} / 1024 = <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(faceProbability)}</strong></div>
       </div>}
       {tableExpanded && <div style={faceProbabilityCurveGridStyle}>
         <div style={faceProbabilityCurveCardStyle}>
           <div style={faceProbabilityCurveHeaderStyle}>
             <span>SZ Prob</span>
             <span style={faceMetricSourceStyle}>AE_TAG_FACE_STS_SIZE: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceStsSize)}</strong></span>
-            <strong style={faceProbabilityCurrentResultStyle}>{formatComputedNumber(szProb)}</strong>
+            <strong style={faceProbabilityCurrentResultStyle}>{formatOneDecimalNumber(szProb)}</strong>
           </div>
           {axisMappingExpanded && <FaceProbabilityCurveChart title="SZ Prob" axisLabel="sz" currentLabel="sz" currentValue={faceStsSize}
             x0={faceStsSizeAxis?.x0 ?? NaN} x1={faceStsSizeAxis?.x1 ?? NaN}
@@ -7465,7 +7465,7 @@ function FaceProbTableCard({
           <div style={faceProbabilityCurveHeaderStyle}>
             <span>Loc Prob</span>
             <span style={faceMetricSourceStyle}>AE_TAG_FACE_STS_LOC: <strong style={faceFormulaCalculationResultStyle}>{formatComputedNumber(faceStsLoc)}</strong></span>
-            <strong style={faceProbabilityCurrentResultStyle}>{formatComputedNumber(locProb)}</strong>
+            <strong style={faceProbabilityCurrentResultStyle}>{formatOneDecimalNumber(locProb)}</strong>
           </div>
           {axisMappingExpanded && <FaceProbabilityCurveChart title="Loc Prob" axisLabel="loc" currentLabel="loc" currentValue={faceStsLoc}
             x0={faceStsLocAxis?.x0 ?? NaN} x1={faceStsLocAxis?.x1 ?? NaN}
@@ -14202,7 +14202,14 @@ const faceProbabilityAxisTablesHeaderStyle: CSSProperties = {
 };
 
 const faceProbabilityChartWrapStyle: CSSProperties = {
+  display: "flex",
+  flex: "1 1 auto",
+  alignItems: "center",
+  justifyContent: "center",
   minWidth: 0,
+  minHeight: 0,
+  width: "100%",
+  overflow: "hidden",
 };
 
 const faceProbabilityPointTextStyle: CSSProperties = {
@@ -14219,8 +14226,9 @@ const faceProbabilityValuesTableStyle: CSSProperties = {
   minWidth: 0,
   width: "100%",
   overflow: "hidden",
-  border: "1px solid var(--colorNeutralStroke2)",
+  border: "1px solid var(--colorNeutralStroke1)",
   borderRadius: 4,
+  boxShadow: "0 0 0 1px color-mix(in srgb, var(--colorNeutralStroke2) 35%, transparent)",
   fontSize: 11,
   fontVariantNumeric: "tabular-nums",
 };
@@ -14272,6 +14280,7 @@ const faceProbabilityCurveHeaderStyle: CSSProperties = {
   fontWeight: 800,
   whiteSpace: "nowrap",
   overflow: "hidden",
+  flex: "0 0 38px",
 };
 
 const faceProbabilityCurrentResultStyle: CSSProperties = {
