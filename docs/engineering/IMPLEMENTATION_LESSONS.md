@@ -40,6 +40,42 @@
 
 - `npm run typecheck`、`git diff --check` 通过；未在 Tauri 窗口实际切换浅色/深色主题验收。
 
+### 2026-11-06：补充临时编译文件清理流程
+
+**亮点**
+
+- README 增加项目根目录可执行的 PowerShell 清理命令，覆盖 `src-tauri/target`、`dist` 和 `luxe-rust-test-*` 临时测试目录，并保留 `node_modules` 依赖目录。
+
+**痛点**
+
+- Rust/Tauri 增量编译产物可能长期占用大量磁盘空间，测试使用独立 `CARGO_TARGET_DIR` 时还会在系统临时目录留下大型目标目录。
+
+**闭坑**
+
+- 清理前先停止 `tauri:dev`、`cargo` 和 `rustc` 进程；删除后重新构建会自动生成所需目录，删除 `node_modules` 后必须运行 `npm ci`。
+
+**验证**
+
+- README 命令按 PowerShell 语法检查；本次仅修改文档，未重新运行构建测试。
+
+### 2026-11-06：核对 README 自动化发布流程
+
+**亮点**
+
+- 对照 `.github/workflows/ci.yml`、`release.yml`、`star-release.yml` 以及 `package.json`、`scripts/prepare-release.mjs`、`scripts/prepare-star-version.mjs` 核对 README；补充 Star 工作流入口和稳定 Release 资产替换行为，修正调试包路径为 `src-tauri/target/debug/bundle/`，并同步 Star 版本实际使用的数字预发布格式。
+
+**痛点**
+
+- README 原自动化表遗漏了实际存在的 Star 发布工作流；本地调试产物路径缺少 `src-tauri/` 前缀，Star 版本格式也误写成了带 `-star` 文本的版本。
+
+**闭坑**
+
+- 修改发布说明前同步检查三个工作流的触发条件、版本校验、资产数量和发布目标；路径以 `src-tauri/tauri.conf.json` 的 Tauri 默认 target 目录为准。
+
+**验证**
+
+- 已完成脚本和工作流静态核对；运行 `git diff --check`，未重新执行构建测试，因为本次只修改文档。
+
 ## 记录模板
 
 ### YYYY-MM-DD：主题

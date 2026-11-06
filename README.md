@@ -38,6 +38,27 @@ npm run tauri:dev
 
 Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁定可执行文件，先停止 `tauri:dev`。解析器外部 AE.cpp 样例通过 `LUXE_AE_CPP_FIXTURE` 指定；缺少外部样例时会跳过对应断言。
 
+### 手动清理临时编译文件
+
+在项目根目录执行以下 PowerShell 命令，可清理 Rust/Tauri 编译产物、前端构建产物和 Rust 测试临时目录：
+
+```powershell
+# 推荐方式：清理 src-tauri/target
+cargo clean --manifest-path .\src-tauri\Cargo.toml
+
+# 或直接删除 Rust 编译目录
+Remove-Item -LiteralPath .\src-tauri\target -Recurse -Force -ErrorAction SilentlyContinue
+
+# 清理前端构建产物
+Remove-Item -LiteralPath .\dist -Recurse -Force -ErrorAction SilentlyContinue
+
+# 清理 Rust 测试生成的临时目录
+Get-ChildItem $env:TEMP -Directory -Filter "luxe-rust-test-*" -ErrorAction SilentlyContinue |
+  Remove-Item -Recurse -Force
+```
+
+清理前请先停止 `tauri:dev`、`cargo`、`rustc` 等正在运行的进程。`node_modules` 是依赖目录，通常应保留；如果删除，需重新运行 `npm ci`。
+
 ### 代码导航
 
 
@@ -60,7 +81,7 @@ Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁�
 
 `npm run tauri:build` 默认读取根目录的 `.tauri-updater.key` 和 `.tauri-updater.password`；同名环境变量 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 优先。GitHub Secrets 仅用于云端构建。
 
-产物位于 `src-tauri/target/release/bundle/` 的 `nsis/` 和 `msi/`；调试包位于 `target/debug/bundle/`。仅打 NSIS 可运行 `npm run tauri:build -- --bundles nsis`。
+产物位于 `src-tauri/target/release/bundle/` 的 `nsis/` 和 `msi/`；调试包位于 `src-tauri/target/debug/bundle/`。仅打 NSIS 可运行 `npm run tauri:build -- --bundles nsis`。
 
 在仓库 **Settings → Secrets and variables → Actions** 配置：
 
@@ -103,8 +124,9 @@ git push origin vX.Y.Z
 
 | 工作流                                                   | 触发与行为                                                                       |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。仅 Markdown 变更跳过 |
-| [Publish Windows release](.github/workflows/release.yml) | 推送`v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布        |
+| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。PR 与 `main` 推送仅在非 Markdown 改动时运行 |
+| [Publish Windows release](.github/workflows/release.yml) | 推送 `v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布 |
+| [Publish latest build on Star](.github/workflows/star-release.yml) | 仓库所有者 Star 或手动运行；基于 `main` 构建带运行编号的 Star 版本，替换最新稳定 Release 的更新资产 |
 
 发布任务固定 Node.js 22、Rust 1.95.0，复用 npm/Rust 依赖缓存，并按以下顺序执行：
 
@@ -139,7 +161,7 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 
 ### 方案依据
 
-采用 tag + GitHub Actions + Draft 校验后发布，适合当前单应用、人工选择版本的节奏。[release-please](https://github.com/googleapis/release-please) 通过规范提交生成版本 PR，[semantic-release](https://github.com/semantic-release/semantic-release) 通过提交信息自动决定版本；后续统一提交规范并需要更高发布频率时可再引入。
+稳定版采用 tag + GitHub Actions + Draft 校验后发布，适合当前单应用、人工选择版本的节奏；Star 工作流只替换最新稳定 Release 的安装包和 `latest.json`，不会创建新的稳定 tag。[release-please](https://github.com/googleapis/release-please) 通过规范提交生成版本 PR，[semantic-release](https://github.com/semantic-release/semantic-release) 通过提交信息自动决定版本；后续统一提交规范并需要更高发布频率时可再引入。
 
 - [Tauri GitHub Actions 发布指南](https://v2.tauri.app/distribute/pipelines/github/)：工具链、缓存、构建与 Release。
 - [Tauri updater](https://v2.tauri.app/plugin/updater/)：签名、安装包与更新清单。
@@ -152,4 +174,4 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 
 ### Star-triggered build
 
-A Star by the repository owner runs `.github/workflows/star-release.yml`. It checks out the latest default-branch source, finds the highest stable `vX.Y.Z` tag, and builds signed NSIS/MSI installers using the unique version `X.Y.(Z+1)-star.<Actions run number>`. After verification it replaces the updater assets and `latest.json` on that stable release without creating a new stable tag. Only the repository owner's Star event runs the publishing job, protecting signing secrets from public-trigger abuse. The client Overwrite Update action checks for and installs this build.
+A Star by the repository owner runs `.github/workflows/star-release.yml`. It checks out the latest default-branch source, finds the highest stable `vX.Y.Z` tag, and builds signed NSIS/MSI installers using the unique numeric pre-release version `X.Y.(Z+1)-<Actions run number>`; the run number must be no greater than `65535` for MSI compatibility. After verification it replaces the updater assets and `latest.json` on that stable release without creating a new stable tag. Only the repository owner's Star event runs the publishing job, protecting signing secrets from public-trigger abuse. The client Overwrite Update action checks for and installs this build.

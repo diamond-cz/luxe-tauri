@@ -29,3 +29,6 @@ Thumbs.db
 .tauri-updater.key
 .tauri-updater.key.pub
 .tauri-updater.password
+
+# Claude model workspace
+/.claude/
