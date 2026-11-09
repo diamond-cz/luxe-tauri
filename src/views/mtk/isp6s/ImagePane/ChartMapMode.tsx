@@ -4510,7 +4510,7 @@ function MtwvCard({
   focusTarget?: ChartFocusTarget | null;
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
@@ -4675,7 +4675,7 @@ function MtwvCard({
             </div>
             <div style={mtwvTableWrapStyle}>
               <div style={mtwvHeatmapGridStyle(maxColumns)}>
-                <div title={editableSource.path} style={mtwvHeatmapCornerStyle}>
+                <div style={mtwvHeatmapCornerStyle}>
                   {editableSource.rows.length}x{maxColumns}
                 </div>
                 {Array.from({ length: maxColumns }, (_, index) => (
@@ -4683,7 +4683,7 @@ function MtwvCard({
                 ))}
                 {editableSource.rows.map((row, rowIndex) => (
                   <Fragment key={row.id}>
-                    <div title={row.line > 0 ? `${row.path} L${row.line}` : row.path} style={mtwvHeatmapRowHeaderStyle}>
+                    <div style={mtwvHeatmapRowHeaderStyle}>
                       R{rowIndex + 1}
                     </div>
                     {Array.from({ length: maxColumns }, (_, cellIndex) => {
@@ -4697,7 +4697,19 @@ function MtwvCard({
                           value={rawValue}
                           intensity={intensity}
                           editable={editable}
-                          title={row.line > 0 ? `${row.path} L${row.line} #${cellIndex}` : row.path}
+                          ariaLabel={`MTWV row ${rowIndex + 1}, column ${cellIndex + 1}`}
+                          onSourceJump={editableSource.rows[rowIndex]?.fields[cellIndex] && onSourceJump
+                            ? (currentValue) => {
+                                const field = editableSource.rows[rowIndex].fields[cellIndex];
+                                const ordinal = orderedSourceFieldsOnLine(
+                                  editableSource.rows.flatMap((sourceRow) => sourceRow.fields), field.line,
+                                ).findIndex((item) => sameFieldEntry(item, field));
+                                onSourceJump("MTWV.weight_table.cell", {
+                                  paths: [field.path], jump_to: "first", highlight: "ranges",
+                                }, { selection: { line: field.line, value: currentValue, ordinal,
+                                  columnStart: field.column_start, columnEnd: field.column_end } });
+                              }
+                            : undefined}
                           onCommit={(nextValue) => updateWeightCell(row.id, cellIndex, nextValue)}
                         />
                       );
@@ -4756,13 +4768,15 @@ function MtwvHeatmapCell({
   value,
   intensity,
   editable,
-  title,
+  ariaLabel,
+  onSourceJump,
   onCommit,
 }: {
   value: string;
   intensity: number;
   editable: boolean;
-  title: string;
+  ariaLabel: string;
+  onSourceJump?: (value: string) => void;
   onCommit: (value: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
@@ -4784,9 +4798,19 @@ function MtwvHeatmapCell({
   };
 
   return (
-    <div title={title} style={mtwvHeatmapCellStyle(intensity, focused, editable)}>
+    <div
+      style={mtwvHeatmapCellStyle(intensity, focused, editable)}
+      onContextMenu={(event) => {
+        if (!onSourceJump) return;
+        event.preventDefault();
+        const nextValue = draftValue.trim();
+        const changed = nextValue !== value.trim() && isSourceNumberText(nextValue);
+        if (changed) onCommit(nextValue);
+        onSourceJump(changed ? nextValue : value);
+      }}
+    >
       <input
-        aria-label={title}
+        aria-label={ariaLabel}
         value={draftValue}
         readOnly={!editable}
         onFocus={() => setFocused(true)}
@@ -5087,7 +5111,7 @@ function NsProbabilityCard({
   source: NsProbabilityCurveSource | null;
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onComputedChange?: (value: number) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -5207,6 +5231,7 @@ function NsProbabilityCard({
               curve={editableSource?.bv ?? null}
               editable={canEdit}
               editorRowLabels={["bv", "prob"]}
+              sourceFields={editableSource?.fields ?? []}
               onCellPreview={previewCurveCell}
               onCellCommit={updateCurveCell}
               onSourceJump={onSourceJump}
@@ -5226,6 +5251,7 @@ function NsProbabilityCard({
               curve={editableSource?.cdf ?? null}
               editable={canEdit}
               editorRowLabels={["cdf", "prob"]}
+              sourceFields={editableSource?.fields ?? []}
               onCellPreview={previewCurveCell}
               onCellCommit={updateCurveCell}
               onSourceJump={onSourceJump}
@@ -5246,6 +5272,7 @@ function NsProbabilityCurveChart({
   curve,
   editable,
   editorRowLabels,
+  sourceFields,
   showPercentage = false,
   sourceJumpLabelPrefix = "NS.Probability",
   onCellPreview,
@@ -5260,11 +5287,12 @@ function NsProbabilityCurveChart({
   curve: NsProbabilityCurve | null;
   editable: boolean;
   editorRowLabels: readonly [string, string];
+  sourceFields: FieldEntry[];
   showPercentage?: boolean;
   sourceJumpLabelPrefix?: string;
   onCellPreview?: (target: NsProbabilityCurveCellTarget, value: string) => void;
   onCellCommit?: (target: NsProbabilityCurveCellTarget, value: string) => boolean | void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
 }) {
   const chart = { width: 430, height: 200, left: 56, right: 28, top: 34, bottom: 40 };
   const plotW = chart.width - chart.left - chart.right;
@@ -5411,6 +5439,7 @@ function NsProbabilityCurveChart({
           curve={curve}
           editable={editable}
           rowLabels={editorRowLabels}
+          sourceFields={sourceFields}
           sourceJumpLabelPrefix={sourceJumpLabelPrefix}
           onCellPreview={onCellPreview}
           onCellCommit={onCellCommit}
@@ -5426,6 +5455,7 @@ function NsProbabilityCurveValueGrid({
   curve,
   editable,
   rowLabels,
+  sourceFields,
   sourceJumpLabelPrefix,
   onCellPreview,
   onCellCommit,
@@ -5435,10 +5465,11 @@ function NsProbabilityCurveValueGrid({
   curve: NsProbabilityCurve;
   editable: boolean;
   rowLabels: readonly [string, string];
+  sourceFields: FieldEntry[];
   sourceJumpLabelPrefix: string;
   onCellPreview?: (target: NsProbabilityCurveCellTarget, value: string) => void;
   onCellCommit?: (target: NsProbabilityCurveCellTarget, value: string) => boolean | void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
 }) {
   const rows: Array<{ label: string; fields: NsProbabilityCurveFieldId[] }> = [
     { label: rowLabels[0], fields: ["x0", "x1"] },
@@ -5461,11 +5492,11 @@ function NsProbabilityCurveValueGrid({
                 onPreview={(nextValue) => onCellPreview?.({ curveId, fieldId }, nextValue)}
                 onCommit={(nextValue) => onCellCommit?.({ curveId, fieldId }, nextValue)}
                 onSourceJump={field && onSourceJump
-                  ? () => onSourceJump(`${sourceJumpLabelPrefix}.${fieldId}`, {
+                  ? (value) => onSourceJump(`${sourceJumpLabelPrefix}.${fieldId}`, {
                       paths: [field.path],
                       jump_to: "first",
                       highlight: "ranges",
-                    })
+                    }, sourceJumpDetails(sourceFields, field, value))
                   : undefined}
               />
             );
@@ -5602,7 +5633,7 @@ function NsProbabilityEditableValueCell({
   ariaLabel: string;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
-  onSourceJump?: () => void;
+  onSourceJump?: (value: string) => void;
 }) {
   return (
     <EditableNumberTableCell
@@ -5614,6 +5645,8 @@ function NsProbabilityEditableValueCell({
       onPreview={onPreview}
       onCommit={onCommit}
       onSourceJump={onSourceJump}
+      commitBeforeSourceJump={Boolean(onSourceJump)}
+      commitPreviewedValue={Boolean(onSourceJump)}
     />
   );
 }
@@ -5640,7 +5673,7 @@ function NsNorTAreaCard({
   nsNormalFinalThdValue: string | null;
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onComputationChange?: (computation: NsAreaComputation) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -5807,8 +5840,8 @@ function NsNorTAreaCard({
       </div>
       {expanded && (
         editableSource ? (
-          <PanelGroup direction="horizontal" autoSaveId={isBt ? "isp6s-ns-bt-split" : "isp6s-ns-nort-split"} className="flex h-full w-full min-w-0 items-stretch">
-            <Panel defaultSize={76} minSize={56} className="min-w-0">
+          <PanelGroup direction="horizontal" autoSaveId={isBt ? "isp6s-ns-bt-split-v2" : "isp6s-ns-nort-split-v2"} className="flex h-full w-full min-w-0 items-stretch">
+            <Panel defaultSize={50} minSize={40} className="min-w-0">
               <div style={nsNorTPanelStyle}>
                 <div style={nsNorTPanelHeaderStyle}>
                   <span>{thdPanelTitle}</span>
@@ -5821,7 +5854,7 @@ function NsNorTAreaCard({
                     {editableSource.bvValues.map((value, index) => (
                       <NsNorTEditableCell
                         key={`bv:${index}`}
-                        value={formatInputNumber(value)}
+                        value={editableSource.bvFields[index]?.value ?? formatInputNumber(value)}
                         editable={canEdit && Boolean(editableSource.bvFields[index])}
                         active={activeThdIndexes.has(index)}
                         variant="curve"
@@ -5829,11 +5862,11 @@ function NsNorTAreaCard({
                         onPreview={(nextValue) => previewCell({ kind: "thdTable", row: "bv", index }, nextValue)}
                         onCommit={(nextValue) => updateCell({ kind: "thdTable", row: "bv", index }, nextValue)}
                         onSourceJump={editableSource.bvFields[index] && onSourceJump
-                          ? () => onSourceJump(isBt ? "NS.BT.BV" : "NS.NorT.BV", {
+                          ? (currentValue) => onSourceJump(isBt ? "NS.BT.BV" : "NS.NorT.BV", {
                               paths: [editableSource.bvFields[index]?.path ?? editableSource.bvPath],
                               jump_to: "first",
                               highlight: "ranges",
-                            })
+                            }, sourceJumpDetails(editableSource.fields, editableSource.bvFields[index]!, currentValue))
                           : undefined}
                       />
                     ))}
@@ -5841,7 +5874,7 @@ function NsNorTAreaCard({
                     {editableSource.thdValues.map((value, index) => (
                       <NsNorTEditableCell
                         key={`thd:${index}`}
-                        value={formatInputNumber(value)}
+                        value={editableSource.thdFields[index]?.value ?? formatInputNumber(value)}
                         editable={canEdit && Boolean(editableSource.thdFields[index])}
                         active={activeThdIndexes.has(index)}
                         variant="curve"
@@ -5849,11 +5882,11 @@ function NsNorTAreaCard({
                         onPreview={(nextValue) => previewCell({ kind: "thdTable", row: "thd", index }, nextValue)}
                         onCommit={(nextValue) => updateCell({ kind: "thdTable", row: "thd", index }, nextValue)}
                         onSourceJump={editableSource.thdFields[index] && onSourceJump
-                          ? () => onSourceJump(thdSourceJumpLabel, {
+                          ? (currentValue) => onSourceJump(thdSourceJumpLabel, {
                               paths: [editableSource.thdFields[index]?.path ?? editableSource.thdPath],
                               jump_to: "first",
                               highlight: "ranges",
-                            })
+                            }, sourceJumpDetails(editableSource.fields, editableSource.thdFields[index]!, currentValue))
                           : undefined}
                       />
                     ))}
@@ -5865,18 +5898,18 @@ function NsNorTAreaCard({
                           <NsNorTParamTable
                             title="NS Flat THD"
                             label="Flat THD"
-                            value={formatInputNumber(flatThdSetting.value)}
+                            value={flatThdSetting.field?.value ?? formatInputNumber(flatThdSetting.value)}
                             editable={canEdit && Boolean(flatThdSetting.field)}
                             valueAriaLabel={flatThdSetting.path}
                             minWidth={0}
                             onPreview={(nextValue) => previewCell({ kind: "flatSetting", id: "flatThd" }, nextValue)}
                             onCommit={(nextValue) => updateCell({ kind: "flatSetting", id: "flatThd" }, nextValue)}
                             onSourceJump={flatThdSetting.field && onSourceJump
-                              ? () => onSourceJump(flatThdSourceJumpLabel, {
+                              ? (currentValue) => onSourceJump(flatThdSourceJumpLabel, {
                                   paths: [flatThdSetting.field?.path ?? flatThdSetting.path],
                                   jump_to: "first",
                                   highlight: "ranges",
-                                })
+                                }, sourceJumpDetails(editableSource.fields, flatThdSetting.field!, currentValue))
                               : undefined}
                           />
                         )}
@@ -5884,26 +5917,26 @@ function NsNorTAreaCard({
                           <NsNorTParamTable
                             title={meteringTitle}
                             label="Pcnt%"
-                            value={formatInputNumber(nsPcntSetting.value)}
+                            value={nsPcntSetting.field?.value ?? formatInputNumber(nsPcntSetting.value)}
                             editable={canEdit && Boolean(nsPcntSetting.field)}
                             valueAriaLabel={nsPcntSetting.path}
                             minWidth={0}
                             onPreview={(nextValue) => previewCell({ kind: "flatSetting", id: "nsPcnt" }, nextValue)}
                             onCommit={(nextValue) => updateCell({ kind: "flatSetting", id: "nsPcnt" }, nextValue)}
                             onSourceJump={nsPcntSetting.field && onSourceJump
-                              ? () => onSourceJump(meteringSourceJumpLabel, {
+                              ? (currentValue) => onSourceJump(meteringSourceJumpLabel, {
                                   paths: [nsPcntSetting.field?.path ?? nsPcntSetting.path],
                                   jump_to: "first",
                                   highlight: "ranges",
-                                })
+                                }, sourceJumpDetails(editableSource.fields, nsPcntSetting.field!, currentValue))
                               : undefined}
                           />
                         )}
                       </div>
                       {nsEvdDefine && (
                         <NsNorTEvdDefineTable
-                          intervalDarkestValue={formatInputNumber(nsEvdDefine.intervalDarkest.value)}
-                          intervalBrightestValue={formatInputNumber(nsEvdDefine.intervalBrightest.value)}
+                          intervalDarkestValue={nsEvdDefine.intervalDarkest.field?.value ?? formatInputNumber(nsEvdDefine.intervalDarkest.value)}
+                          intervalBrightestValue={nsEvdDefine.intervalBrightest.field?.value ?? formatInputNumber(nsEvdDefine.intervalBrightest.value)}
                           intervalDarkestEditable={canEdit && Boolean(nsEvdDefine.intervalDarkest.field)}
                           intervalBrightestEditable={canEdit && Boolean(nsEvdDefine.intervalBrightest.field)}
                           intervalDarkestAriaLabel={NS_NORT_EVD_DARKEST_PATH}
@@ -5913,18 +5946,18 @@ function NsNorTAreaCard({
                           onIntervalBrightestPreview={(nextValue) => previewCell({ kind: "evdDefine", row: "interval", index: 1 }, nextValue)}
                           onIntervalBrightestCommit={(nextValue) => updateCell({ kind: "evdDefine", row: "interval", index: 1 }, nextValue)}
                           onIntervalDarkestSourceJump={nsEvdDefine.intervalDarkest.field && onSourceJump
-                            ? () => onSourceJump("NS.NorT.ns_evd_interval.darkest", {
+                            ? (currentValue) => onSourceJump("NS.NorT.ns_evd_interval.darkest", {
                                 paths: [nsEvdDefine.intervalDarkest.field?.path ?? NS_NORT_EVD_DARKEST_PATH],
                                 jump_to: "first",
                                 highlight: "ranges",
-                              })
+                              }, sourceJumpDetails(editableSource.fields, nsEvdDefine.intervalDarkest.field!, currentValue))
                             : undefined}
                           onIntervalBrightestSourceJump={nsEvdDefine.intervalBrightest.field && onSourceJump
-                            ? () => onSourceJump("NS.NorT.ns_evd_interval.brightest", {
+                            ? (currentValue) => onSourceJump("NS.NorT.ns_evd_interval.brightest", {
                                 paths: [nsEvdDefine.intervalBrightest.field?.path ?? NS_NORT_EVD_BRIGHTEST_PATH],
                                 jump_to: "first",
                                 highlight: "ranges",
-                              })
+                              }, sourceJumpDetails(editableSource.fields, nsEvdDefine.intervalBrightest.field!, currentValue))
                             : undefined}
                         />
                       )}
@@ -5934,7 +5967,7 @@ function NsNorTAreaCard({
               </div>
             </Panel>
             <ResizeHandle direction="horizontal" size={8} />
-            <Panel defaultSize={24} minSize={20} className="min-w-0">
+            <Panel defaultSize={50} minSize={20} className="min-w-0">
               <div style={nsProbabilityChartCardStyle}>
                 <div style={nsNorTPanelHeaderStyle}>
                   <span>{probTitle}</span>
@@ -5950,6 +5983,7 @@ function NsNorTAreaCard({
                   editable={canEdit}
                   editorRowLabels={probRowLabels}
                   showPercentage
+                  sourceFields={editableSource.fields}
                   sourceJumpLabelPrefix={isBt ? "NS.BT.NS_SKY_BV_Prob" : "NS.NorT.NS_Flat_Prob"}
                   onCellPreview={(target, nextValue) => previewCell({ kind: "flatProb", fieldId: target.fieldId }, nextValue)}
                   onCellCommit={(target, nextValue) => updateCell({ kind: "flatProb", fieldId: target.fieldId }, nextValue)}
@@ -5983,7 +6017,7 @@ function NsNorTEditableCell({
   ariaLabel: string;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
-  onSourceJump?: () => void;
+  onSourceJump?: (value: string) => void;
 }) {
   return (
     <EditableNumberTableCell
@@ -5996,6 +6030,8 @@ function NsNorTEditableCell({
       onPreview={onPreview}
       onCommit={onCommit}
       onSourceJump={onSourceJump}
+      commitBeforeSourceJump={Boolean(onSourceJump)}
+      commitPreviewedValue={Boolean(onSourceJump)}
     />
   );
 }
@@ -6017,7 +6053,7 @@ function NsDtAreaCard({
   imageLimitValue: string | null;
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
@@ -6085,14 +6121,14 @@ function NsDtAreaCard({
     return true;
   };
 
-  const sourceJump = (id: NsDtCellId) => {
+  const sourceJump = (id: NsDtCellId, value: string) => {
     const field = getSourceField(id);
     const path = field?.path ?? (id === "darkY" ? NS_DT_DARK_Y_PATH : id === "thd" ? NS_LOWBND_THD_PATH : NS_LOWBND_THD_LIMIT_PATH);
     onSourceJump?.(`NS.DT.${id}`, {
       paths: [path],
       jump_to: "first",
       highlight: "ranges",
-    });
+    }, field ? sourceJumpDetails(sourceValues?.fields ?? [], field, value) : undefined);
   };
 
   const sourceThd = formatComputedNumber(sourceValues?.thdValue ?? NaN);
@@ -6145,8 +6181,8 @@ function NsDtAreaCard({
         </span>
       </div>
       {expanded && (
-        <PanelGroup direction="horizontal" autoSaveId="isp6s-ns-dt-split" className="flex h-full w-full min-w-0 items-stretch">
-          <Panel defaultSize={58} minSize={36} className="min-w-0">
+        <PanelGroup direction="horizontal" autoSaveId="isp6s-ns-dt-split-v2" className="flex h-full w-full min-w-0 items-stretch">
+          <Panel defaultSize={50} minSize={36} className="min-w-0">
             <div style={nsDtPanelStyle}>
               <div style={nsNorTPanelHeaderStyle}>
                 <span>NS_LOWBND_THD</span>
@@ -6156,41 +6192,41 @@ function NsDtAreaCard({
                 <NsNorTParamTable
                   title="NS DarkY Metering%"
                   label="Pcnt%"
-                  value={formatInputNumber(getSourceValue("darkY"))}
+                  value={getSourceField("darkY")?.value ?? formatInputNumber(getSourceValue("darkY"))}
                   editable={canEdit && Boolean(getSourceField("darkY"))}
                   valueAriaLabel={NS_DT_DARK_Y_PATH}
                   minWidth={0}
                   onPreview={(value) => previewCell("darkY", value)}
                   onCommit={(value) => updateCell("darkY", value)}
-                  onSourceJump={onSourceJump ? () => sourceJump("darkY") : undefined}
+                  onSourceJump={onSourceJump ? (value) => sourceJump("darkY", value) : undefined}
                 />
                 <NsNorTParamTable
                   title="NS Dark THD"
                   label="Dark THD"
-                  value={formatInputNumber(getSourceValue("thd"))}
+                  value={getSourceField("thd")?.value ?? formatInputNumber(getSourceValue("thd"))}
                   editable={canEdit && Boolean(getSourceField("thd"))}
                   valueAriaLabel={NS_LOWBND_THD_PATH}
                   minWidth={0}
                   onPreview={(value) => previewCell("thd", value)}
                   onCommit={(value) => updateCell("thd", value)}
-                  onSourceJump={onSourceJump ? () => sourceJump("thd") : undefined}
+                  onSourceJump={onSourceJump ? (value) => sourceJump("thd", value) : undefined}
                 />
                 <NsNorTParamTable
                   title="NS Dark Limit"
                   label="Up Limit"
-                  value={formatInputNumber(getSourceValue("limit"))}
+                  value={getSourceField("limit")?.value ?? formatInputNumber(getSourceValue("limit"))}
                   editable={canEdit && Boolean(getSourceField("limit"))}
                   valueAriaLabel={NS_LOWBND_THD_LIMIT_PATH}
                   minWidth={0}
                   onPreview={(value) => previewCell("limit", value)}
                   onCommit={(value) => updateCell("limit", value)}
-                  onSourceJump={onSourceJump ? () => sourceJump("limit") : undefined}
+                  onSourceJump={onSourceJump ? (value) => sourceJump("limit", value) : undefined}
                 />
               </div>
             </div>
           </Panel>
           <ResizeHandle direction="horizontal" size={8} />
-          <Panel defaultSize={42} minSize={28} className="min-w-0">
+          <Panel defaultSize={50} minSize={28} className="min-w-0">
             <div style={nsProbabilityChartCardStyle}>
               <div style={nsNorTPanelHeaderStyle}>
                 <span>NS Y Metering%</span>
@@ -7485,7 +7521,7 @@ function FaceProbTableCard({
                     <span style={faceBvDrCornerBvStyle}>Prob</span>
                     <span style={faceBvDrCornerDrStyle}>BV</span>
                   </div>
-                ) : <div title={row.path} style={faceProbTableLabelStyle}>{row.label}</div>}
+                ) : <div style={faceProbTableLabelStyle}>{row.label}</div>}
                 {Array.from({ length: columnCount }, (_, columnIndex) => {
                   const field = row.fields[columnIndex] ?? null;
                   const value = row.values[columnIndex] ?? "-";
@@ -7622,7 +7658,7 @@ function FaceFdszTableCard({
           <div style={faceProbTableStyle(columnCount)}>
             {rows.map((row, rowIndex) => (
               <Fragment key={row.path}>
-                <div title={row.path} style={rowIndex === 0 ? faceProbTableAxisLabelStyle : faceProbTableLabelStyle}>{row.label}</div>
+                <div style={rowIndex === 0 ? faceProbTableAxisLabelStyle : faceProbTableLabelStyle}>{row.label}</div>
                 {Array.from({ length: columnCount }, (_, columnIndex) => {
                   const field = row.fields[columnIndex] ?? null;
                   const target: FaceProbCellTarget = { rowIndex, columnIndex };
@@ -7849,7 +7885,8 @@ function FaceProbEditableCell({
         aria-label={hitStatus}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+          if (onSourceJump) onSourceJump(value);
+          else if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
         }}
       >
         {heatmapLoading ? "…" : heatmapFailed ? "-" : heatmapCount ?? 0}
@@ -8551,7 +8588,9 @@ function FaceBvDrTableCard({
                         aria-label={`${title} BV ${formatComputedNumber(source.rowHeaders[rowIndex])} DR ${formatComputedNumber(source.columnHeaders[columnIndex])} ${hitStatus}`}
                         onContextMenu={(event) => {
                           event.preventDefault();
-                          if (!heatmapLoading && !heatmapFailed) {
+                          if (field && onSourceJump) {
+                            jumpToCellSource(field, target, field.value);
+                          } else if (!heatmapLoading && !heatmapFailed) {
                             onSelectHeatmapImages?.(faceBvDrHitPaths(source, eligibleHeatmapPoints, rowIndex, columnIndex));
                           }
                         }}
@@ -9498,7 +9537,7 @@ function HsWeightCard({
   wetValues: Record<HsWeightToneId, string | null>;
   sourceDraftText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
-  onSourceJump?: (label: string, spec: CardSourceSpec) => void;
+  onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onInterpolatedChange?: (values: Partial<Record<HsWeightToneId, number>>) => void;
   initialExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -9620,6 +9659,17 @@ function HsWeightCard({
               editable={canEdit}
               onCellPreview={previewWeightCell}
               onCellCommit={updateWeightCell}
+              onCellSourceJump={(field, value) => {
+                if (!onSourceJump) return;
+                const ordinal = orderedSourceFieldsOnLine(editableSource.fields, field.line)
+                  .findIndex((item) => sameFieldEntry(item, field));
+                onSourceJump("HS.Weight.cell", {
+                  paths: [field.path], jump_to: "first", highlight: "ranges",
+                }, { selection: {
+                  line: field.line, value, ordinal,
+                  columnStart: field.column_start, columnEnd: field.column_end,
+                } });
+              }}
             />
           ) : (
             <div style={hsWeightPendingStyle}>loading...</div>
@@ -9636,12 +9686,14 @@ function HsWeightGrid({
   editable,
   onCellPreview,
   onCellCommit,
+  onCellSourceJump,
 }: {
   source: HsWeightSource | null;
   selected: HsWeightSelection;
   editable: boolean;
   onCellPreview?: (target: HsWeightCellTarget, value: string) => void;
   onCellCommit?: (target: HsWeightCellTarget, value: string) => boolean | void;
+  onCellSourceJump?: (field: FieldEntry, value: string) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
@@ -9710,10 +9762,11 @@ function HsWeightGrid({
                   key={midIndex}
                   value={field?.value ?? formatHsWeightCell(mid)}
                   editable={editable && Boolean(field)}
-                  title={field ? `${source?.midPath} #${midIndex}` : "Mid%"}
+                  title="Mid%"
                   style={hsWeightMidHeaderStyle(selected.midIndexes.has(midIndex))}
                   onPreview={(value) => onCellPreview?.({ kind: "mid", midIndex }, value)}
                   onCommit={(value) => onCellCommit?.({ kind: "mid", midIndex }, value)}
+                  onSourceJump={field && onCellSourceJump ? (value) => onCellSourceJump(field, value) : undefined}
                 />
               );
             })}
@@ -9726,10 +9779,11 @@ function HsWeightGrid({
               <HsWeightEditableCell
                 value={bvField?.value ?? formatHsWeightCell(bv)}
                 editable={editable && Boolean(bvField)}
-                title={bvField ? `${source?.bvPath} #${bvIndex}` : "BV"}
+                title="BV"
                 style={hsWeightBvHeaderStyle(selected.bvIndexes.has(bvIndex), drAxis.length)}
                 onPreview={(value) => onCellPreview?.({ kind: "bv", bvIndex }, value)}
                 onCommit={(value) => onCellCommit?.({ kind: "bv", bvIndex }, value)}
+                onSourceJump={bvField && onCellSourceJump ? (value) => onCellSourceJump(bvField, value) : undefined}
               />
               <div style={hsWeightB2dColumnStyle}>
                 {drAxis.map((dr, drIndex) => {
@@ -9739,10 +9793,11 @@ function HsWeightGrid({
                       key={`${bvIndex}:${drIndex}`}
                       value={field?.value ?? formatHsWeightCell(dr)}
                       editable={editable && Boolean(field)}
-                      title={field ? `${source?.drB2dPath} #${bvIndex}:${drIndex}` : "DR:B2D"}
+                      title="DR:B2D"
                       style={hsWeightB2dCellStyle(Boolean(selected.drIndexesByBv.get(bvIndex)?.has(drIndex)))}
                       onPreview={(value) => onCellPreview?.({ kind: "dr", bvIndex, drIndex }, value)}
                       onCommit={(value) => onCellCommit?.({ kind: "dr", bvIndex, drIndex }, value)}
+                      onSourceJump={field && onCellSourceJump ? (value) => onCellSourceJump(field, value) : undefined}
                     />
                   );
                 })}
@@ -9763,7 +9818,7 @@ function HsWeightGrid({
                               key={channel.id}
                               value={field?.value ?? formatHsWeightCell(value)}
                               editable={editable && Boolean(field)}
-                              title={field ? `${source?.matrixPath} #${bvIndex}:${drIndex}:${midIndex}:${channelIndex}` : channel.id}
+                              title={channel.id}
                               style={hsWeightMiniCellStyle(channel.id, selectedCell, channelIndex)}
                               onPreview={(nextValue) => onCellPreview?.({
                                 kind: "value",
@@ -9772,6 +9827,7 @@ function HsWeightGrid({
                                 midIndex,
                                 channelIndex,
                               }, nextValue)}
+                              onSourceJump={field && onCellSourceJump ? (nextValue) => onCellSourceJump(field, nextValue) : undefined}
                               onCommit={(nextValue) => onCellCommit?.({
                                 kind: "value",
                                 bvIndex,
@@ -10134,7 +10190,7 @@ function HsAreaGrid({
               key={`column:${columnIndex}`}
               value={field?.value ?? formatHsAreaAxisValue(value, columnIndex, "C")}
               editable={editable && Boolean(field)}
-              title={field ? `${source?.columnHeaderPath} #${columnIndex}` : columnLabel}
+              title=""
               style={faceBvDrColumnHeaderStyle(selected.columnIndexes.has(columnIndex))}
               onPreview={(nextValue) => onCellPreview?.({ kind: "columnHeader", columnIndex }, nextValue)}
               onCommit={(nextValue) => onCellCommit?.({ kind: "columnHeader", columnIndex }, nextValue)}
@@ -10152,7 +10208,7 @@ function HsAreaGrid({
               <HsWeightEditableCell
                 value={rowField?.value ?? formatHsAreaAxisValue(rowValue, rowIndex, "R")}
                 editable={editable && Boolean(rowField)}
-                title={rowField ? `${source?.rowHeaderPath} #${rowIndex}` : "BV"}
+                title=""
                 style={hsDarkAreaRowHeaderStyle(selected.rowIndexes.has(rowIndex))}
                 onPreview={(nextValue) => onCellPreview?.({ kind: "rowHeader", rowIndex }, nextValue)}
                 onCommit={(nextValue) => onCellCommit?.({ kind: "rowHeader", rowIndex }, nextValue)}
@@ -10174,7 +10230,7 @@ function HsAreaGrid({
                       ...faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active),
                       appearance: "none", borderTop: 0, borderLeft: 0, font: "inherit", cursor: "pointer",
                     }}
-                    title={`${source?.valuePath} #${rowIndex}:${columnIndex} · ${heatmapStatus}`}
+                    title={heatmapStatus}
                     aria-label={`HS Area BV 第 ${rowIndex + 1} 行，${columnLabel} 第 ${columnIndex + 1} 列，${heatmapStatus}`}
                     onClick={() => {
                       if (source && !heatmapLoading && !heatmapFailed) {
@@ -10184,7 +10240,9 @@ function HsAreaGrid({
                     onContextMenu={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      if (source && !heatmapLoading && !heatmapFailed) {
+                      if (field && onCellSourceJump) {
+                        onCellSourceJump(field, { kind: "value", rowIndex, columnIndex }, field.value);
+                      } else if (source && !heatmapLoading && !heatmapFailed) {
                         onSelectHeatmapImages?.(hsAreaHitPaths(source, heatmapPoints, rowIndex, columnIndex));
                       }
                     }}
@@ -10197,7 +10255,7 @@ function HsAreaGrid({
                     key={`cell:${rowIndex}:${columnIndex}`}
                     value={field?.value ?? formatHsAreaCellValue(value)}
                     editable={editable && Boolean(field)}
-                    title={`${field ? `${source?.valuePath} #${rowIndex}:${columnIndex}` : "THD"}${showHeatmap ? ` · ${heatmapStatus}` : ""}`}
+                    title={showHeatmap ? heatmapStatus : ""}
                     style={showHeatmap ? faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active) : hsDarkAreaDataCellStyle(active)}
                     onPreview={(nextValue) => onCellPreview?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
                     onCommit={(nextValue) => onCellCommit?.({ kind: "value", rowIndex, columnIndex }, nextValue)}
@@ -12481,6 +12539,18 @@ function orderedSourceFieldsOnLine(fields: FieldEntry[], line: number): FieldEnt
   return ordered;
 }
 
+function sourceJumpDetails(fields: FieldEntry[], field: FieldEntry, value: string): ChartSourceJumpDetails {
+  const ordinal = orderedSourceFieldsOnLine(fields, field.line)
+    .findIndex((item) => sameFieldEntry(item, field));
+  return {
+    selection: {
+      line: field.line,
+      value,
+      ordinal,
+    },
+  };
+}
+
 const faceSourceLinesCache = new Map<string, string[]>();
 const faceSourceTokensCache = new Map<string, string[]>();
 
@@ -13975,7 +14045,7 @@ function NsNorTParamTable({
   minWidth: number;
   onPreview?: (value: string) => void;
   onCommit?: (value: string) => boolean | void;
-  onSourceJump?: () => void;
+  onSourceJump?: (value: string) => void;
 }) {
   return (
     <div style={nsNorTParamTableStyle(minWidth)}>
@@ -13990,6 +14060,8 @@ function NsNorTParamTable({
         onPreview={onPreview}
         onCommit={onCommit}
         onSourceJump={onSourceJump}
+        commitBeforeSourceJump={Boolean(onSourceJump)}
+        commitPreviewedValue={Boolean(onSourceJump)}
       />
     </div>
   );
@@ -14019,8 +14091,8 @@ function NsNorTEvdDefineTable({
   onIntervalDarkestCommit?: (value: string) => boolean | void;
   onIntervalBrightestPreview?: (value: string) => void;
   onIntervalBrightestCommit?: (value: string) => boolean | void;
-  onIntervalDarkestSourceJump?: () => void;
-  onIntervalBrightestSourceJump?: () => void;
+  onIntervalDarkestSourceJump?: (value: string) => void;
+  onIntervalBrightestSourceJump?: (value: string) => void;
 }) {
   return (
     <div style={nsNorTEvdDefineTableStyle}>
@@ -14039,6 +14111,8 @@ function NsNorTEvdDefineTable({
         onPreview={onIntervalDarkestPreview}
         onCommit={onIntervalDarkestCommit}
         onSourceJump={onIntervalDarkestSourceJump}
+        commitBeforeSourceJump={Boolean(onIntervalDarkestSourceJump)}
+        commitPreviewedValue={Boolean(onIntervalDarkestSourceJump)}
       />
       <EditableNumberTableCell
         value={intervalBrightestValue}
@@ -14049,6 +14123,8 @@ function NsNorTEvdDefineTable({
         onPreview={onIntervalBrightestPreview}
         onCommit={onIntervalBrightestCommit}
         onSourceJump={onIntervalBrightestSourceJump}
+        commitBeforeSourceJump={Boolean(onIntervalBrightestSourceJump)}
+        commitPreviewedValue={Boolean(onIntervalBrightestSourceJump)}
       />
       <div style={nsNorTEvdDefineNoteStyle}>Pcnt%: 120 = 12%, (1000 base)</div>
     </div>

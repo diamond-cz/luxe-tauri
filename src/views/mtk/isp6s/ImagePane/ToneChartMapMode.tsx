@@ -482,7 +482,10 @@ export function ToneChartMapMode({
   }, field ? { selection: {
     line: field.line,
     value: field.value,
-    ordinal: 0,
+    ordinal: ((tab === "CA-LTM" ? currentCaLtmResult?.fields : result?.fields) ?? [])
+      .filter((item) => item.line === field.line)
+      .sort((left, right) => left.column_start - right.column_start || left.index - right.index)
+      .findIndex((item) => item.path === field.path && item.index === field.index),
     columnStart: field.column_start,
     columnEnd: field.column_end,
   } } : undefined);
@@ -532,13 +535,13 @@ export function ToneChartMapMode({
               <div className="flex min-h-8 items-center gap-2 border-b px-3 py-1"
                    style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }}>
                 <span className="min-w-0 flex-1 truncate text-xs font-semibold" title={group.label}>{group.label}</span>
-                <button type="button" title={`跳转源码 ${group.path}`} aria-label={`跳转源码 ${group.path}`}
+                <button type="button" title="跳转源码" aria-label="跳转源码"
                         onClick={() => jump(group.label, group.fields[0].line, group.fields[group.fields.length - 1].line)}
                         style={{ color: "var(--colorBrandForeground1)" }}><Code24Regular className="h-4 w-4" /></button>
               </div>
               <div className="border-b px-3 py-1 font-mono text-[11px]"
                    style={{ borderColor: "var(--colorNeutralStroke2)", color: "var(--colorNeutralForeground3)" }}>
-                paths={group.path} · L{group.line} · {group.fields.length} 个值
+                L{group.line} · {group.fields.length} 个值
               </div>
               <ToneGroupRows group={group} onJump={(field) => jump(field.comment || field.path, field.line, field.line, field)} />
             </section>
@@ -689,7 +692,15 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
     fontWeight: active ? 700 : 400,
   };
   if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]" style={cellStyle}
-    onContextMenu={(event) => { event.preventDefault(); if (!controls.heatmapLoading && !controls.heatmapFailed) onHitImages?.(); }}>
+    onContextMenu={(event) => {
+      if (!field && !onHitImages) return;
+      event.preventDefault();
+      if (field) {
+        controls.onCellJump(tableId, field, value);
+      } else if (!controls.heatmapLoading && !controls.heatmapFailed) {
+        onHitImages?.();
+      }
+    }}>
     {controls.heatmapLoading ? "…" : controls.heatmapFailed ? "-" : hitCount ?? 0}
   </div>;
   return <div style={cellStyle}>
@@ -969,12 +980,17 @@ function ToneGroupRows({ group, onJump }: {
             {group.fields.slice(0, visibleCount).map((field) => (
               <tr key={`${field.path}:${field.line}:${field.index}`} className="border-t"
                   style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-                <td className="max-w-0 truncate px-3 py-1 font-mono" title={`${field.path}${field.comment ? ` | ${field.comment}` : ""}`}>
+                <td className="max-w-0 truncate px-3 py-1 font-mono">
                   {onJump ? <button type="button" onClick={() => onJump(field)}
                           className="max-w-full truncate text-left" style={{ color: "var(--colorBrandForeground1)" }}>{field.path}</button>
                     : field.path}
                 </td>
-                <td className="px-3 py-1 text-right font-mono" title={field.value}>{field.value}</td>
+                <td className="px-3 py-1 text-right font-mono"
+                    onContextMenu={(event) => {
+                      if (!onJump) return;
+                      event.preventDefault();
+                      onJump(field);
+                    }}>{field.value}</td>
               </tr>
             ))}
           </tbody>

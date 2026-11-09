@@ -2261,6 +2261,7 @@
 **验证**
 
 - `npm run typecheck` 通过。
+- `npm run build` 通过（Vite 6.4.3，2214 个模块）。
 - `git diff --check` 通过。
 - 尚未在 Tauri 窗口手动逐类验证 ISP6S 表格右键跳转的纵向居中与横向保留/滚动行为。
 
@@ -2356,3 +2357,63 @@
 
 - `npm run typecheck`、`npm run build`（2214 个模块）和 `git diff --check` 均通过。
 - 尚未在 Tauri 窗口中手动验证下载、安装状态下标题栏环形动画和通知卡片定位。
+### 2026-11-09：ISP6S 表格右键源码定位
+
+**亮点**
+
+- MainT、HS、NS、Face 与 Tone 表格的数值单元格通过现有源码跳转入口定位；可编辑单元格先提交有效草稿，再携带源码行、字段序号及数值列范围选中对应 token。
+- Tone 和 MTWV 表格行/列及 HS Weight、HS Area、Face 热力图计数格不再暴露源文件路径悬浮文本；无源码映射的热力图格仍可按原有行为筛选命中图片。
+
+**痛点**
+
+- 右键交互分散在可编辑数值格、热力图计数格和 Tone 专用单元格中；增加表格入口时容易只处理普通数值模式，遗漏计数模式或源码字段序号。
+
+**闭坑**
+
+- 新表格单元格应传入字段映射与 `selection`，按源码行计算 `ordinal`；带编辑草稿时使用 `commitBeforeSourceJump`，无字段映射时不应伪造跳转。
+- 检查表格内 `title` 是否拼入 `.path` 或 `paths=`；普通状态提示可以保留，源文件路径不应作为悬浮提示。
+
+**验证**
+
+- `npm run typecheck` 通过；`git diff --check` 通过。
+- 尚未在 Tauri 桌面窗口逐页实测 MainT、HS、NS、Face 与 Tone 的右键定位和数值高亮。
+### 2026-11-09：NS 表格右键跳转选中当前数值
+
+**亮点**
+
+- NS Probability、NS NorT/BT、NS EVD define 和 NS DT 参数单元格统一复用 `EditableNumberTableCell` 的 `commitBeforeSourceJump` 与 `commitPreviewedValue`，右键跳转前先提交有效草稿，再把当前值传给源码编辑器。
+- `sourceJumpDetails` 从完整的 NS 字段集合计算源码行内 `ordinal`，跳转只携带行号、当前值和序号，避免编辑后旧列偏移覆盖新值定位。
+
+**痛点**
+
+- 原 NS 单元格回调没有接收当前值，且右键路径未提交草稿，导致源码视图只能跳转到行而不能稳定选中单元格数值；Probability 曲线此前还只从当前曲线的四个字段计算序号。
+
+**闭坑**
+
+- 新增 NS 可编辑表格右键跳转时必须传递 `(value: string)`，并开启 `commitBeforeSourceJump`；行内序号必须基于对应源码块的完整字段集合，不能依赖表格显示顺序或编辑前的列偏移。
+
+**验证**
+
+- `npm run typecheck` 通过。
+- `npm run build` 通过（Vite 6.4.3，2214 个模块）。
+- `git diff --check` 通过。
+- 尚未在 Tauri 实际窗口逐个右键验收 NS 页面；需重点核对已编辑数字和同一源码行存在多个数字时的选中范围。
+### 2026-11-09：NS Area 卡片分割器默认比例与持久化
+
+**亮点**
+
+- NS NorT Area、NS BT Area 和 NS DT Area 的双面板统一使用 `defaultSize={50}`，三张卡片分别使用独立的 `autoSaveId`，用户拖动后的比例会按卡片持久化。
+- NS NorT/BT 左侧最小尺寸调整为 `40%`，确保 `50:50` 默认布局不会被最小尺寸约束覆盖；NS DT 保留现有两侧最小尺寸约束。
+
+**痛点**
+
+- 原 NS NorT/BT 使用 `76:24`，NS DT 使用 `58:42`，且旧的自动保存键可能继续恢复历史比例，导致首次使用或升级后不是 1:1。
+
+**闭坑**
+
+- 修改默认分割比例时必须检查 `minSize` 是否小于等于默认值；需要改变已有保存布局的默认行为时同步升级 `autoSaveId`，否则旧布局会覆盖新的默认比例。
+
+**验证**
+
+- 待运行 `npm run typecheck`、`npm run build` 和 `git diff --check`。
+- 尚未在 Tauri 实际窗口拖动三张卡片的分割器并重启验证持久化效果。
