@@ -58,7 +58,7 @@ pub fn run() {
             let initial_shortcuts = store.snapshot().shortcuts.clone();
             app.manage(AppState::new(store));
 
-            // i18n catalog (all 16 locales loaded eagerly — total <200 KB).
+            // i18n catalog (all five supported locales loaded eagerly — total <200 KB).
             let catalog = LocaleCatalog::load(handle).unwrap_or_default();
             app.manage(catalog);
 

@@ -17,7 +17,7 @@
 
 ## 项目边界
 
-LUXE 是面向 Camera Tuning 工程师的 Windows x64 Tauri 桌面应用。前端使用 React/Vite/Fluent UI，后端使用 Rust/Tauri，通过 Tauri IPC 通信；持久化状态使用 TOML，当前支持 16 种语言。
+LUXE 是面向 Camera Tuning 工程师的 Windows x64 Tauri 桌面应用。前端使用 React/Vite/Fluent UI，后端使用 Rust/Tauri，通过 Tauri IPC 通信；持久化状态使用 TOML，当前支持五种语言：`zh_CN`、`zh_TW`、`en_US`、`ja_JP`、`tr_TR`。
 
 | 路径 | 职责 |
 | --- | --- |
