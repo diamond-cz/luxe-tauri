@@ -41,6 +41,7 @@ struct SyncEnvelope {
 struct BridgeState {
     pipe_tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
     pending_selection: Mutex<Option<String>>,
+    pending_sequence: Mutex<Option<u64>>,
     sequence: std::sync::atomic::AtomicU64,
     snapshot: RwLock<ViewerSnapshot>,
 }
@@ -50,6 +51,7 @@ impl Default for BridgeState {
         Self {
             pipe_tx: Mutex::new(None),
             pending_selection: Mutex::new(None),
+            pending_sequence: Mutex::new(None),
             sequence: std::sync::atomic::AtomicU64::new(0),
             snapshot: RwLock::new(ViewerSnapshot::default()),
         }
@@ -77,7 +79,7 @@ fn select_image(image_path: String, state: State<'_, BridgeState>) -> Result<(),
     queue_image_selection(&state, image_path)
 }
 
-fn selection_message(state: &BridgeState, image_path: String) -> Result<Vec<u8>, String> {
+fn selection_message(state: &BridgeState, image_path: String) -> Result<(u64, Vec<u8>), String> {
     let sequence = state
         .sequence
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -93,15 +95,19 @@ fn selection_message(state: &BridgeState, image_path: String) -> Result<Vec<u8>,
     };
     let mut bytes = serde_json::to_vec(&envelope).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
-    Ok(bytes)
+    Ok((sequence, bytes))
 }
 
 fn queue_image_selection(state: &BridgeState, image_path: String) -> Result<(), String> {
+    let (sequence, bytes) = selection_message(state, image_path.clone())?;
     *state
         .pending_selection
         .lock()
         .map_err(|_| "pending selection state poisoned")? = Some(image_path.clone());
-    let bytes = selection_message(state, image_path.clone())?;
+    *state
+        .pending_sequence
+        .lock()
+        .map_err(|_| "pending sequence state poisoned")? = Some(sequence);
     let result = state
         .pipe_tx
         .lock()
@@ -115,15 +121,6 @@ fn queue_image_selection(state: &BridgeState, image_path: String) -> Result<(), 
             }
             mpsc::error::TrySendError::Closed(_) => "LUXE named pipe is closed".to_string(),
         });
-    if result.is_ok() {
-        let mut pending = state
-            .pending_selection
-            .lock()
-            .map_err(|_| "pending selection state poisoned")?;
-        if pending.as_deref() == Some(image_path.as_str()) {
-            *pending = None;
-        }
-    }
     result
 }
 
@@ -313,6 +310,22 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         if let Ok(message) = serde_json::from_slice::<SyncEnvelope>(payload) {
                             if message.kind == "selection" {
                                 let _ = app.emit("luxe-selection", message);
+                            } else if message.kind == "ack"
+                                && message.source_instance.starts_with("luxe-")
+                            {
+                                let matches_pending = state
+                                    .pending_sequence
+                                    .lock()
+                                    .ok()
+                                    .is_some_and(|pending| *pending == Some(message.sequence));
+                                if matches_pending {
+                                    if let Ok(mut pending) = state.pending_selection.lock() {
+                                        *pending = None;
+                                    }
+                                    if let Ok(mut pending) = state.pending_sequence.lock() {
+                                        *pending = None;
+                                    }
+                                }
                             }
                         }
                         line.clear();
