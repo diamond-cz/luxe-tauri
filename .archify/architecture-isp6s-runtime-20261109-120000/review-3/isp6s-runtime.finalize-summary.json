@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\candidate.json",
+    "sha256": "cb7a501b1b3ad863d62746586eeaec23d34ea4cf6b0bfd46bc14c8acbb51ec95",
+    "bytes": 7545
+  },
+  "artifact": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html",
+    "sha256": "a1a06994fcb4c77aa410534a3614cab797932a06714df69910909b00471e6c0a",
+    "bytes": 860542
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-3\\isp6s-runtime.finalize.json",
+    "summaryReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-3\\isp6s-runtime.finalize-summary.json",
+    "browserCheckReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-3\\isp6s-runtime.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-09T01:27:05.523Z",
+    "source": "network",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 5125,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 2,
+      "routesOverSuggestedBends": 4
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "runtime-to-state",
+            "from": "tauri-runtime",
+            "to": "state-commands",
+            "label": "load / save / flush",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "right": {
+            "id": "image-result",
+            "from": "image-commands",
+            "to": "isp6s-ui",
+            "label": "图片条目 / 预览 / TOML 值",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            1004,
+            340
+          ]
+        },
+        {
+          "left": {
+            "id": "image-result",
+            "from": "image-commands",
+            "to": "isp6s-ui",
+            "label": "图片条目 / 预览 / TOML 值",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "right": {
+            "id": "schema-result",
+            "from": "state-commands",
+            "to": "isp6s-ui",
+            "label": "表格 / 参数检查映射",
+            "collectionIndex": 13,
+            "artifactIndex": 14
+          },
+          "point": [
+            365,
+            340
+          ],
+          "sharedNode": "isp6s-ui"
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "ipc-to-runtime",
+            "from": "ipc",
+            "to": "tauri-runtime",
+            "label": "Tauri invoke",
+            "collectionIndex": 3,
+            "artifactIndex": 4
+          },
+          "bends": 3,
+          "stretch": 1.291
+        },
+        {
+          "relationship": {
+            "id": "runtime-to-image",
+            "from": "tauri-runtime",
+            "to": "image-commands",
+            "label": "scan / load / preview",
+            "collectionIndex": 5,
+            "artifactIndex": 6
+          },
+          "bends": 3,
+          "stretch": 1.231
+        },
+        {
+          "relationship": {
+            "id": "image-to-dir",
+            "from": "image-commands",
+            "to": "image-dir",
+            "label": "扫描图片并读同名 TOML",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "bends": 3,
+          "stretch": 1.247
+        },
+        {
+          "relationship": {
+            "id": "cpp-result",
+            "from": "cpp-parser",
+            "to": "isp6s-ui",
+            "label": "结构化字段与注释",
+            "collectionIndex": 11,
+            "artifactIndex": 12
+          },
+          "bends": 4,
+          "stretch": 1.049
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "isp6s-ui has 4 relationships facing its right side, which fits 3 ports: make that side at least 74px, or move some of those neighbours so they face another side of isp6s-ui.",
+      "tauri-runtime → state-commands crosses image-commands → isp6s-ui: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "image-commands → isp6s-ui and state-commands → isp6s-ui cross next to isp6s-ui: move node image-commands or state-commands so the two reach isp6s-ui from different sides (for example one level with it, one directly above or below it).",
+      "ipc → tauri-runtime needs 3 bends: move node ipc or tauri-runtime so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "tauri-runtime → image-commands needs 3 bends: move node tauri-runtime or image-commands so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "image-commands → image-dir needs 3 bends: move node image-commands or image-dir so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "cpp-parser → isp6s-ui needs 4 bends: move node cpp-parser or isp6s-ui so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

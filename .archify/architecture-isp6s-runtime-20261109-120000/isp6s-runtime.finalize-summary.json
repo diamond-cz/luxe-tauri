@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\candidate.json",
+    "sha256": "cb7a501b1b3ad863d62746586eeaec23d34ea4cf6b0bfd46bc14c8acbb51ec95",
+    "bytes": 7545
+  },
+  "artifact": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html",
+    "sha256": "a1a06994fcb4c77aa410534a3614cab797932a06714df69910909b00471e6c0a",
+    "bytes": 860542
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "fail"
+  },
+  "failedStage": "browser-check",
+  "diagnostics": [
+    {
+      "code": "viewer/browser-check-runtime",
+      "severity": "error",
+      "message": "browser-check could not complete its Chrome inspection.",
+      "subject": {
+        "artifact": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html"
+      },
+      "evidence": {
+        "reason": "Temporary directory ancestor identity is unavailable: C:\\Users\\caozhen\\AppData\\Local\\Temp"
+      },
+      "supportedFixes": [
+        "resolve the reported Chrome inspection error, then rerun browser-check"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.finalize.json",
+    "summaryReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.finalize-summary.json",
+    "browserCheckReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2505,
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  }
+}

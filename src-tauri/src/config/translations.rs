@@ -16,9 +16,7 @@ use crate::error::{AppError, AppResult};
 /// Canonical ordering. settings.language stores the **index** into this list.
 /// Must stay aligned with `src/locales/index.ts` on the front-end.
 pub const LANGUAGE_LOCALES: &[&str] = &[
-    "zh_CN", "zh_TW", "en_US", "ja_JP", "ko_KR",
-    "de_DE", "fr_FR", "es_ES", "pt_BR", "ru_RU",
-    "it_IT", "tr_TR", "pl_PL", "cs_CZ", "vi_VN", "ar_SA",
+    "zh_CN", "zh_TW", "en_US", "ja_JP", "tr_TR",
 ];
 
 pub type LocaleBundle = HashMap<String, String>;
@@ -47,6 +45,9 @@ impl LocaleCatalog {
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| AppError::Path(format!("invalid name: {path:?}")))?
                 .to_owned();
+            if !LANGUAGE_LOCALES.contains(&stem.as_str()) {
+                continue;
+            }
             let text = std::fs::read_to_string(&path)?;
             let bundle: LocaleBundle = serde_json::from_str(&text)?;
             bundles.insert(stem, bundle);
@@ -86,4 +87,14 @@ fn resolve_translations_dir(app: &AppHandle) -> AppResult<std::path::PathBuf> {
         return Ok(dev);
     }
     Err(AppError::NotFound("translations directory".into()))
+}
+
+#[cfg(test)]
+mod locale_contract_tests {
+    use super::LANGUAGE_LOCALES;
+
+    #[test]
+    fn canonical_order_has_exactly_five_locales() {
+        assert_eq!(LANGUAGE_LOCALES, &["zh_CN", "zh_TW", "en_US", "ja_JP", "tr_TR"]);
+    }
 }

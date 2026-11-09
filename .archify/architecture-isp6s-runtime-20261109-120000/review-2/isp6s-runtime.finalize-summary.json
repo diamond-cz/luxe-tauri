@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\candidate.json",
+    "sha256": "cb7a501b1b3ad863d62746586eeaec23d34ea4cf6b0bfd46bc14c8acbb51ec95",
+    "bytes": 7545
+  },
+  "artifact": {
+    "path": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html",
+    "sha256": "a1a06994fcb4c77aa410534a3614cab797932a06714df69910909b00471e6c0a",
+    "bytes": 860542
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "fail"
+  },
+  "failedStage": "browser-check",
+  "diagnostics": [
+    {
+      "code": "viewer/browser-check-runtime",
+      "severity": "error",
+      "message": "browser-check could not complete its Chrome inspection.",
+      "subject": {
+        "artifact": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html"
+      },
+      "evidence": {
+        "reason": "Chrome DevTools read pipe failed: stream ended\nChrome process: still running.\nChrome stderr:\n[1109/092501.368:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.368:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 1 time(s)\r\n[1109/092501.538:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.538:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 2 time(s)\r\n[1109/092501.554:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.554:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 3 time(s)\r\n[1109/092501.575:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.579:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 4 time(s)\r\n[1109/092501.600:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.600:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 5 time(s)\r\n[1109/092501.622:ERROR:gpu_process_host.cc(979)] GPU process exited unexpectedly: exit_code=-1073741790\r\n[1109/092501.622:WARNING:gpu_process_host.cc(1292)] The GPU process has crashed 6 time(s)\r\n[1109/092501.622:FATAL:gpu_data_manager_impl_private.cc(417)] GPU process isn't usable. Goodbye.\nChrome transport: Node v24.14.1, libuv 1.51.0, win32; pid=22232, exitCode=null, signalCode=null.\nChrome read pipe: readable=false, ended=true, destroyed=false, receivedBytes=588, messages=5, bufferedBytes=0.\nChrome write pipe: writable=true, ended=false, destroyed=false, completedWrites=4, writtenBytes=326, bufferedBytes=0."
+      },
+      "supportedFixes": [
+        "resolve the reported Chrome inspection error, then rerun browser-check"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-2\\isp6s-runtime.finalize.json",
+    "summaryReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-2\\isp6s-runtime.finalize-summary.json",
+    "browserCheckReceipt": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\review-2\\isp6s-runtime.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3348,
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  }
+}

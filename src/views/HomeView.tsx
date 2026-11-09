@@ -36,8 +36,8 @@ import { runUpdateCheck } from "@/services/runUpdateCheck";
 interface PlatformCard {
   to: string;
   icon: LuxeIconName;
-  title: string;
-  subtitle: string;
+  titleKey: string;
+  subtitleKey: string;
   accent: string;
 }
 
@@ -45,22 +45,22 @@ const PLATFORM_CARDS: PlatformCard[] = [
   {
     to: "/mtk",
     icon: "ic_fluent_window_location_target_filled",
-    title: "MTK 平台",
-    subtitle: "AE.cpp / ToneMap 解析与可视化",
+    titleKey: "home_mtk_title",
+    subtitleKey: "home_mtk_description",
     accent: "#9558C1",
   },
   {
     to: "/qualcomm",
     icon: "ic_fluent_window_shield_filled",
-    title: "Qualcomm 平台",
-    subtitle: "xml 参数文件导入(待扩展)",
+    titleKey: "home_qualcomm_title",
+    subtitleKey: "home_qualcomm_description",
     accent: "#2D7BF4",
   },
   {
     to: "/unisoc",
     icon: "ic_fluent_window_brush_filled",
-    title: "Unisoc 平台",
-    subtitle: "xml 参数文件导入(待扩展)",
+    titleKey: "home_unisoc_title",
+    subtitleKey: "home_unisoc_description",
     accent: "#E94B7A",
   },
 ];
@@ -86,16 +86,16 @@ export function HomeView() {
   );
   const updateBusy = updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing";
   const primaryUpdateLabel = updateStatus === "checking"
-    ? "检查中"
+    ? t("home_update_checking")
     : updateStatus === "downloading"
-      ? "下载中"
+      ? t("update_downloading")
       : updateStatus === "installing"
-        ? "安装中"
+        ? t("update_installing")
       : updateStatus === "manual"
         ? t("update_open_release")
         : updateStatus === "available"
-          ? "下载并安装"
-      : "检查更新";
+          ? t("home_download_install")
+      : t("home_check_updates");
 
   const orderedCards = platformOrder
     .map((id) => PLATFORM_CARDS.find((card) => card.to === id))
@@ -151,7 +151,7 @@ export function HomeView() {
           <h2 className="flex items-center gap-3 text-base font-semibold">
             <span aria-hidden className="inline-block h-4 w-1 rounded-sm"
                   style={{ background: "var(--colorBrandBackground)" }} />
-            <span style={{ color: "var(--colorNeutralForeground1)" }}>平台</span>
+            <span style={{ color: "var(--colorNeutralForeground1)" }}>{t("home_platform_section")}</span>
           </h2>
           <DndContext
             sensors={sensors}
@@ -179,11 +179,11 @@ export function HomeView() {
                       </div>
                       <div className="text-base font-semibold"
                            style={{ color: "var(--colorNeutralForeground1)" }}>
-                        {card.title}
+                        {t(card.titleKey)}
                       </div>
                       <div className="text-xs"
                            style={{ color: "var(--colorNeutralForeground3)" }}>
-                        {card.subtitle}
+                        {t(card.subtitleKey)}
                       </div>
                     </button>
                   </SortableCard>
@@ -197,7 +197,7 @@ export function HomeView() {
           <h2 className="flex items-center gap-3 text-base font-semibold">
             <span aria-hidden className="inline-block h-4 w-1 rounded-sm"
                   style={{ background: "var(--colorBrandBackground)" }} />
-            <span style={{ color: "var(--colorNeutralForeground1)" }}>关于</span>
+            <span style={{ color: "var(--colorNeutralForeground1)" }}>{t("home_about_section")}</span>
           </h2>
 
           <div
@@ -214,7 +214,7 @@ export function HomeView() {
                   LUXE
                 </div>
                 <div className="mt-1 flex items-center gap-1 text-sm" style={{ color: "var(--colorNeutralForeground3)" }}>
-                  <span>版本</span>
+                  <span>{t("home_version_label")}</span>
                   <Tooltip content={t("home_current_version", { version: currentVersion })} relationship="description" positioning="above">
                     <span
                       tabIndex={0}
@@ -251,7 +251,7 @@ export function HomeView() {
               }}
             >
               {updateStatus === "ok" ? <span aria-hidden>✓</span> : updateStatus === "available" || updateStatus === "manual" ? <span aria-hidden>✦</span> : null}
-              {updateStatus === "checking" ? "正在检查更新…" : updateStatus === "downloading" ? `正在下载更新${downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "…"}` : updateStatus === "installing" ? "正在安装更新，完成后应用将重新启动" : updateStatus === "available" ? `发现新版本 v${latestVersion}` : updateStatus === "manual" ? t("update_manual_release", { version: latestVersion }) : updateStatus === "ok" ? `当前已是最新版本 v${currentVersion}` : updateStatus === "error" ? "检查更新失败，请重试或查看 Release" : "检查 GitHub Releases 获取最新版本"}
+              {updateStatus === "checking" ? t("home_update_checking") : updateStatus === "downloading" ? t("home_update_downloading", { progress: downloadTotal ? ` · ${Math.min(100, Math.floor(downloadBytes / downloadTotal * 100))}%` : "" }) : updateStatus === "installing" ? t("home_update_installing") : updateStatus === "available" ? t("home_update_available", { version: latestVersion }) : updateStatus === "manual" ? t("update_manual_release", { version: latestVersion }) : updateStatus === "ok" ? t("home_update_current", { version: currentVersion }) : updateStatus === "error" ? t("home_update_error") : t("home_update_idle")}
             </div>
 
             <div
@@ -281,7 +281,7 @@ export function HomeView() {
                 onClick={() => openReleaseUrl(GITHUB_RELEASES_URL)}
                 style={{ background: "var(--colorNeutralBackground1)" }}
               >
-                更新日志
+                {t("home_update_log")}
               </Button>
               <Button
                 className="transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none"
@@ -290,7 +290,7 @@ export function HomeView() {
                 onClick={() => setUpdateLogOpen(true)}
                 style={{ background: "var(--colorNeutralBackground1)" }}
               >
-                近期更新
+                {t("home_recent_updates")}
               </Button>
             </div>
 
@@ -299,7 +299,7 @@ export function HomeView() {
                 className="absolute inset-x-0 bottom-0 block h-1 w-full"
                 value={downloadTotal ? Math.min(downloadBytes, downloadTotal) : undefined}
                 max={downloadTotal ?? undefined}
-                aria-label="更新下载进度"
+                aria-label={t("update_download_progress")}
                 style={{ accentColor: "var(--colorBrandBackground)" }}
               />
             )}

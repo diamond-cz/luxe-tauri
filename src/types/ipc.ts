@@ -74,6 +74,7 @@ export interface Isp6sAeVisual {
 }
 
 export interface StateRoot {
+  locale_schema_version: number;
   last_route?: string;
   main_window:     MainWindow;
   settings:        Settings;

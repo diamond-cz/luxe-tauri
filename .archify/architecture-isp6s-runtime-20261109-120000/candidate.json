@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LUXE ISP6S 运行架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-isp6s-runtime-20261109-120000/isp6s-runtime.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/diamond-cz/luxe-tauri.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "85e77cc02aab077449495b457def5ffeae76c2c0"
+    }
+  },
+  "components": [
+    {
+      "id": "engineer",
+      "type": "external",
+      "label": "Camera Tuning 工程师",
+      "sublabel": "选择参数文件与图片目录",
+      "pos": [40, 250],
+      "size": [156, 66]
+    },
+    {
+      "id": "isp6s-ui",
+      "type": "frontend",
+      "label": "ISP6S 工作区",
+      "sublabel": "AE Basic / ToneMap · React",
+      "pos": [270, 250],
+      "size": [176, 66],
+      "sources": [
+        { "path": "src/views/mtk/MtkView.tsx", "line": 14, "end_line": 14 },
+        { "path": "src/views/mtk/MtkView.tsx", "line": 280, "end_line": 335 },
+        { "path": "src/views/mtk/isp6s/Isp6sAeVisual.tsx", "line": 69, "end_line": 73 }
+      ]
+    },
+    {
+      "id": "workspace-state",
+      "type": "database",
+      "label": "前端工作区状态",
+      "sublabel": "Zustand + workspaceSession",
+      "pos": [270, 90],
+      "size": [176, 66],
+      "sources": [
+        { "path": "src/views/mtk/MtkView.tsx", "line": 24, "end_line": 45 },
+        { "path": "src/views/mtk/isp6s/Isp6sAeVisual.tsx", "line": 72, "end_line": 88 },
+        { "path": "src/stores/mtkStore.ts" }
+      ]
+    },
+    {
+      "id": "ipc",
+      "type": "backend",
+      "label": "Tauri IPC 调用层",
+      "sublabel": "invoke commands · typed wrappers",
+      "pos": [610, 250],
+      "size": [176, 66],
+      "sources": [
+        { "path": "src/ipc/cppParser.ts", "line": 1, "end_line": 7 },
+        { "path": "src/ipc/cppParser.ts", "line": 85, "end_line": 85 },
+        { "path": "src/ipc/imageScan.ts", "line": 11, "end_line": 12 }
+      ]
+    },
+    {
+      "id": "tauri-runtime",
+      "type": "backend",
+      "label": "Tauri Rust 命令层",
+      "sublabel": "registered command handlers",
+      "pos": [830, 250],
+      "size": [190, 66],
+      "sources": [
+        { "path": "src-tauri/src/lib.rs", "line": 99, "end_line": 103 },
+        { "path": "src-tauri/src/lib.rs", "line": 127, "end_line": 149 }
+      ]
+    },
+    {
+      "id": "cpp-parser",
+      "type": "backend",
+      "label": "C++ 参数解析器",
+      "sublabel": "parse_cpp_file · spawn_blocking",
+      "pos": [1100, 110],
+      "size": [190, 66],
+      "sources": [
+        { "path": "src-tauri/src/commands/cpp_cmds.rs", "line": 20, "end_line": 30 },
+        { "path": "src-tauri/src/commands/cpp_cmds.rs", "line": 159, "end_line": 163 }
+      ]
+    },
+    {
+      "id": "image-commands",
+      "type": "backend",
+      "label": "图片与 TOML 命令",
+      "sublabel": "scan · metadata · preview",
+      "pos": [610, 430],
+      "size": [190, 66],
+      "sources": [
+        { "path": "src-tauri/src/commands/image_cmds.rs", "line": 37, "end_line": 49 },
+        { "path": "src-tauri/src/commands/image_cmds.rs", "line": 83, "end_line": 115 }
+      ]
+    },
+    {
+      "id": "state-commands",
+      "type": "backend",
+      "label": "应用状态命令",
+      "sublabel": "load / patch / flush state",
+      "pos": [300, 430],
+      "size": [190, 66],
+      "sources": [
+        { "path": "src-tauri/src/commands/state_cmds.rs", "line": 9, "end_line": 25 }
+      ]
+    },
+    {
+      "id": "cpp-file",
+      "type": "external",
+      "label": "AE.cpp / Tone.cpp",
+      "sublabel": "工程师选择的参数源文件",
+      "pos": [1370, 110],
+      "size": [186, 66]
+    },
+    {
+      "id": "image-dir",
+      "type": "external",
+      "label": "调试图片目录",
+      "sublabel": "JPG / PNG + 同名 TOML",
+      "pos": [830, 430],
+      "size": [186, 66]
+    },
+    {
+      "id": "isp-config",
+      "type": "database",
+      "label": "ISP6S 映射资源",
+      "sublabel": "src-tauri/resources/Isp6s.toml",
+      "pos": [540, 430],
+      "size": [200, 66],
+      "sources": [
+        { "path": "src-tauri/src/config/isp6s_schema.rs", "line": 14, "end_line": 25 },
+        { "path": "src-tauri/src/config/isp6s_schema.rs", "line": 115, "end_line": 129 },
+        { "path": "src-tauri/resources/Isp6s.toml", "line": 56, "end_line": 75 }
+      ]
+    },
+    {
+      "id": "state-file",
+      "type": "database",
+      "label": "持久化用户状态",
+      "sublabel": "state.toml · Rust StateStore",
+      "pos": [540, 570],
+      "size": [200, 66],
+      "sources": [
+        { "path": "src-tauri/src/config/state_file.rs", "line": 1, "end_line": 7 },
+        { "path": "src-tauri/src/config/state_file.rs", "line": 172, "end_line": 202 }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "user-to-workspace", "from": "engineer", "to": "isp6s-ui", "label": "交互与选取文件", "variant": "emphasis" },
+    { "id": "workspace-state-read", "from": "workspace-state", "to": "isp6s-ui", "label": "恢复选择与布局", "fromSide": "bottom", "toSide": "top" },
+    { "id": "workspace-to-ipc", "from": "isp6s-ui", "to": "ipc", "label": "发起解析 / 图片 / 配置请求", "variant": "emphasis" },
+    { "id": "ipc-to-runtime", "from": "ipc", "to": "tauri-runtime", "label": "Tauri invoke", "variant": "emphasis" },
+    { "id": "runtime-to-cpp", "from": "tauri-runtime", "to": "cpp-parser", "label": "parse_cpp_file / schema" },
+    { "id": "runtime-to-image", "from": "tauri-runtime", "to": "image-commands", "label": "scan / load / preview" },
+    { "id": "runtime-to-state", "from": "tauri-runtime", "to": "state-commands", "label": "load / save / flush" },
+    { "id": "cpp-to-file", "from": "cpp-parser", "to": "cpp-file", "label": "读取参数文件", "variant": "dashed" },
+    { "id": "image-to-dir", "from": "image-commands", "to": "image-dir", "label": "扫描图片并读同名 TOML", "variant": "dashed" },
+    { "id": "schema-load", "from": "state-commands", "to": "isp-config", "label": "载入 ISP6S schema", "fromSide": "right", "toSide": "left" },
+    { "id": "state-write", "from": "state-commands", "to": "state-file", "label": "持久化状态", "variant": "dashed" },
+    { "id": "cpp-result", "from": "cpp-parser", "to": "isp6s-ui", "label": "结构化字段与注释", "variant": "dashed", "fromSide": "top", "toSide": "top" },
+    { "id": "image-result", "from": "image-commands", "to": "isp6s-ui", "label": "图片条目 / 预览 / TOML 值", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "schema-result", "from": "state-commands", "to": "isp6s-ui", "label": "表格 / 参数检查映射", "variant": "dashed", "fromSide": "left", "toSide": "bottom" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "ISP6S 主流程",
+      "items": [
+        "AE Basic 与 ToneMap 在 MtkView 中按 tab 分流到 Isp6sAeVisual。",
+        "AE.cpp / Tone.cpp 由 Rust C++ parser 解析，结果回到 React 工作区用于参数表与源码定位。",
+        "图片目录扫描和图片旁的 TOML 读取由 Rust image commands 执行。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "配置与状态",
+      "items": [
+        "Isp6s.toml 定义图像列、参数检查、预览字段与源码跳转映射，由 get_isp6s_schema 提供。",
+        "用户工作区选择保存在 Zustand；应用级状态通过 Rust StateStore 写入 state.toml。"
+      ]
+    }
+  ]
+}

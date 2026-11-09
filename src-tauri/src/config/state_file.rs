@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use super::state_schema::{ImageTableColumns, ImageTableModeColumns, StateRoot};
+use super::state_schema::{migrate_locale_index, ImageTableColumns, ImageTableModeColumns, StateRoot};
 use crate::error::{AppError, AppResult};
 
 const STATE_FILE_NAME: &str = "state.toml";
@@ -78,7 +78,7 @@ impl StateStore {
         let source = if path.exists() { path.as_path() } else {
             migrate_from.filter(|source| source.is_file()).unwrap_or(&path)
         };
-        let root = if source.exists() {
+        let mut root = if source.exists() {
             let text = std::fs::read_to_string(source)?;
             // Preserve malformed files so a failed load cannot erase user state.
             toml::from_str::<StateRoot>(&text)?
@@ -86,6 +86,7 @@ impl StateStore {
             tracing::info!(?path, "state.toml missing; bootstrapping defaults");
             StateRoot::default()
         };
+        migrate_locale_index(&mut root);
 
         let store = Self {
             root:      Arc::new(RwLock::new(root)),

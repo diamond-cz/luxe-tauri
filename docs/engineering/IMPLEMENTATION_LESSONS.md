@@ -2290,3 +2290,48 @@
 
 - 参数映射表标题列不换行，改为 `2fr:1fr:1fr` 的标题/数值列比例；标题列在极窄卡片中单行省略，两个数值列继续均分剩余宽度。标题及表格字号分别收至 9px / 10px，减少标题对数值空间的占用。
 - `npm run typecheck`、`npm run build`（2214 个模块）和 `git diff --check` 均通过；尚未在 Tauri 窗口检查极窄宽度下实际省略及数值可读性。
+
+### 2026-11-06：语言资源收敛为五种并迁移旧索引
+
+**亮点**
+
+- 前端 `src/locales/index.ts`、Rust `LANGUAGE_LOCALES` 和设置选择器统一为 `zh_CN`、`zh_TW`、`en_US`、`ja_JP`、`tr_TR`；Rust 资源加载器只接受白名单文件。
+- `StateStore::load` 在读取 TOML 后执行 `migrate_locale_index`：旧版土耳其语索引 11 映射到新索引 4，其他已删除语言回退简体中文，并写入 `locale_schema_version = 1`。
+
+**痛点**
+
+- 仅缩短语言数组会让旧索引 11 静默指向错误语言；资源目录中的旧 JSON 即使不显示在下拉框中仍会被打包。
+
+**闭坑**
+
+- 修改语言列表必须同时检查 `src/locales/index.ts`、`src-tauri/src/config/translations.rs`、`src-tauri/resources/translations/`、`src/types/ipc.ts` 和状态迁移测试。
+- 语言资源集合必须与白名单完全相等；当前目录仅保留五个 JSON，非法及历史索引均回退到 0。
+
+**验证**
+
+- `npm run typecheck` 通过。
+- `npm run build` 通过（Vite 6.4.3，2214 个模块）。
+- 独立 `CARGO_TARGET_DIR` 下的 `cargo test --locked --manifest-path src-tauri/Cargo.toml` 通过（19 个单元测试及全部集成测试通过，1 个性能测试 ignored）。
+- `git diff --check` 通过；尚未进行 Tauri 窗口内语言切换和重启后的人工验收。
+
+### 2026-11-09：首页平台与关于卡片接入多语言
+
+**亮点**
+
+- `src/views/HomeView.tsx` 的平台卡片以稳定翻译键描述标题和说明；分区标题、关于卡片的版本、更新操作、更新状态和进度辅助文本均由 `t()` 渲染。
+- `src-tauri/resources/translations/{zh_CN,zh_TW,en_US,ja_JP,tr_TR}.json` 同步提供首页所需键，使现有 Rust 启动加载的翻译 bundle 可直接覆盖首页文案。
+
+**痛点**
+
+- 首页已经调用 `useTranslation()`，但卡片和更新信息仍有中文字面量，造成设置语言切换后首页中英文混杂。
+
+**闭坑**
+
+- 修改首页文案需检查静态卡片配置、更新按钮各状态、更新详情及 aria-label，并保证五个当前语言资源含相同首页键。
+- 下载进度通过 `home_update_downloading` 的 `{{progress}}` 插值传入；无总字节数时传空字符串，避免拼接语言相关标点。
+
+**验证**
+
+- `npm run typecheck` 通过。
+- Python 标准库解析五个翻译 JSON 通过；`git diff --check` 通过。
+- 尚未在 Tauri 窗口手动切换五种语言验收实际排版和措辞。

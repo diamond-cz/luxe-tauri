@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "fc6531ce-e21f-4e69-9b15-74bf7c3a42a8",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\candidate.json",
+  "output": "D:\\Image_process\\luxe-tauri\\.archify\\architecture-isp6s-runtime-20261109-120000\\isp6s-runtime.html",
+  "specification": {
+    "sha256": "cb7a501b1b3ad863d62746586eeaec23d34ea4cf6b0bfd46bc14c8acbb51ec95",
+    "bytes": 7545
+  },
+  "artifact": {
+    "sha256": "a1a06994fcb4c77aa410534a3614cab797932a06714df69910909b00471e6c0a",
+    "bytes": 860542
+  }
+}

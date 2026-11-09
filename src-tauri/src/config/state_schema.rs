@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StateRoot {
+    #[serde(default)]
+    pub locale_schema_version: u8,
     #[serde(default = "default_last_route")]
     pub last_route: String,
     #[serde(default)]
@@ -114,6 +116,54 @@ impl Default for Settings {
             auto_update:    false,
             update_notify:  true,
         }
+    }
+}
+
+pub const LOCALE_SCHEMA_VERSION: u8 = 1;
+
+pub fn migrate_locale_index(state: &mut StateRoot) {
+    state.settings.language = if state.locale_schema_version < LOCALE_SCHEMA_VERSION {
+        match state.settings.language {
+            0..=3 => state.settings.language,
+            11 => 4,
+            _ => 0,
+        }
+    } else if state.settings.language < 5 {
+        state.settings.language
+    } else {
+        0
+    };
+    state.locale_schema_version = LOCALE_SCHEMA_VERSION;
+}
+
+#[cfg(test)]
+mod locale_migration_tests {
+    use super::{migrate_locale_index, StateRoot, LOCALE_SCHEMA_VERSION};
+
+    #[test]
+    fn old_turkish_index_moves_to_new_position() {
+        let mut state = StateRoot::default();
+        state.settings.language = 11;
+        migrate_locale_index(&mut state);
+        assert_eq!(state.settings.language, 4);
+        assert_eq!(state.locale_schema_version, LOCALE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn removed_language_indexes_fall_back_to_simplified_chinese() {
+        let mut state = StateRoot::default();
+        state.settings.language = 15;
+        migrate_locale_index(&mut state);
+        assert_eq!(state.settings.language, 0);
+    }
+
+    #[test]
+    fn invalid_index_in_current_schema_also_falls_back() {
+        let mut state = StateRoot::default();
+        state.locale_schema_version = LOCALE_SCHEMA_VERSION;
+        state.settings.language = 9;
+        migrate_locale_index(&mut state);
+        assert_eq!(state.settings.language, 0);
     }
 }
 
