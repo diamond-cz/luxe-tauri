@@ -4,6 +4,7 @@ pub mod cpp_parser;
 pub mod error;
 pub mod events;
 pub mod image_scan;
+pub mod image_sync;
 mod memory_trim;
 pub mod poetry;
 pub mod shortcuts;
@@ -57,6 +58,10 @@ pub fn run() {
             let store = StateStore::load(handle).expect("state.toml load failed");
             let initial_shortcuts = store.snapshot().shortcuts.clone();
             app.manage(AppState::new(store));
+
+            let image_sync = crate::image_sync::ImageSyncHub::default();
+            app.manage(image_sync.clone());
+            crate::image_sync::start(app.handle().clone(), image_sync);
 
             // i18n catalog (all five supported locales loaded eagerly — total <200 KB).
             let catalog = LocaleCatalog::load(handle).unwrap_or_default();
@@ -147,6 +152,7 @@ pub fn run() {
             commands::image_cmds::load_image_thumbnail_batch,
             commands::image_cmds::load_image_preview,
             commands::image_cmds::load_image_hover_preview,
+            commands::image_sync_cmds::publish_image_selection,
             commands::text_cmds::read_text_file,
             commands::text_cmds::write_temp_text_file,
             commands::text_cmds::write_text_file,

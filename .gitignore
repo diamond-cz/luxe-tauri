@@ -4,6 +4,8 @@ dist/
 src-tauri/target/
 /target-codex/
 src-tauri/target-codex/
+plugins/luxe-image-sync/native/target/
+/plugins/luxe-image-sync/bin/
 src-tauri/gen/
 .pnpm-store/
 *.log

@@ -3,6 +3,7 @@ pub mod cpp_cmds;
 pub mod fs_cmds;
 pub mod i18n_cmds;
 pub mod image_cmds;
+pub mod image_sync_cmds;
 pub mod poetry_cmds;
 pub mod shortcut_cmds;
 pub mod state_cmds;

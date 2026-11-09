@@ -51,6 +51,7 @@ interface MtkState {
   setImport:   (isp: IspId, tabIdx: number | "CA-LTM", state: Partial<ImportState>) => void;
   setImageDir: (isp: IspId, tabIdx: number, state: Partial<ImageDirState>) => void;
   setImageSelection: (workspaceKey: string, path: string | null) => void;
+  setExternalImageSelection: (imageDirKey: string, workspaceKey: string, index: number, path: string) => void;
 }
 
 export const useMtkStore = create<MtkState>()(
@@ -110,6 +111,21 @@ export const useMtkStore = create<MtkState>()(
     }),
     setImageSelection: (workspaceKey, path) => set((s) => {
       s.imageSelection[workspaceKey] = path;
+    }),
+    setExternalImageSelection: (imageDirKey, workspaceKey, index, path) => set((s) => {
+      const image = s.imageDir[imageDirKey];
+      if (!image || index < 0 || index >= image.entries.length || image.entries[index].jpg_path !== path) return;
+      image.current = index;
+      image.tomlData = {};
+      image.status = "loading";
+      image.message = null;
+      s.imageSelection[workspaceKey] = path;
+      if (image.dir) {
+        s.mtk.image_workspaces ??= {};
+        const saved = s.mtk.image_workspaces[imageDirKey];
+        if (saved?.dir === image.dir) saved.selected_image = path;
+        else s.mtk.image_workspaces[imageDirKey] = { dir: image.dir, selected_image: path };
+      }
     }),
   })),
 );

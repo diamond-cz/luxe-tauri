@@ -34,6 +34,7 @@ import {
   EVT_TRAY_ACTION,
 } from "@/ipc/client";
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import { startImageSyncListener } from "@/services/imageSyncService";
 
 type DebouncedVoid = (() => void) & { cancel: () => void };
 
@@ -84,6 +85,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           void saveStateSection("mtk", next.mtk).catch((error) => console.warn("save mtk", error));
         }
       }));
+      const stopImageSync = await startImageSyncListener();
+      if (disposed) stopImageSync();
+      else unlisteners.push(stopImageSync);
       useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
       const route = ["/home", "/mtk", "/qualcomm", "/unisoc", "/settings"].includes(root.last_route ?? "")
         ? root.last_route! : "/home";

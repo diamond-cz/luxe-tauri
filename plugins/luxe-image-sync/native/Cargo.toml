@@ -1,0 +1,14 @@
+[package]
+name = "luxe-image-sync"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+[dependencies]
+tauri = { version = "=2.12.4", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "io-util", "time", "rt", "macros", "net"] }
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }

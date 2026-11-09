@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LUXE 图片联动</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px "Segoe UI", sans-serif; }
+      body { margin: 0; padding: 18px; background: Canvas; color: CanvasText; }
+      .path { min-height: 42px; margin: 12px 0; padding: 10px; border: 1px solid #8886; overflow-wrap: anywhere; }
+      .row { display: flex; gap: 8px; }
+      button { min-width: 100px; padding: 8px 12px; }
+      .muted { opacity: .7; }
+    </style>
+  </head>
+  <body>
+    <strong>HiViewer 选图同步到 LUXE；插件窗口切图控制 LUXE</strong>
+    <div id="status" class="muted">等待 HiViewer 快照或 LUXE 连接...</div>
+    <div id="path" class="path">未选择图片</div>
+    <div class="row">
+      <button id="previous" type="button">上一张 (A)</button>
+      <button id="next" type="button">下一张 (D)</button>
+    </div>
+    <script>
+      const state = { files: [], currentPath: null, source: 'hiviewer' };
+      const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
+      const setStatus = (text) => { document.querySelector('#status').textContent = text; };
+      const render = () => {
+        document.querySelector('#path').textContent = state.currentPath || '未选择图片';
+        const index = state.currentPath ? state.files.indexOf(state.currentPath) : -1;
+        if (state.source === 'luxe') {
+          setStatus('当前路径来自 LUXE；使用 A / D 或按钮可控制 LUXE');
+        } else {
+          setStatus(index >= 0 ? `HiViewer 当前选择 ${index + 1} / ${state.files.length}；已同步给 LUXE` : '等待 HiViewer 当前图片同步到 LUXE');
+        }
+      };
+      const move = (delta) => {
+        if (!state.files.length) return;
+        const currentIndex = state.files.indexOf(state.currentPath);
+        const index = currentIndex >= 0 ? currentIndex : (delta > 0 ? -1 : 0);
+        const next = state.files[(index + delta + state.files.length) % state.files.length];
+        void invoke('select_image', { imagePath: next }).then(() => {
+          state.currentPath = next;
+          state.source = 'luxe';
+          render();
+        }).catch((error) => setStatus(`回传失败: ${error}`));
+      };
+      document.querySelector('#previous').onclick = () => move(-1);
+      document.querySelector('#next').onclick = () => move(1);
+      window.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 'a') move(-1);
+        if (event.key.toLowerCase() === 'd') move(1);
+      });
+      void window.__TAURI__.event.listen('viewer-updated', ({ payload }) => {
+        state.files = payload.files || [];
+        state.currentPath = payload.currentPath || null;
+        state.source = 'hiviewer';
+        render();
+      });
+      void window.__TAURI__.event.listen('luxe-selection', ({ payload }) => {
+        state.currentPath = payload.imagePath || null;
+        state.source = 'luxe';
+        render();
+      });
+    </script>
+  </body>
+</html>

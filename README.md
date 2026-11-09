@@ -12,31 +12,32 @@ LUXE 是面向 Camera Tuning 工程师的 AE（自动曝光）算法可视化工
 
 ## 开发
 
-当前自动构建目标为 **Windows x64**。环境参照 CI：Node.js 22、Rust 1.95.0、Visual Studio 2022 的 C++ 桌面开发工具及 Windows SDK；包管理器使用 npm。运行应用需要 WebView2 Runtime；Tauri 首次打包会下载 WiX/NSIS 工具。
+当前自动构建目标为 **Windows x64**。环境参照 CI：Node.js 22、Rust 1.95.0、Visual Studio 2022 的 C++ 桌面开发工具及 Windows SDK；包管理器使用 npm。运行应用需要 WebView2 Runtime；Tauri 首次打包会下载 WiX/NSIS 工具。本机性能有限时，本地仅运行类型检查和脚本测试；Rust/Tauri 编译、桌面开发运行及安装包生成交给 GitHub Actions。
 
 ```powershell
 git clone https://github.com/diamond-cz/luxe-tauri.git
 cd luxe-tauri
 npm ci
-npm run tauri:dev
+npm run typecheck
 ```
 
 使用 npm 和已提交的锁文件；Tauri CLI 已包含在开发依赖中。
+
+HiViewer 图片联动插件的功能边界、GitHub Actions 构建产物和手动安装验收步骤见 [`plugins/luxe-image-sync/README.md`](plugins/luxe-image-sync/README.md)。
 
 
 | 命令                   | 用途                              |
 | ---------------------- | --------------------------------- |
 | `npm run dev`          | 仅启动 Vite，完整桌面功能需 Tauri |
-| `npm run tauri:dev`    | 启动桌面开发模式                  |
 | `npm run typecheck`    | TypeScript 类型检查               |
-| `npm run build`        | 类型检查并生成前端`dist/`         |
-| `npm run rust:test`    | Rust 测试                         |
+| `npm run build`        | 类型检查并生成前端`dist/`，由 CI 执行 |
+| `npm run rust:test`    | Rust 测试，由 GitHub Actions 执行 |
 | `npm run release:test` | 版本同步与发布清单脚本测试        |
-| `npm run tauri:build`  | 本地构建 NSIS + MSI               |
-| `npm run tauri:msi`    | 仅构建 MSI                        |
-| `npm run tauri:debug`  | 构建调试安装包                    |
+| `npm run tauri:build`  | Tauri 安装包构建脚本（由 CI 执行） |
+| `npm run tauri:msi`    | MSI 构建脚本（由 CI 执行）         |
+| `npm run tauri:debug`  | 调试包构建脚本（由 CI 执行）        |
 
-Rust 测试需要先运行 `npm run build` 生成 `dist/`。若开发进程锁定可执行文件，先停止 `tauri:dev`。解析器外部 AE.cpp 样例通过 `LUXE_AE_CPP_FIXTURE` 指定；缺少外部样例时会跳过对应断言。
+Rust 测试在 GitHub Actions 中先运行前端构建生成 `dist/`，再执行 Cargo 测试。解析器外部 AE.cpp 样例通过 `LUXE_AE_CPP_FIXTURE` 指定；缺少外部样例时会跳过对应断言。
 
 ### 手动清理临时编译文件
 
@@ -79,9 +80,9 @@ Get-ChildItem $env:TEMP -Directory -Filter "luxe-rust-test-*" -ErrorAction Silen
 
 ### 本地打包与签名
 
-`npm run tauri:build` 默认读取根目录的 `.tauri-updater.key` 和 `.tauri-updater.password`；同名环境变量 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 优先。GitHub Secrets 仅用于云端构建。
+GitHub Actions 使用 Secrets 构建 Windows 安装包；本地不运行 `npm run tauri:build`、`npm run tauri:msi` 或其他 Tauri/Rust 编译命令。
 
-产物位于 `src-tauri/target/release/bundle/` 的 `nsis/` 和 `msi/`；调试包位于 `src-tauri/target/debug/bundle/`。仅打 NSIS 可运行 `npm run tauri:build -- --bundles nsis`。
+CI 产物包含 Windows 安装包；需要桌面交互验收时，从对应 GitHub Actions 运行下载产物。
 
 在仓库 **Settings → Secrets and variables → Actions** 配置：
 
@@ -106,8 +107,7 @@ npm run version:check
 
 # 2. 验证；CI 也会执行这些检查
 npm run release:test
-npm run build
-npm run rust:test
+# npm run build、Rust 测试和安装包构建由 GitHub Actions 执行
 
 # 3. 提交已验证的代码和版本文件，再推送目标 tag
 git add src-tauri/tauri.conf.json package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock

@@ -2436,3 +2436,80 @@
 
 - `npm run typecheck`、`git diff --check` 通过；全局搜索确认宿主文档和启动注释不再宣称支持 16 种语言，剩余 16 仅为插件 manifest 的独立容量上限。
 - 未进行 Tauri 窗口内语言切换的人工验收；本次仅同步文档和注释，不改变运行时语言逻辑。
+
+### 2026-11-09：跨进程图片联动规则边界
+
+**亮点**
+
+- 在 `.codex/rules/06-通信与数据获取规范.md` 区分 HiViewer 插件宿主快照输入与 LUXE 独立回传适配层；双向回传不依赖 HiViewer v1 尚未开放的 `host/*` callback。
+- 规则将 Windows Named Pipe 设为原生进程通信的优先评估项，并要求与 loopback TCP/WebSocket、文件协议比较权限、断线、部署和测试成本。
+- `.codex/rules/03-目录与架构规范.md`、`.codex/rules/08-数据库与状态管理规范.md` 明确绝对路径、`imageDir` workspace 目录匹配和既有 Zustand 索引更新边界。
+
+**痛点**
+
+- 当前 LUXE 没有跨进程消息服务或图片选择 API；HiViewer 插件指南中的 `ViewerSnapshot` 方向为宿主到插件，`selection.get()` 是固定快照，不能单独满足反向同步。
+- 本次只新增架构规则，尚未实现协议、Named Pipe、插件包或安装包；传输方案和 HiViewer 双向行为尚未实测。
+
+**闭坑**
+
+- 实施前先定义版本、sourceInstance、sequence、绝对路径、ACK、未匹配结果及 remote-origin 标记；验证旧序号、重复事件和回环不会改变较新的选择。
+- HiViewer 插件收到 `viewer/update` 后若要反向同步，应显式连接 LUXE 的独立适配层；不得调用未实现的宿主 callback。
+- LUXE 仅按路径父目录定位唯一已扫描 workspace，并以 `ImageEntry.jpg_path` 找索引；零个或多个 workspace 命中均不得猜测或自动扫描。
+
+**验证**
+
+- `git diff --check`：通过。
+- 未运行 typecheck、Rust 测试、插件构建/打包或 Tauri 安装包；本次变更只涉及规则与经验文档。
+- 未在实际 HiViewer 与 LUXE 进程间验证双向切图。
+
+### 2026-11-09：本地低内存环境的 Rust 编译边界与联动消息限流
+
+**亮点**
+
+- `.codex/rules/01-人设与开发准则.md`、`02-技术栈与核心库.md`、`04-核心铁律与避坑.md`、`AGENTS.md` 统一规定：本地只做 `npm run typecheck`、Node 22 脚本测试和不触发编译的 Rust 格式/静态检查；前端打包、Rust 编译/测试及 Windows 安装包交给 `.github/workflows/ci.yml` 和发布工作流。
+- README、性能维护文档和本地状态文档同步改为 CI 产物验收，避免示例命令诱导本地执行 `cargo build/check/test` 或 `tauri:dev`。
+- `src/services/imageSyncService.ts` 按 `sourceInstance + sequence` 拒绝重复/过期图片选择并限制来源缓存为 32 个；`src-tauri/src/image_sync.rs` 将 Named Pipe 单帧读取限制为 16 KiB，并限制每连接的来源序号表。
+
+**痛点**
+
+- 本机 Rust/Tauri 编译会造成高内存占用和资源释放滞后；本轮未执行 Cargo 编译或测试，因此新增 Rust 代码的 Windows 编译兼容性仍需 CI 结果确认。
+- 全仓 `cargo fmt --check` 仍包含既有格式差异；只对本轮新增 `image_sync.rs` 与 `image_sync_cmds.rs` 执行格式化，避免无关格式噪声。
+
+**闭坑**
+
+- 后续 Rust 改动先运行 `rustfmt --check --edition 2021` 指向受影响文件，再提交让 GitHub Actions 执行 `cargo test --locked --manifest-path src-tauri/Cargo.toml`。
+- 跨进程消息必须先做有界读取，再解析 JSON；前端必须在应用状态前按来源序号去重，且远程应用动作不能再次发布为本地选择。
+- 插件/应用双向联动仍需从 CI 产物安装后，在真实 HiViewer 与 LUXE 进程间验收；类型检查和脚本测试不能替代该验收。
+
+**验证**
+
+- `npm run typecheck`：通过。
+- `npm run release:test`：27 项通过。
+- `rustfmt --check --edition 2021 src-tauri/src/image_sync.rs src-tauri/src/commands/image_sync_cmds.rs`：通过。
+- `git diff --check`：通过。
+- 未运行 `cargo build`、`cargo check`、`cargo test`、`npm run rust:test`、`npm run tauri:build` 或 `npm run tauri:dev`；未完成 CI 和真实双进程桌面验收。
+
+### 2026-11-09：HiViewer 图片联动插件 CI 打包
+
+**亮点**
+
+- `plugins/luxe-image-sync/` 将能力限定为 HiViewer 快照驱动 LUXE、插件窗口按 A/D 控制 LUXE；manifest 声明 Windows x64 `bin/luxe-image-sync.exe`，`.github/workflows/plugin.yml` 在 Windows runner 编译并上传 `.hvp` 与 SHA-256。
+- `scripts/plugin-package.mjs` 使用 Node 22 内置模块检查 manifest、资源路径、sidecar 和包预算，并生成根目录含 `checksums.json` 的 ZIP 格式 `.hvp`。
+- 插件只允许从当前 HiViewer 快照列表选择路径，并以有界队列和逐帧 16 KiB Named Pipe 读取限制跨进程消息。
+
+**痛点**
+
+- 现有仓库文档曾引用缺失的 `plugins/tools/cli.mjs`，无法实际执行插件校验或打包；补充仓库内 Node 工具避免工作流依赖缺失 CLI。
+- 本机没有 `gh` CLI，也没有 GitHub Actions API 授权工具；当前只能准备工作流，无法由终端触发或查看运行结果。
+- 插件宿主与 LUXE 的 Named Pipe 行为尚未在桌面进程中实测，插件包构建也依赖新增 Actions 首次编译验证。
+
+**闭坑**
+
+- 插件发布前核对 `.hvp` 包根、manifest 平台和 sidecar 路径一致；从 Actions artifact 解压核对 `.hvp`、校验文件清单摘要，再通过 HiViewer“设置 → 自定义插件 → 从包安装”手动安装。
+- 确认 HiViewer 当前版本接受生成的 `checksums.json` schema；如宿主校验拒绝安装，使用 HiViewer 仓库实际 pack CLI/格式修正打包器后重跑 CI。
+- LUXE 必须先扫描唯一匹配目录；桌面验收覆盖 HiViewer 切图驱动 LUXE、插件 A/D 驱动 LUXE、LUXE 本地切图更新插件及 LUXE 离线重连。
+
+**验证**
+
+- 本轮待完成：Node 插件包检查/ZIP 可读性、npm typecheck、发布脚本测试、Rust 受影响文件 rustfmt、git diff --check。
+- 未在本机运行任何 Cargo/Tauri 编译命令；Windows Rust 编译、插件包检查与 `.hvp` 生成交由 `.github/workflows/plugin.yml`。

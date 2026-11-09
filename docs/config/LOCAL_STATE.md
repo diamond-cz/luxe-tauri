@@ -14,7 +14,7 @@
 | --- | --- |
 | `npm run typecheck` | 前端类型检查 |
 | `node --test scripts/workspace-persistence.test.mjs` | 选图、参数路径、保存队列和失败恢复 |
-| `cargo test --manifest-path src-tauri/Cargo.toml --test workspace_persistence` | 临时目录下的迁移优先级、回退、连续保存和重新加载 |
-| `cargo test --manifest-path src-tauri/Cargo.toml --test workspace_persistence migrate_current_development_state -- --ignored --exact` | 显式迁移当前本地状态并核对字段一致性；保留旧文件 |
+| GitHub Actions `cargo test --locked --manifest-path src-tauri/Cargo.toml` | 临时目录下的迁移优先级、回退、连续保存和重新加载 |
+| 手动迁移验收 | 仅在用户明确安排的桌面验收环境运行；核对当前本地状态字段一致性并保留旧文件 |
 
-界面验收：运行 `npm run tauri:dev`，选择 DP 工具、AE/ToneMap 参数文件和图片目录，切换到非首张图片，再正常退出并重新启动。核对路径、页面、选中图片及按需解析结果；也可通过设置打开实际状态目录。无桌面交互的自动测试仅验证状态与 IPC 边界，不代表已完成界面重启验收。
+界面验收：使用 GitHub Actions 生成的 Windows x64 产物，选择 DP 工具、AE/ToneMap 参数文件和图片目录，切换到非首张图片，再正常退出并重新启动。核对路径、页面、选中图片及按需解析结果；也可通过设置打开实际状态目录。无桌面交互的自动测试仅验证状态与 IPC 边界，不代表已完成界面重启验收。

@@ -1,0 +1,23 @@
+{
+  "manifestVersion": 1,
+  "apiVersion": 1,
+  "id": "luxe.image-sync",
+  "name": "LUXE 图片联动",
+  "version": "0.1.0",
+  "author": "LUXE",
+  "description": "将 HiViewer 当前图片与 LUXE 的图片索引双向联动。",
+  "entry": "main.js",
+  "permissions": ["native.execute", "selection.read"],
+  "commands": [
+    { "id": "open", "title": "打开 LUXE 图片联动", "handler": "native-view", "method": "view/open" },
+    { "id": "update", "title": "同步 LUXE 图片", "handler": "native-view", "method": "viewer/update" }
+  ],
+  "contributions": [
+    { "id": "open", "kind": "image-viewer", "title": "LUXE 图片联动", "command": "open" }
+  ],
+  "backend": {
+    "executable": "bin/luxe-image-sync.exe",
+    "target": "windows-x86_64",
+    "transport": "stdio-jsonl"
+  }
+}

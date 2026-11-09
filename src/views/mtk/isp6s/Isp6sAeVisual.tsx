@@ -22,6 +22,7 @@ import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceS
 import { isDebugParserExecutable } from "../debugParserPath";
 import { WorkspaceColumns, WorkspaceHideButton } from "./WorkspaceColumns";
 import { panelMotionStyle, usePanelCollapseTransition } from "./usePanelCollapseTransition";
+import { publishImageSelection } from "@/services/imageSyncService";
 
 const ImagePane = lazy(() => import("./ImagePane/ImagePane").then(({ ImagePane }) => ({ default: ImagePane })));
 
@@ -281,6 +282,9 @@ export function Isp6sAeVisual({
     session.imageScrollPath = selectedEntry.jpg_path;
     const imageDirKey = `${isp}|${imageTabIdx}`;
     setImageSelection(workspaceKey, selectedEntry.jpg_path);
+    void publishImageSelection(selectedEntry.jpg_path).catch((error) =>
+      console.debug("publish image sync selection failed", error),
+    );
     if (selectionSyncEnabled && pairedWorkspaceKey) {
       setImageSelection(pairedWorkspaceKey, selectedEntry.jpg_path);
       syncPairedScroll(selectedEntry.jpg_path, session.imageScroll);

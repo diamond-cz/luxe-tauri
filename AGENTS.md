@@ -51,8 +51,8 @@ React 组件使用 PascalCase，函数与变量使用 camelCase；Rust 模块使
 
 1. 运行 git status --short，阅读受影响入口、类型、IPC、测试和相关专题文档；保留已有用户改动。
 2. 确定模块和持久化边界，复用现有 API、Fluent 语义令牌、状态写入队列与缓存清理入口。
-3. 前端改动至少运行 npm run typecheck；Rust 行为改动运行 npm run rust:test；脚本行为使用 Node 22 的 node:test。配置、解析器和命令变更补充可观察行为测试。
-4. 窗口、主题、拖拽、多显示器及更新交互在 npm run tauri:dev 中核对；无法实测时在结果中说明。UI PR 附截图。
+3. 前端改动至少运行 npm run typecheck；本地 Rust 改动只对受影响文件运行 rustfmt --check --edition 2021 等不触发编译的静态检查，不要在本地运行 cargo build/check/test、npm run rust:test、npm run tauri:build 或 npm run tauri:dev。Rust 编译与测试交给 .github/workflows/ci.yml；脚本行为使用 Node 22 的 node:test。配置、解析器和命令变更补充可观察行为测试。
+4. 窗口、主题、拖拽、多显示器及更新交互不得通过本地 Tauri 编译验证；本地无现成运行产物时，在 GitHub Actions 产物/自动化验证或用户桌面验收后记录结果。UI PR 附截图。
 5. 完成后运行 git diff --check，检查未跟踪文件、密钥、生成产物和本地状态文件，并更新下述经验账本。
 
 ## 性能与安全红线

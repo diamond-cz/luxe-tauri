@@ -21,3 +21,4 @@ export const EVT_TRAY_ACTION:        "tray_action"        = "tray_action";
 export const EVT_SHORTCUT_TRIGGERED: "shortcut_triggered" = "shortcut_triggered";
 export const EVT_LOCALE_CHANGED:     "locale_changed"     = "locale_changed";
 export const EVT_THUMBNAIL_READY:    "thumbnail_ready"    = "thumbnail_ready";
+export const EVT_IMAGE_SYNC_SELECTION: "image_sync_selection" = "image_sync_selection";

@@ -1,0 +1,71 @@
+name: Build HiViewer plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/luxe-image-sync/**"
+      - "scripts/plugin-package.mjs"
+      - "package.json"
+      - ".github/workflows/plugin.yml"
+  pull_request:
+    paths:
+      - "plugins/luxe-image-sync/**"
+      - "scripts/plugin-package.mjs"
+      - "package.json"
+      - ".github/workflows/plugin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hiviewer-plugin-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-plugin:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build native-view backend
+        run: cargo build --locked --release --manifest-path plugins/luxe-image-sync/native/Cargo.toml --target x86_64-pc-windows-msvc
+
+      - name: Assemble and verify plugin package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pluginRoot = 'plugins/luxe-image-sync'
+          $binDir = Join-Path $pluginRoot 'bin'
+          New-Item -ItemType Directory -Force $binDir | Out-Null
+          Copy-Item 'plugins/luxe-image-sync/native/target/x86_64-pc-windows-msvc/release/luxe-image-sync.exe' (Join-Path $binDir 'luxe-image-sync.exe')
+          npm run plugin -- check $pluginRoot
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-artifact'
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          $package = Join-Path $artifactDir 'luxe-image-sync-0.1.0-windows-x86_64.hvp'
+          npm run plugin -- pack $pluginRoot $package
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$package.sha256" -Value "$digest  $(Split-Path $package -Leaf)" -Encoding ascii
+          Copy-Item (Join-Path $pluginRoot 'README.md') (Join-Path $artifactDir 'INSTALL-zh-CN.md')
+          "PLUGIN_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luxe-image-sync-windows-x86_64
+          path: ${{ env.PLUGIN_ARTIFACT_DIR }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
