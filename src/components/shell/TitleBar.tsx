@@ -177,6 +177,7 @@ function AvailableUpdateButton() {
   const items = getUpdateNotes(version, notes);
   const percent = total ? Math.min(100, Math.floor(downloaded / total * 100)) : null;
   const busy = status === "downloading" || status === "installing";
+  const showProgressRing = status === "downloading" || status === "installing";
   const label = status === "downloading"
     ? t("update_downloading")
     : status === "installing" ? t("update_installing")
@@ -203,7 +204,14 @@ function AvailableUpdateButton() {
         className="flex h-full w-11 items-center justify-center transition-colors hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
         style={{ color: "var(--colorPaletteGreenForeground1)" }}
       >
-        <ArrowCircleUp24Regular className="h-5 w-5" />
+        {showProgressRing ? (
+          <UpdateProgressRing
+            percent={status === "downloading" ? percent : null}
+            label={status === "downloading" ? t("update_downloading") : t("update_installing")}
+          />
+        ) : (
+          <ArrowCircleUp24Regular className="h-5 w-5" />
+        )}
       </button>
       <div
         className={`${open ? "visible opacity-100" : "invisible opacity-0"} absolute right-1 top-full z-50 w-[min(23rem,calc(100vw-1rem))] pt-2 transition duration-150`}
@@ -238,20 +246,70 @@ function AvailableUpdateButton() {
               </div>
             )}
             {status === "error" && <p className="mb-2 break-words text-xs" role="alert" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</p>}
-            <Button
-              appearance="primary"
-              size="small"
-              disabled={busy}
-              onClick={() => void (status === "manual" ? openUrl(releaseUrl).catch((error) => console.warn("open release failed", error))
-                : status === "error" ? runUpdateCheck("manual") : installAvailableUpdate())}
-              className="w-full"
-            >
-              {label}
-            </Button>
+            <div className="flex justify-end">
+              <Button
+                appearance="primary"
+                size="small"
+                disabled={busy}
+                onClick={() => void (status === "manual" ? openUrl(releaseUrl).catch((error) => console.warn("open release failed", error))
+                  : status === "error" ? runUpdateCheck("manual") : installAvailableUpdate())}
+              >
+                {label}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function UpdateProgressRing({ percent, label }: { percent: number | null; label: string }) {
+  const radius = 8;
+  const circumference = 2 * Math.PI * radius;
+  const determinate = percent !== null;
+
+  return (
+    <svg
+      className={`h-5 w-5 ${determinate ? "" : "animate-spin motion-reduce:animate-none"}`}
+      viewBox="0 0 20 20"
+      role="img"
+      aria-label={determinate ? `${label} ${percent}%` : label}
+    >
+      <circle
+        cx="10"
+        cy="10"
+        r={radius}
+        fill="none"
+        stroke="var(--colorNeutralStroke2)"
+        strokeWidth="2.5"
+      />
+      <circle
+        cx="10"
+        cy="10"
+        r={radius}
+        fill="none"
+        stroke="var(--colorBrandBackground)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeDasharray={determinate ? circumference : circumference * 0.3}
+        strokeDashoffset={determinate ? circumference * (1 - percent / 100) : 0}
+        transform="rotate(-90 10 10)"
+      />
+      {determinate && (
+        <text
+          x="10"
+          y="10"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fill="var(--colorNeutralForeground1)"
+          fontSize="5.5"
+          fontWeight="600"
+        >
+          {percent}
+        </text>
+      )}
+    </svg>
   );
 }
 

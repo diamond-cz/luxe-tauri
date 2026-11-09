@@ -2335,3 +2335,24 @@
 - `npm run typecheck` 通过。
 - Python 标准库解析五个翻译 JSON 通过；`git diff --check` 通过。
 - 尚未在 Tauri 窗口手动切换五种语言验收实际排版和措辞。
+
+### 2026-11-09：更新通知操作区与标题栏进度环
+
+**亮点**
+
+- `src/components/shell/TitleBar.tsx` 的更新通知操作按钮改为底部右对齐，避免主按钮占满通知卡片宽度。
+- 标题栏更新入口复用 `useUpdateStore` 的下载字节和总字节状态，下载时显示百分比环，安装或未知进度时显示旋转环，并为环形控件提供可访问名称。
+
+**痛点**
+
+- 原通知按钮使用 `w-full`，视觉上占据整个底部；更新进行时标题栏仍显示普通更新图标，用户无法快速判断下载进度。
+
+**闭坑**
+
+- 环形进度必须读取 `downloadedBytes` / `totalBytes`，不能从展示文案反向解析百分比；`totalBytes` 为空时使用不确定进度状态。
+- 更新按钮在 `downloading` 和 `installing` 状态保持禁用，避免重复调用现有 `installAvailableUpdate()`。
+
+**验证**
+
+- `npm run typecheck`、`npm run build`（2214 个模块）和 `git diff --check` 均通过。
+- 尚未在 Tauri 窗口中手动验证下载、安装状态下标题栏环形动画和通知卡片定位。

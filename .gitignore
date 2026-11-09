@@ -32,3 +32,4 @@ Thumbs.db
 
 # Claude model workspace
 /.claude/
+/.archify/

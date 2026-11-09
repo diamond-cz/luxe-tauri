@@ -90,7 +90,7 @@
       "type": "backend",
       "label": "图片与 TOML 命令",
       "sublabel": "scan · metadata · preview",
-      "pos": [610, 430],
+      "pos": [1100, 250],
       "size": [190, 66],
       "sources": [
         { "path": "src-tauri/src/commands/image_cmds.rs", "line": 37, "end_line": 49 },
@@ -102,7 +102,7 @@
       "type": "backend",
       "label": "应用状态命令",
       "sublabel": "load / patch / flush state",
-      "pos": [300, 430],
+      "pos": [1100, 390],
       "size": [190, 66],
       "sources": [
         { "path": "src-tauri/src/commands/state_cmds.rs", "line": 9, "end_line": 25 }
@@ -121,7 +121,7 @@
       "type": "external",
       "label": "调试图片目录",
       "sublabel": "JPG / PNG + 同名 TOML",
-      "pos": [830, 430],
+      "pos": [1370, 250],
       "size": [186, 66]
     },
     {
@@ -129,7 +129,7 @@
       "type": "database",
       "label": "ISP6S 映射资源",
       "sublabel": "src-tauri/resources/Isp6s.toml",
-      "pos": [540, 430],
+      "pos": [1400, 390],
       "size": [200, 66],
       "sources": [
         { "path": "src-tauri/src/config/isp6s_schema.rs", "line": 14, "end_line": 25 },
@@ -142,7 +142,7 @@
       "type": "database",
       "label": "持久化用户状态",
       "sublabel": "state.toml · Rust StateStore",
-      "pos": [540, 570],
+      "pos": [1370, 530],
       "size": [200, 66],
       "sources": [
         { "path": "src-tauri/src/config/state_file.rs", "line": 1, "end_line": 7 },
