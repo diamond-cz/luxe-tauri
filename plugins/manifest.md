@@ -104,12 +104,13 @@ plugin.hvp                 # ZIP，manifest 直接位于包根
 
 `pack` 只收集 manifest、main.js、ui/、bin/。main.ts、sdk/、Cargo.toml、target/、根目录 README 不会自动包含。运行资源放在 ui/ 或 bin/，不要引用开发机器的绝对路径。
 
-`checksums.json` 由打包器生成，版本字段必须是字符串 `"1"`，而不是数字 `1`；宿主安装时会先按该类型反序列化，再校验每个 payload 文件的大小和 SHA-256。
+`checksums.json` 由打包器生成，必须是“包内相对路径到 SHA-256 字符串”的直接映射；不能添加 `version`、`files` 等包装字段。宿主安装时会将该 map 与除 `checksums.json`、`signature.json` 外的全部包文件逐项比较。
 
 ```json
 {
-  "version": "1",
-  "files": [{ "path": "manifest.json", "size": 123, "sha256": "..." }]
+  "manifest.json": "...",
+  "main.js": "...",
+  "bin/plugin.exe": "..."
 }
 ```
 

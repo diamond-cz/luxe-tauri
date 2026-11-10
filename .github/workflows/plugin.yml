@@ -67,8 +67,14 @@ jobs:
             }
           }
           $checksums = Get-Content -LiteralPath (Join-Path $probeDir 'checksums.json') -Raw | ConvertFrom-Json
-          if ($checksums.version -ne '1') {
-            throw "invalid checksums.json version: expected string '1'"
+          if ($checksums.PSObject.Properties.Name -contains 'version' -or $checksums.PSObject.Properties.Name -contains 'files') {
+            throw "invalid checksums.json shape; expected path-to-sha256 map"
+          }
+          foreach ($required in @('manifest.json', 'main.js', 'bin/luxe-image-sync.exe')) {
+            $checksum = $checksums.PSObject.Properties[$required].Value
+            if ($checksum -notmatch '^[0-9a-f]{64}$') {
+              throw "invalid checksum for $required"
+            }
           }
           $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "$package.sha256" -Value "$digest  $(Split-Path $package -Leaf)" -Encoding ascii

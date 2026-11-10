@@ -2517,18 +2517,18 @@
 
 **亮点**
 
-- `scripts/plugin-package.mjs` 生成标准 ZIP 本地文件头和中央目录，`checksums.json.version` 固定为字符串 `"1"`；`.github/workflows/plugin.yml` 使用 Windows `Expand-Archive` 和 JSON 类型检查验证最终 `.hvp`。
+- `scripts/plugin-package.mjs` 生成标准 ZIP 本地文件头和中央目录，`checksums.json` 与 HiViewer 宿主要求的“相对路径到 SHA-256” map 一致；`.github/workflows/plugin.yml` 使用 Windows `Expand-Archive` 和 checksum map 检查验证最终 `.hvp`。
 
 **痛点**
 
-- 旧打包器在 ZIP 头中多写一个 `u16(0)`，HiViewer 报 `Invalid Central Directory header`；修正 ZIP 后，宿主继续暴露 checksum 版本类型不兼容，说明仅检查 ZIP 头不能替代宿主 schema 验证。
+- 旧打包器在 ZIP 头中多写一个 `u16(0)`，HiViewer 报 `Invalid Central Directory header`；修正 ZIP 后，宿主继续暴露 checksum 从对象包装层到直接 map 的 schema 不兼容，说明仅检查 ZIP 头不能替代宿主源码 schema 验证。
 
 **闭坑**
 
-- 以后修改 `.hvp` 前必须同时检查 ZIP 标准解压、`manifest.json`、`checksums.json` 的字段类型和 HiViewer 实际安装错误；artifact 外层 ZIP 必须先解压，安装时选择内部 `.hvp`。
+- 以后修改 `.hvp` 前必须同时检查 ZIP 标准解压、`manifest.json`、`checksums.json` 的字段结构和 HiViewer 实际安装错误；artifact 外层 ZIP 必须先解压，安装时选择内部 `.hvp`。
 
 **验证**
 
-- Windows 临时 fixture 使用 `Expand-Archive` 解出 4 个文件，确认 `checksums.json.version` 为字符串 `"1"`。
+- Windows 临时 fixture 使用 `Expand-Archive` 解出 4 个文件，确认 checksum map 覆盖全部 payload 且 SHA-256 无不匹配项。
 - `npm run typecheck`、`node --check scripts/plugin-package.mjs`、`git diff --check` 通过；GitHub Actions 运行 `42743035184` 的插件编译、标准解压校验和 artifact 上传成功。
 - 未在本机运行 Cargo/Tauri 编译，也未在本机 HiViewer 实际安装；最终宿主安装仍需使用最新 artifact 验收。

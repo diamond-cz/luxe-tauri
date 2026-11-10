@@ -134,9 +134,9 @@ function createZip(entries) {
   for (const entry of entries) {
     const name = Buffer.from(entry.name, "utf8");
     const data = entry.data;
-    const local = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), u16(20), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data]);
+    const local = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), u16(20), u16(0x800), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data]);
     localParts.push(local);
-    const central = Buffer.concat([Buffer.from([0x50, 0x4b, 0x01, 0x02]), u16(20), u16(20), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name]);
+    const central = Buffer.concat([Buffer.from([0x50, 0x4b, 0x01, 0x02]), u16(20), u16(20), u16(0x800), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name]);
     centralParts.push(central);
     offset += local.length;
   }
@@ -148,15 +148,14 @@ function createZip(entries) {
 
 async function pack(root, output) {
   const { manifest, files } = await check(root);
-  const checksums = { version: "1", files: [] };
+  const checksums = {};
   const entries = [];
   for (const file of files) {
     const data = await fs.readFile(file.absolute);
-    checksums.files.push({ path: file.relative, size: data.length, sha256: crypto.createHash("sha256").update(data).digest("hex") });
+    checksums[file.relative] = crypto.createHash("sha256").update(data).digest("hex");
     entries.push({ name: file.relative, data });
   }
-  checksums.files.sort((a, b) => a.path.localeCompare(b.path));
-  entries.push({ name: "checksums.json", data: encoder.encode(`${JSON.stringify(checksums, null, 2)}\n`) });
+  entries.push({ name: "checksums.json", data: encoder.encode(JSON.stringify(checksums)) });
   const archive = createZip(entries);
   if (archive.length > MAX_PACKAGE_BYTES) fail("plugin package exceeds 128 MiB");
   const target = path.resolve(output);
