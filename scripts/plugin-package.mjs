@@ -134,9 +134,9 @@ function createZip(entries) {
   for (const entry of entries) {
     const name = Buffer.from(entry.name, "utf8");
     const data = entry.data;
-    const local = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), u16(20), u16(0), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data]);
+    const local = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), u16(20), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data]);
     localParts.push(local);
-    const central = Buffer.concat([Buffer.from([0x50, 0x4b, 0x01, 0x02]), u16(20), u16(20), u16(0), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name]);
+    const central = Buffer.concat([Buffer.from([0x50, 0x4b, 0x01, 0x02]), u16(20), u16(20), u16(0), u16(0), u16(time), u16(date), u32(crc32(data)), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name]);
     centralParts.push(central);
     offset += local.length;
   }

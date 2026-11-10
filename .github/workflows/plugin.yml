@@ -57,6 +57,15 @@ jobs:
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
           $package = Join-Path $artifactDir 'luxe-image-sync-0.1.0-windows-x86_64.hvp'
           npm run plugin -- pack $pluginRoot $package
+          $zipProbe = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe.zip'
+          $probeDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe'
+          Copy-Item -LiteralPath $package -Destination $zipProbe
+          Expand-Archive -LiteralPath $zipProbe -DestinationPath $probeDir -Force
+          foreach ($required in @('manifest.json', 'main.js', 'checksums.json', 'bin/luxe-image-sync.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $probeDir $required) -PathType Leaf)) {
+              throw "invalid .hvp archive; missing $required"
+            }
+          }
           $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "$package.sha256" -Value "$digest  $(Split-Path $package -Leaf)" -Encoding ascii
           Copy-Item (Join-Path $pluginRoot 'README.md') (Join-Path $artifactDir 'INSTALL-zh-CN.md')
