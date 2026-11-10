@@ -66,6 +66,10 @@ jobs:
               throw "invalid .hvp archive; missing $required"
             }
           }
+          $checksums = Get-Content -LiteralPath (Join-Path $probeDir 'checksums.json') -Raw | ConvertFrom-Json
+          if ($checksums.version -ne '1') {
+            throw "invalid checksums.json version: expected string '1'"
+          }
           $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "$package.sha256" -Value "$digest  $(Split-Path $package -Leaf)" -Encoding ascii
           Copy-Item (Join-Path $pluginRoot 'README.md') (Join-Path $artifactDir 'INSTALL-zh-CN.md')

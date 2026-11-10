@@ -148,7 +148,7 @@ function createZip(entries) {
 
 async function pack(root, output) {
   const { manifest, files } = await check(root);
-  const checksums = { version: 1, files: [] };
+  const checksums = { version: "1", files: [] };
   const entries = [];
   for (const file of files) {
     const data = await fs.readFile(file.absolute);
