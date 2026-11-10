@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 const PIPE_NAME: &str = r"\\.\pipe\luxe-image-sync-v1";
 const PLUGIN_ID: &str = "luxe.image-sync";
 const PROTOCOL_VERSION: u8 = 1;
+const MAX_SELECTION_PATHS: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +22,10 @@ struct ViewerSnapshot {
     #[serde(default)]
     files: Vec<String>,
     current_path: Option<String>,
+    #[serde(default)]
+    test_machine_files: Vec<String>,
+    #[serde(default)]
+    test_machine_current_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +38,8 @@ struct SyncEnvelope {
     #[serde(default)]
     image_path: Option<String>,
     #[serde(default)]
+    image_paths: Option<Vec<String>>,
+    #[serde(default)]
     accepted: Option<bool>,
     #[serde(default)]
     reason: Option<String>,
@@ -40,7 +47,7 @@ struct SyncEnvelope {
 
 struct BridgeState {
     pipe_tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
-    pending_selection: Mutex<Option<String>>,
+    pending_selection: Mutex<Option<Vec<String>>>,
     pending_sequence: Mutex<Option<u64>>,
     sequence: std::sync::atomic::AtomicU64,
     snapshot: RwLock<ViewerSnapshot>,
@@ -71,15 +78,16 @@ fn select_image(image_path: String, state: State<'_, BridgeState>) -> Result<(),
     if !snapshot
         .files
         .iter()
+        .chain(snapshot.test_machine_files.iter())
         .any(|path| normalize_windows_path(path) == normalized)
     {
         return Err("image path is not in the current HiViewer snapshot".into());
     }
     drop(snapshot);
-    queue_image_selection(&state, image_path)
+    queue_image_selection(&state, vec![image_path])
 }
 
-fn selection_message(state: &BridgeState, image_path: String) -> Result<(u64, Vec<u8>), String> {
+fn selection_message(state: &BridgeState, paths: &[String]) -> Result<(u64, Vec<u8>), String> {
     let sequence = state
         .sequence
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -89,7 +97,8 @@ fn selection_message(state: &BridgeState, image_path: String) -> Result<(u64, Ve
         kind: "selection".into(),
         source_instance: format!("hiviewer-plugin-{}", std::process::id()),
         sequence,
-        image_path: Some(image_path),
+        image_path: paths.first().cloned(),
+        image_paths: Some(paths.to_vec()),
         accepted: None,
         reason: None,
     };
@@ -98,12 +107,19 @@ fn selection_message(state: &BridgeState, image_path: String) -> Result<(u64, Ve
     Ok((sequence, bytes))
 }
 
-fn queue_image_selection(state: &BridgeState, image_path: String) -> Result<(), String> {
-    let (sequence, bytes) = selection_message(state, image_path.clone())?;
+fn queue_image_selection(state: &BridgeState, paths: Vec<String>) -> Result<(), String> {
+    let paths = paths
+        .into_iter()
+        .take(MAX_SELECTION_PATHS)
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Err("no image paths provided".into());
+    }
+    let (sequence, bytes) = selection_message(state, &paths)?;
     *state
         .pending_selection
         .lock()
-        .map_err(|_| "pending selection state poisoned")? = Some(image_path.clone());
+        .map_err(|_| "pending selection state poisoned")? = Some(paths.clone());
     *state
         .pending_sequence
         .lock()
@@ -130,10 +146,10 @@ fn flush_pending_selection(state: &BridgeState) {
         .lock()
         .ok()
         .and_then(|mut pending| pending.take());
-    let Some(path) = pending else { return };
-    if queue_image_selection(state, path.clone()).is_err() {
+    let Some(paths) = pending else { return };
+    if queue_image_selection(state, paths.clone()).is_err() {
         if let Ok(mut pending) = state.pending_selection.lock() {
-            *pending = Some(path);
+            *pending = Some(paths);
         }
     }
 }
@@ -218,8 +234,13 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         .and_then(|value| serde_json::from_value::<ViewerSnapshot>(value).ok());
                     let accepted = if let Some(snapshot) = snapshot {
                         if snapshot.files.len() <= 1000
+                            && snapshot.test_machine_files.len() <= 1000
                             && snapshot
                                 .files
+                                .iter()
+                                .all(|path| is_absolute_windows_path(path))
+                            && snapshot
+                                .test_machine_files
                                 .iter()
                                 .all(|path| is_absolute_windows_path(path))
                             && snapshot.current_path.as_deref().is_none_or(|current| {
@@ -227,15 +248,34 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                                     normalize_windows_path(path) == normalize_windows_path(current)
                                 })
                             })
+                            && snapshot
+                                .test_machine_current_path
+                                .as_deref()
+                                .is_none_or(|current| {
+                                    snapshot.test_machine_files.iter().any(|path| {
+                                        normalize_windows_path(path)
+                                            == normalize_windows_path(current)
+                                    })
+                                })
                         {
                             if let Ok(mut current) = state.snapshot.write() {
                                 if snapshot.sequence >= current.sequence {
                                     let current_path = snapshot.current_path.clone();
+                                    let test_machine_current_path =
+                                        snapshot.test_machine_current_path.clone();
                                     *current = snapshot.clone();
                                     let _ = app.emit("viewer-updated", snapshot);
                                     drop(current);
-                                    if let Some(path) = current_path {
-                                        let _ = queue_image_selection(&state, path);
+                                    let mut paths = current_path.into_iter().collect::<Vec<_>>();
+                                    if let Some(path) = test_machine_current_path {
+                                        paths.push(path);
+                                    }
+                                    if !paths.is_empty() {
+                                        let mut unique = std::collections::HashSet::new();
+                                        paths.retain(|path| {
+                                            unique.insert(normalize_windows_path(path))
+                                        });
+                                        let _ = queue_image_selection(&state, paths);
                                     } else if let Ok(mut pending) = state.pending_selection.lock() {
                                         *pending = None;
                                     }

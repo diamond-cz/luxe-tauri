@@ -21,6 +21,8 @@ pub struct SyncEnvelope {
     #[serde(default)]
     pub image_path: Option<String>,
     #[serde(default)]
+    pub image_paths: Option<Vec<String>>,
+    #[serde(default)]
     pub accepted: Option<bool>,
     #[serde(default)]
     pub reason: Option<String>,
@@ -34,6 +36,7 @@ impl SyncEnvelope {
             source_instance: source_instance.into(),
             sequence: LOCAL_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1,
             image_path: Some(image_path.into()),
+            image_paths: None,
             accepted: None,
             reason: None,
         }
@@ -46,6 +49,7 @@ impl SyncEnvelope {
             source_instance: source_instance.into(),
             sequence,
             image_path: None,
+            image_paths: None,
             accepted: Some(accepted),
             reason: reason.map(str::to_owned),
         }
@@ -162,8 +166,14 @@ async fn run_pipe_server(app: AppHandle, hub: ImageSyncHub) {
                             continue;
                         }
                         last_sequence.insert(message.source_instance.clone(), message.sequence);
-                        let Some(path) = message.image_path.as_deref() else { continue };
-                        if !std::path::Path::new(path).is_absolute() { continue; }
+                        let valid_path = |path: &str| std::path::Path::new(path).is_absolute();
+                        let has_valid_path = message
+                            .image_paths
+                            .as_deref()
+                            .map(|paths| !paths.is_empty() && paths.iter().all(|path| valid_path(path)))
+                            .unwrap_or(false)
+                            || message.image_path.as_deref().is_some_and(valid_path);
+                        if !has_valid_path { continue; }
                         let accepted = app.emit(SELECTION_EVENT, &message).is_ok();
                         let ack = SyncEnvelope::ack(
                             &format!("luxe-{}", std::process::id()),
@@ -233,8 +243,18 @@ pub fn parse_message(line: &str) -> Result<SyncEnvelope, &'static str> {
     if message.kind != "selection" && message.kind != "ack" {
         return Err("invalid-kind");
     }
-    if message.kind == "selection" && message.image_path.is_none() {
+    if message.kind == "selection"
+        && message.image_path.is_none()
+        && message.image_paths.as_ref().is_none_or(Vec::is_empty)
+    {
         return Err("missing-image-path");
+    }
+    if message
+        .image_paths
+        .as_ref()
+        .is_some_and(|paths| paths.len() > 32)
+    {
+        return Err("too-many-image-paths");
     }
     Ok(message)
 }
@@ -262,6 +282,16 @@ mod tests {
         assert_eq!(message.protocol_version, 1);
         assert_eq!(message.kind, "selection");
         assert!(message.sequence > 0);
+    }
+
+    #[test]
+    fn parses_ordered_multi_path_selection() {
+        let message = parse_message(
+            r#"{"protocolVersion":1,"kind":"selection","sourceInstance":"viewer-test","sequence":8,"imagePaths":["C:\\images\\focus.jpg","D:\\test\\focus.jpg"]}"#,
+        )
+        .unwrap();
+        assert_eq!(message.image_path, None);
+        assert_eq!(message.image_paths.as_ref().map(Vec::len), Some(2));
     }
 
     #[test]

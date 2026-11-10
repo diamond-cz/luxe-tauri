@@ -2532,3 +2532,21 @@
 - Windows 临时 fixture 使用 `Expand-Archive` 解出 4 个文件，确认 checksum map 覆盖全部 payload 且 SHA-256 无不匹配项。
 - `npm run typecheck`、`node --check scripts/plugin-package.mjs`、`git diff --check` 通过；GitHub Actions 运行 `42743035184` 的插件编译、标准解压校验和 artifact 上传成功。
 - 未在本机运行 Cargo/Tauri 编译，也未在本机 HiViewer 实际安装；最终宿主安装仍需使用最新 artifact 验收。
+
+### 2026-11-10：HiViewer 多候选图片联动匹配
+
+**亮点**
+
+- `plugins/luxe-image-sync/native/src/main.rs` 将活动主图与测试机对应焦点图作为有序候选发送，`src-tauri/src/image_sync.rs` 保留旧 `imagePath` 并限制候选数量；`src/services/imageSyncService.ts` 优先对全部焦点候选精确路径匹配，再对全局唯一文件名回退，复用既有 `setExternalImageSelection` 和 TOML 加载流程。
+
+**痛点**
+
+- HiViewer `ViewerSnapshot.files` 是导航列表而非选择单元格集合，不能直接把全部列表当作当前多选；当前插件协议可可靠获得主焦点图和测试机焦点图，任意多选集合仍需宿主增加 selected paths 字段。
+
+**闭坑**
+
+- 新增跨进程候选字段时必须同时更新 TypeScript 类型、Rust envelope、插件 sidecar，并保留 `imagePath` 兼容；文件名回退必须要求全局唯一，歧义时保持原索引不动。
+
+**验证**
+
+- 本轮将运行 `npm run typecheck`、受影响 Rust 文件 `rustfmt --check`、插件 Rust `rustfmt --check`、`git diff --check`；不运行本地 Cargo/Tauri 编译，Windows 构建和插件包由 GitHub Actions 完成。

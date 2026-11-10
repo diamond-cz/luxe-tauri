@@ -8,25 +8,36 @@ import type { ImageSyncMessage, ImageSyncResult } from "@/types/imageSync";
 const EVENT = "image_sync_selection";
 const MAX_SYNC_SOURCES = 32;
 const normalizePath = (path: string) => path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase();
-const directoryOf = (path: string) => path.replaceAll("/", "\\").replace(/\\[^\\]*$/, "");
 
-function imageDirectoryKey(workspaceKey: string) {
-  const [isp, tab] = workspaceKey.split("|");
-  return `${isp}|${isp === "ISP6S" && (tab === "0" || tab === "1") ? 0 : tab}`;
+function selectionPaths(message: ImageSyncMessage): string[] {
+  return [...new Set([...(message.imagePaths ?? []), ...(message.imagePath ? [message.imagePath] : [])]
+    .filter((path) => /^(?:[a-z]:[\\/]|\\\\)/i.test(path)))];
 }
 
-function findWorkspaceKey(path: string): string | null {
-  const state = useMtkStore.getState();
-  const parent = normalizePath(directoryOf(path));
-  const candidates = new Set<string>();
-  for (const [key, workspace] of Object.entries(state.mtk.image_workspaces ?? {})) {
-    if (workspace.dir && normalizePath(workspace.dir) === parent) candidates.add(imageDirectoryKey(key));
+type IndexedMatch = { imageDirKey: string; index: number; path: string };
+
+function findIndexedImage(paths: string[]): { match?: IndexedMatch; ambiguous: boolean } {
+  const imageDirs = Object.entries(useMtkStore.getState().imageDir);
+  for (const path of paths) {
+    const normalized = normalizePath(path);
+    const exact = imageDirs.flatMap(([imageDirKey, image]) => image.entries.flatMap((entry, index) =>
+      normalizePath(entry.jpg_path) === normalized ? [{ imageDirKey, index, path: entry.jpg_path }] : []));
+    if (exact.length === 1) return { match: exact[0], ambiguous: false };
+    if (exact.length > 1) return { ambiguous: true };
   }
-  for (const [key, workspace] of Object.entries(state.imageDir)) {
-    if (workspace.dir && normalizePath(workspace.dir) === parent) candidates.add(key);
+
+  for (const path of paths) {
+    const normalized = normalizePath(path);
+    const filename = normalized.split("\\").at(-1);
+    if (!filename) continue;
+    const byName = imageDirs.flatMap(([imageDirKey, image]) => image.entries.flatMap((entry, index) =>
+      normalizePath(entry.jpg_path).split("\\").at(-1) === filename
+        ? [{ imageDirKey, index, path: entry.jpg_path }]
+        : []));
+    if (byName.length === 1) return { match: byName[0], ambiguous: false };
+    if (byName.length > 1) return { ambiguous: true };
   }
-  if (candidates.size !== 1) return null;
-  return [...candidates][0];
+  return { ambiguous: false };
 }
 
 function routeToWorkspace(imageDirKey: string) {
@@ -46,16 +57,16 @@ function routeToWorkspace(imageDirKey: string) {
 
 function applyRemoteSelection(message: ImageSyncMessage): ImageSyncResult {
   if (message.protocolVersion !== 1) return { accepted: false, reason: "unsupported-version" };
-  const path = message.imagePath;
-  if (!path || !/^(?:[a-z]:\\|\\\\)/i.test(path)) return { accepted: false, reason: "image-not-indexed" };
-  const imageDirKey = findWorkspaceKey(path);
-  if (!imageDirKey) return { accepted: false, reason: "ambiguous-workspace" };
+  const paths = selectionPaths(message);
+  if (!paths.length) return { accepted: false, reason: "image-not-indexed" };
+  const { match, ambiguous } = findIndexedImage(paths);
+  if (ambiguous) return { accepted: false, reason: "ambiguous-workspace" };
+  if (!match) return { accepted: false, reason: "image-not-indexed" };
+  const { imageDirKey, index } = match;
   const workspaceKey = routeToWorkspace(imageDirKey);
   if (!workspaceKey) return { accepted: false, reason: "image-not-indexed" };
   const image = useMtkStore.getState().imageDir[imageDirKey];
   if (!image?.entries.length) return { accepted: false, reason: "image-not-indexed" };
-  const index = image.entries.findIndex((entry) => normalizePath(entry.jpg_path) === normalizePath(path));
-  if (index < 0) return { accepted: false, reason: "image-not-indexed" };
   const entry = image.entries[index];
   useMtkStore.getState().setExternalImageSelection(imageDirKey, workspaceKey, index, entry.jpg_path);
   void loadImageToml(entry.toml_path).then((tomlData) => {
@@ -102,14 +113,12 @@ export async function startImageSyncListener(): Promise<() => void> {
     const result = applyRemoteSelection(message);
     pending = null;
     if (!result.accepted && result.reason === "image-not-indexed") {
-      const key = message.imagePath ? findWorkspaceKey(message.imagePath) : null;
-      const image = key ? useMtkStore.getState().imageDir[key] : null;
-      if (!image?.entries.length || image.status === "scanning" || image.status === "loading") {
+      if (Object.values(useMtkStore.getState().imageDir).some((image) => image.status === "scanning" || image.status === "loading")) {
         pending = message;
       }
     }
     if (!result.accepted) {
-      console.info("image sync selection was not applied", result.reason, message.imagePath);
+      console.info("image sync selection was not applied", result.reason, selectionPaths(message));
     }
   };
 
@@ -121,9 +130,7 @@ export async function startImageSyncListener(): Promise<() => void> {
     try {
       const result = applyRemoteSelection(message);
       if (!result.accepted && result.reason === "image-not-indexed") {
-        const key = findWorkspaceKey(message.imagePath ?? "");
-        const image = key ? useMtkStore.getState().imageDir[key] : null;
-        if (!image?.entries.length || image.status === "scanning" || image.status === "loading") pending = message;
+        if (Object.values(useMtkStore.getState().imageDir).some((image) => image.status === "scanning" || image.status === "loading")) pending = message;
       }
     } finally {
       applyingPending = false;

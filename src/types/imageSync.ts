@@ -4,6 +4,8 @@ export interface ImageSyncMessage {
   sourceInstance: string;
   sequence: number;
   imagePath?: string;
+  /** Ordered candidates; imagePath remains for protocol v1 senders. */
+  imagePaths?: string[];
   accepted?: boolean;
   reason?: string;
 }
