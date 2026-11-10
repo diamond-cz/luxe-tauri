@@ -104,6 +104,15 @@ plugin.hvp                 # ZIP，manifest 直接位于包根
 
 `pack` 只收集 manifest、main.js、ui/、bin/。main.ts、sdk/、Cargo.toml、target/、根目录 README 不会自动包含。运行资源放在 ui/ 或 bin/，不要引用开发机器的绝对路径。
 
+`checksums.json` 由打包器生成，版本字段必须是字符串 `"1"`，而不是数字 `1`；宿主安装时会先按该类型反序列化，再校验每个 payload 文件的大小和 SHA-256。
+
+```json
+{
+  "version": "1",
+  "files": [{ "path": "manifest.json", "size": 123, "sha256": "..." }]
+}
+```
+
 包文件最多 128 MiB，解压后最多 256 MiB，单文件最多 128 MiB，文件数最多 2048，manifest 最多 64 KiB。路径使用 `/`，拒绝绝对路径、`..`、链接、Windows 设备名和仅大小写不同的重复文件。不要手工改摘要或已安装文件；重新打包和安装。
 
 JS/TS 包通常可跨桌面平台使用，仍需核对 WebView API。原生包每份只声明一个平台，见 [Rust sidecar 指南](native-sidecars.md)。

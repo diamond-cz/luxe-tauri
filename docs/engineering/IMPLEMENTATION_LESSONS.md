@@ -2513,3 +2513,22 @@
 
 - 本轮待完成：Node 插件包检查/ZIP 可读性、npm typecheck、发布脚本测试、Rust 受影响文件 rustfmt、git diff --check。
 - 未在本机运行任何 Cargo/Tauri 编译命令；Windows Rust 编译、插件包检查与 `.hvp` 生成交由 `.github/workflows/plugin.yml`。
+### 2026-11-10：HiViewer 插件包 ZIP 与 checksum schema 修复
+
+**亮点**
+
+- `scripts/plugin-package.mjs` 生成标准 ZIP 本地文件头和中央目录，`checksums.json.version` 固定为字符串 `"1"`；`.github/workflows/plugin.yml` 使用 Windows `Expand-Archive` 和 JSON 类型检查验证最终 `.hvp`。
+
+**痛点**
+
+- 旧打包器在 ZIP 头中多写一个 `u16(0)`，HiViewer 报 `Invalid Central Directory header`；修正 ZIP 后，宿主继续暴露 checksum 版本类型不兼容，说明仅检查 ZIP 头不能替代宿主 schema 验证。
+
+**闭坑**
+
+- 以后修改 `.hvp` 前必须同时检查 ZIP 标准解压、`manifest.json`、`checksums.json` 的字段类型和 HiViewer 实际安装错误；artifact 外层 ZIP 必须先解压，安装时选择内部 `.hvp`。
+
+**验证**
+
+- Windows 临时 fixture 使用 `Expand-Archive` 解出 4 个文件，确认 `checksums.json.version` 为字符串 `"1"`。
+- `npm run typecheck`、`node --check scripts/plugin-package.mjs`、`git diff --check` 通过；GitHub Actions 运行 `42743035184` 的插件编译、标准解压校验和 artifact 上传成功。
+- 未在本机运行 Cargo/Tauri 编译，也未在本机 HiViewer 实际安装；最终宿主安装仍需使用最新 artifact 验收。
