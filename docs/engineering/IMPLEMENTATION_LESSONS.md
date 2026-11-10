@@ -2568,3 +2568,22 @@
 **验证**
 
 - `npm run typecheck`、插件 Rust `rustfmt --check`、`git diff --check` 均通过；没有运行本地 Cargo/Tauri 编译。`npm run plugin -- check plugins/luxe-image-sync` 因本地没有 CI 生成的 `bin/luxe-image-sync.exe` 而失败，完整包检查由 Actions 执行；`.hvp` 安装和按钮现场交互仍需用户验收。
+
+### 2026-11-10：插件后台同步与测试机列路由
+
+**亮点**
+
+- manifest 收敛为单一 `sync` native-view 命令；插件窗口的关闭事件只隐藏窗口，sidecar 进程继续接收 HiViewer 快照；`testMachineColumnPath` 存在时只发送 `testMachineCurrentPath`，否则只发送主图焦点。
+- Named Pipe 发送队列改为 Tokio `watch` 最新值通道，快速切图时新选择覆盖旧待发送内容，减少 LUXE 追赶过期图片的延迟。
+
+**痛点**
+
+- 旧 manifest 同时暴露 `view/open` 和 `viewer/update`，用户会看到两个实际打开同一窗口的入口；关闭 native 窗口还会结束宿主会话，导致后续快照无法抵达插件。
+
+**闭坑**
+
+- native-view 后台同步必须保证至少一个宿主会话持续存在；关闭 UI 应隐藏窗口而不是销毁进程。测试机列是否启用必须由 `testMachineColumnPath` 判断，不能把主图和测试机图同时作为同步候选。
+
+**验证**
+
+- 本轮运行 `npm run typecheck`、插件 Rust `rustfmt --check`、`git diff --check`；Rust/Tauri 编译、包检查和现场关闭窗口/快速切图验收交由 GitHub Actions 与 HiViewer 实机完成。

@@ -7,18 +7,19 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{Emitter, State};
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 
 const PIPE_NAME: &str = r"\\.\pipe\luxe-image-sync-v1";
 const PLUGIN_ID: &str = "luxe.image-sync";
 const PROTOCOL_VERSION: u8 = 1;
-const MAX_SELECTION_PATHS: usize = 32;
+const MAX_SELECTION_PATHS: usize = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ViewerSnapshot {
     source: String,
     sequence: u64,
+    test_machine_column_path: Option<String>,
     #[serde(default)]
     files: Vec<String>,
     current_path: Option<String>,
@@ -46,7 +47,7 @@ struct SyncEnvelope {
 }
 
 struct BridgeState {
-    pipe_tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    pipe_tx: Mutex<Option<watch::Sender<Vec<u8>>>>,
     pending_selection: Mutex<Option<Vec<String>>>,
     pending_sequence: Mutex<Option<u64>>,
     sequence: std::sync::atomic::AtomicU64,
@@ -133,20 +134,17 @@ fn queue_image_selection(state: &BridgeState, paths: Vec<String>) -> Result<(), 
         .pending_sequence
         .lock()
         .map_err(|_| "pending sequence state poisoned")? = Some(sequence);
-    let result = state
-        .pipe_tx
-        .lock()
-        .map_err(|_| "pipe state poisoned")?
-        .as_ref()
-        .ok_or_else(|| "LUXE named pipe is not connected".to_string())?
-        .try_send(bytes)
-        .map_err(|error| match error {
-            mpsc::error::TrySendError::Full(_) => {
-                "LUXE connection is busy; retry the selection".to_string()
-            }
-            mpsc::error::TrySendError::Closed(_) => "LUXE named pipe is closed".to_string(),
-        });
-    result
+    let sender = state.pipe_tx.lock().map_err(|_| "pipe state poisoned")?;
+    if let Some(sender) = sender.as_ref() {
+        sender.send_replace(bytes);
+        Ok(())
+    } else {
+        *state
+            .pending_selection
+            .lock()
+            .map_err(|_| "pending selection state poisoned")? = Some(paths);
+        Ok(())
+    }
 }
 
 fn flush_pending_selection(state: &BridgeState) {
@@ -232,7 +230,7 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                     &stdout,
                     json!({
                         "jsonrpc": "2.0", "id": id,
-                        "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": "0.1.1" }, "capabilities": [] }
+                        "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": "0.1.2" }, "capabilities": [] }
                     }),
                 ),
                 Some("view/open") | Some("viewer/update") => {
@@ -269,24 +267,33 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         {
                             if let Ok(mut current) = state.snapshot.write() {
                                 if snapshot.sequence >= current.sequence {
-                                    let current_path = snapshot.current_path.clone();
-                                    let test_machine_current_path =
-                                        snapshot.test_machine_current_path.clone();
+                                    let sync_path = if snapshot.test_machine_column_path.is_some() {
+                                        snapshot.test_machine_current_path.clone()
+                                    } else {
+                                        snapshot.current_path.clone()
+                                    };
                                     *current = snapshot.clone();
                                     let _ = app.emit("viewer-updated", snapshot);
                                     drop(current);
-                                    let mut paths = current_path.into_iter().collect::<Vec<_>>();
-                                    if let Some(path) = test_machine_current_path {
-                                        paths.push(path);
-                                    }
+                                    let paths = sync_path.into_iter().collect::<Vec<_>>();
                                     if !paths.is_empty() {
                                         let mut unique = std::collections::HashSet::new();
                                         paths.retain(|path| {
                                             unique.insert(normalize_windows_path(path))
                                         });
                                         let _ = queue_image_selection(&state, paths);
-                                    } else if let Ok(mut pending) = state.pending_selection.lock() {
-                                        *pending = None;
+                                    } else {
+                                        if let Ok(mut pending) = state.pending_selection.lock() {
+                                            *pending = None;
+                                        }
+                                        if let Ok(mut pending) = state.pending_sequence.lock() {
+                                            *pending = None;
+                                        }
+                                        if let Ok(sender) = state.pipe_tx.lock() {
+                                            if let Some(sender) = sender.as_ref() {
+                                                sender.send_replace(Vec::new());
+                                            }
+                                        }
                                     }
                                     true
                                 } else {
@@ -340,7 +347,7 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
                 }
             };
             let (read_half, mut write_half) = tokio::io::split(client);
-            let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
+            let (tx, mut rx) = watch::channel::<Vec<u8>>(Vec::new());
             *state.pipe_tx.lock().unwrap() = Some(tx);
             state
                 .luxe_connected
@@ -351,7 +358,10 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
             let mut line = Vec::with_capacity(1024);
             loop {
                 tokio::select! {
-                    Some(bytes) = rx.recv() => {
+                    changed = rx.changed() => {
+                        if changed.is_err() { break; }
+                        let bytes = rx.borrow_and_update().clone();
+                        if bytes.is_empty() { continue; }
                         if write_half.write_all(&bytes).await.is_err() { break; }
                     }
                     result = read_bounded_line(&mut reader, &mut line) => {
@@ -438,6 +448,12 @@ fn main() {
             start_host_protocol(app.handle().clone(), protocol_state.clone());
             start_pipe_bridge(app.handle().clone(), protocol_state.clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .run(tauri::generate_context!())
         .expect("failed to run LUXE image sync plugin");

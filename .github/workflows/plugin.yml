@@ -55,7 +55,7 @@ jobs:
           npm run plugin -- check $pluginRoot
           $artifactDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-artifact'
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
-          $package = Join-Path $artifactDir 'luxe-image-sync-0.1.1-windows-x86_64.hvp'
+          $package = Join-Path $artifactDir 'luxe-image-sync-0.1.2-windows-x86_64.hvp'
           npm run plugin -- pack $pluginRoot $package
           $zipProbe = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe.zip'
           $probeDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe'

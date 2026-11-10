@@ -28,7 +28,7 @@
       <button id="next" type="button">下一张 (D)</button>
     </div>
     <script>
-      const state = { files: [], currentPath: null, source: 'hiviewer', luxeConnected: false };
+      const state = { files: [], currentPath: null, source: 'hiviewer', luxeConnected: false, testMachineMode: false };
       const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
       const setStatus = (text) => { document.querySelector('#status').textContent = text; };
       const setConnection = () => {
@@ -45,7 +45,8 @@
         if (state.source === 'luxe') {
           setStatus('当前路径来自 LUXE；使用 A / D 或按钮可控制 LUXE');
         } else {
-          setStatus(index >= 0 ? `HiViewer 当前选择 ${index + 1} / ${state.files.length}；已同步给 LUXE` : '等待 HiViewer 当前图片同步到 LUXE');
+          const source = state.testMachineMode ? '测试机文件夹' : '当前文件夹';
+          setStatus(index >= 0 ? `HiViewer ${source} ${index + 1} / ${state.files.length}；已同步给 LUXE` : `等待 HiViewer ${source}当前图片`);
         }
       };
       const move = (delta) => {
@@ -66,8 +67,11 @@
         if (event.key.toLowerCase() === 'd') move(1);
       });
       void window.__TAURI__.event.listen('viewer-updated', ({ payload }) => {
-        state.files = payload.files || [];
-        state.currentPath = payload.currentPath || null;
+        state.testMachineMode = Boolean(payload.testMachineColumnPath);
+        state.files = state.testMachineMode ? (payload.testMachineFiles || []) : (payload.files || []);
+        state.currentPath = state.testMachineMode
+          ? (payload.testMachineCurrentPath || null)
+          : (payload.currentPath || null);
         state.source = 'hiviewer';
         render();
       });
