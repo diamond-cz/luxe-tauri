@@ -278,7 +278,7 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
 fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
     tauri::async_runtime::spawn(async move {
         use tokio::{
-            io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
+            io::{AsyncWriteExt, BufReader},
             net::windows::named_pipe::ClientOptions,
             time::sleep,
         };
@@ -338,6 +338,9 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
         }
     });
 }
+
+#[cfg(windows)]
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 #[cfg(windows)]
 async fn read_bounded_line<R: AsyncBufRead + Unpin>(

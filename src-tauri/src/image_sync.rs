@@ -87,7 +87,7 @@ pub fn start(app: AppHandle, hub: ImageSyncHub) {
 #[cfg(windows)]
 async fn run_pipe_server(app: AppHandle, hub: ImageSyncHub) {
     use tokio::{
-        io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
+        io::{AsyncWriteExt, BufReader},
         net::windows::named_pipe::ServerOptions,
         time::{sleep, Duration},
     };
@@ -188,6 +188,9 @@ async fn run_pipe_server(app: AppHandle, hub: ImageSyncHub) {
         });
     }
 }
+
+#[cfg(windows)]
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 #[cfg(windows)]
 async fn read_bounded_line<R: AsyncBufRead + Unpin>(
