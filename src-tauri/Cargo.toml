@@ -1,6 +1,6 @@
 [package]
 name = "luxe-tauri"
-version = "0.2.15"
+version = "0.2.16"
 description = "LUXE — Camera Tuning AE Visualization (Rust + Tauri)"
 authors = ["LUXE"]
 edition = "2021"
@@ -53,6 +53,7 @@ windows = { version = "0.61.3", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_Com",
     "Win32_Storage_FileSystem",
     "Win32_System_Threading",

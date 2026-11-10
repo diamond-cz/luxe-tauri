@@ -290,8 +290,9 @@ export function Isp6sAeVisual({
       syncPairedScroll(selectedEntry.jpg_path, session.imageScroll);
     }
     const selectionIsCurrent = () => {
-      const current = useMtkStore.getState().imageDir[imageDirKey];
-      return current?.dir === imageDir.dir && current.current === idx
+      const latest = useMtkStore.getState();
+      const current = latest.imageDir[imageDirKey];
+      return latest.imageRevisions[imageDirKey] === selectionRevision && current?.dir === imageDir.dir && current.current === idx
         && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
     };
     // 普通点击图片时清除热力图筛选；标题栏的上一张/下一张导航会显式保留
@@ -304,6 +305,7 @@ export function Isp6sAeVisual({
       dir: imageDir.dir, entries: imageDir.entries,
       current: idx, tomlData: cachedToml ?? {}, status: cachedToml ? "done" : "loading", message: null,
     });
+    const selectionRevision = useMtkStore.getState().imageRevisions[imageDirKey];
     if (cachedToml) return;
     try {
       const tomlData = await loadImageToml(selectedEntry.toml_path);

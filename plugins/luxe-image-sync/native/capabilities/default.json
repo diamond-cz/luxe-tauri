@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "LUXE image sync plugin window",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default"]
+  "permissions": ["core:default", "core:event:default", "core:window:allow-set-title"]
 }

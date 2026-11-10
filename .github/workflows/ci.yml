@@ -45,6 +45,7 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - run: npm run release:test
+      - run: npm run sync:test
       # Rust tests embed the configured frontendDist.
       - run: npm run build
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml

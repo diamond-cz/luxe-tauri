@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LUXE 图片联动</title>
+    <title>LUXE</title>
     <style>
-      :root { color-scheme: light dark; font: 14px "Segoe UI", sans-serif; }
+      :root { color-scheme: light dark; font: 14px "Segoe UI", sans-serif; --sync-border: GrayText; --sync-success: LinkText; --sync-warning: CanvasText; }
       body { margin: 0; padding: 18px; background: Canvas; color: CanvasText; }
       header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       h1 { margin: 0; font-size: 18px; }
-      .badge { border: 1px solid #8888; border-radius: 999px; padding: 3px 9px; font-size: 12px; }
-      .badge.ok { color: #107c10; border-color: #107c10; }
-      .badge.warn { color: #9d5d00; border-color: #9d5d00; }
-      .path { min-height: 42px; margin: 12px 0; padding: 10px; border: 1px solid #8886; overflow-wrap: anywhere; line-height: 1.4; }
+      .badge { border: 1px solid var(--sync-border); border-radius: 999px; padding: 3px 9px; font-size: 12px; }
+      .badge.ok { color: var(--sync-success); border-color: var(--sync-success); }
+      .badge.warn { color: var(--sync-warning); border-color: var(--sync-warning); }
+      .path { min-height: 42px; margin: 12px 0; padding: 10px; border: 1px solid var(--sync-border); overflow-wrap: anywhere; line-height: 1.4; }
       .row { display: flex; gap: 8px; }
       button { flex: 1; min-width: 100px; padding: 8px 12px; cursor: pointer; }
       button:disabled { cursor: default; opacity: .55; }
@@ -20,75 +20,13 @@
     </style>
   </head>
   <body>
-    <header><h1>HiViewer 选图同步到 LUXE</h1><span id="connection" class="badge warn">连接中</span></header>
-    <div id="status" class="muted">等待 HiViewer 当前图片...</div>
-    <div id="path" class="path">未选择图片</div>
+    <header><h1>LUXE</h1><span id="connection" class="badge warn">…</span></header>
+    <div role="status" aria-live="polite" id="status" class="muted">…</div>
+    <div id="path" class="path">…</div>
     <div class="row">
-      <button id="previous" type="button">上一张 (A)</button>
-      <button id="next" type="button">下一张 (D)</button>
+      <button id="previous" type="button" disabled>A</button>
+      <button id="next" type="button" disabled>D</button>
     </div>
-    <script>
-      const state = { files: [], currentPath: null, source: 'hiviewer', luxeConnected: false, testMachineMode: false };
-      const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
-      const setStatus = (text) => { document.querySelector('#status').textContent = text; };
-      const setConnection = () => {
-        const badge = document.querySelector('#connection');
-        badge.textContent = state.luxeConnected ? 'LUXE 已连接' : '等待 LUXE';
-        badge.className = `badge ${state.luxeConnected ? 'ok' : 'warn'}`;
-      };
-      const render = () => {
-        document.querySelector('#path').textContent = state.currentPath || '未选择图片';
-        const index = state.currentPath ? state.files.indexOf(state.currentPath) : -1;
-        document.querySelector('#previous').disabled = !state.files.length || !state.luxeConnected;
-        document.querySelector('#next').disabled = !state.files.length || !state.luxeConnected;
-        setConnection();
-        if (state.source === 'luxe') {
-          setStatus('当前路径来自 LUXE；使用 A / D 或按钮可控制 LUXE');
-        } else {
-          const source = state.testMachineMode ? '测试机文件夹' : '当前文件夹';
-          setStatus(index >= 0 ? `HiViewer ${source} ${index + 1} / ${state.files.length}；已同步给 LUXE` : `等待 HiViewer ${source}当前图片`);
-        }
-      };
-      const move = (delta) => {
-        if (!state.files.length) return;
-        const currentIndex = state.files.indexOf(state.currentPath);
-        const index = currentIndex >= 0 ? currentIndex : (delta > 0 ? -1 : 0);
-        const next = state.files[(index + delta + state.files.length) % state.files.length];
-        void invoke('select_image', { imagePath: next }).then(() => {
-          state.currentPath = next;
-          state.source = 'luxe';
-          render();
-        }).catch((error) => setStatus(`发送失败：${String(error)}`));
-      };
-      document.querySelector('#previous').onclick = () => move(-1);
-      document.querySelector('#next').onclick = () => move(1);
-      window.addEventListener('keydown', (event) => {
-        if (event.key.toLowerCase() === 'a') move(-1);
-        if (event.key.toLowerCase() === 'd') move(1);
-      });
-      void window.__TAURI__.event.listen('viewer-updated', ({ payload }) => {
-        state.testMachineMode = Boolean(payload.testMachineColumnPath);
-        state.files = state.testMachineMode ? (payload.testMachineFiles || []) : (payload.files || []);
-        state.currentPath = state.testMachineMode
-          ? (payload.testMachineCurrentPath || null)
-          : (payload.currentPath || null);
-        state.source = 'hiviewer';
-        render();
-      });
-      void window.__TAURI__.event.listen('luxe-selection', ({ payload }) => {
-        state.currentPath = payload.imagePath || null;
-        state.source = 'luxe';
-        render();
-      });
-      void window.__TAURI__.event.listen('luxe-connection', ({ payload }) => {
-        state.luxeConnected = payload === true;
-        render();
-      });
-      void invoke('is_luxe_connected').then((connected) => {
-        state.luxeConnected = connected === true;
-        render();
-      }).catch((error) => setStatus(`读取连接状态失败：${String(error)}`));
-      render();
-    </script>
+    <script src="bridge.js"></script>
   </body>
 </html>

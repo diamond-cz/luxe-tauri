@@ -2587,3 +2587,21 @@
 **验证**
 
 - 本轮运行 `npm run typecheck`、插件 Rust `rustfmt --check`、`git diff --check`；Rust/Tauri 编译、包检查和现场关闭窗口/快速切图验收交由 GitHub Actions 与 HiViewer 实机完成。
+
+### 2026-11-10：HiViewer A/D 切图与快照更新顺序保护
+
+**亮点**
+
+- `plugins/luxe-image-sync/native/src/main.rs` 的 `select_image` 在同一个快照读锁周期内校验路径并写入发送队列，避免校验后新 HiViewer 快照先更新、旧 A/D 指令随后覆盖新选择。
+
+**痛点**
+
+- 旧流程在路径校验后释放快照读锁，再单独加锁写入队列；新快照与旧 A/D 指令的并发时序可能让旧选择最后入队。
+
+**闭坑**
+
+- `select_image` 的快照校验和入队必须处于同一个快照读锁保护周期；宿主更新快照后再入队，确保新快照选择拥有较新队列序号。
+
+**验证**
+
+- `npm run sync:test` 17 项通过，`npm run typecheck` 通过，受影响 Rust 文件 `rustfmt --check --edition 2021` 通过，插件 `bridge.js` 的 `node --check` 通过，`git diff --check` 通过。未运行 Cargo/Tauri 编译或测试；HiViewer 与 LUXE 桌面双向验收未执行。

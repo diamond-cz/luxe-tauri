@@ -1,44 +1,13 @@
-import { listen } from "@tauri-apps/api/event";
-import { call } from "@/ipc/client";
+import { completeSelection, listenForSelection, publishSelection } from "@/ipc/imageSync";
 import { loadImageToml } from "@/ipc/imageScan";
+import { i18n } from "@/locales/i18n";
 import { useMtkStore } from "@/stores/mtkStore";
-import { ISP_LIST, type IspId } from "@/views/mtk/ispTabs";
+import { ISP_LIST, ISP_TABS, type IspId } from "@/views/mtk/ispTabs";
 import type { ImageSyncMessage, ImageSyncResult } from "@/types/imageSync";
+import { findIndexedImage } from "./imageSyncMatching";
+import { createImageSyncReceiver } from "./imageSyncReceiver";
 
-const EVENT = "image_sync_selection";
-const MAX_SYNC_SOURCES = 32;
-const normalizePath = (path: string) => path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase();
-
-function selectionPaths(message: ImageSyncMessage): string[] {
-  return [...new Set([...(message.imagePaths ?? []), ...(message.imagePath ? [message.imagePath] : [])]
-    .filter((path) => /^(?:[a-z]:[\\/]|\\\\)/i.test(path)))];
-}
-
-type IndexedMatch = { imageDirKey: string; index: number; path: string };
-
-function findIndexedImage(paths: string[]): { match?: IndexedMatch; ambiguous: boolean } {
-  const imageDirs = Object.entries(useMtkStore.getState().imageDir);
-  for (const path of paths) {
-    const normalized = normalizePath(path);
-    const exact = imageDirs.flatMap(([imageDirKey, image]) => image.entries.flatMap((entry, index) =>
-      normalizePath(entry.jpg_path) === normalized ? [{ imageDirKey, index, path: entry.jpg_path }] : []));
-    if (exact.length === 1) return { match: exact[0], ambiguous: false };
-    if (exact.length > 1) return { ambiguous: true };
-  }
-
-  for (const path of paths) {
-    const normalized = normalizePath(path);
-    const filename = normalized.split("\\").at(-1);
-    if (!filename) continue;
-    const byName = imageDirs.flatMap(([imageDirKey, image]) => image.entries.flatMap((entry, index) =>
-      normalizePath(entry.jpg_path).split("\\").at(-1) === filename
-        ? [{ imageDirKey, index, path: entry.jpg_path }]
-        : []));
-    if (byName.length === 1) return { match: byName[0], ambiguous: false };
-    if (byName.length > 1) return { ambiguous: true };
-  }
-  return { ambiguous: false };
-}
+const localSelectionObservers = new Set<() => void>();
 
 function routeToWorkspace(imageDirKey: string) {
   const [ispText, tabText] = imageDirKey.split("|");
@@ -49,97 +18,81 @@ function routeToWorkspace(imageDirKey: string) {
   const tab = isp === "ISP6S" && tabText === "0" && current.current_isp === ispIndex
     && (current.current_tab === 0 || current.current_tab === 1)
     ? current.current_tab : Number(tabText);
-  if (!Number.isInteger(tab) || tab < 0) return null;
-  useMtkStore.getState().setCurrentIsp(ispIndex);
-  useMtkStore.getState().setCurrentTab(tab);
+  if (!Number.isInteger(tab) || tab < 0 || tab >= ISP_TABS[isp].length) return null;
+  if (current.current_isp !== ispIndex) useMtkStore.getState().setCurrentIsp(ispIndex);
+  if (useMtkStore.getState().mtk.current_tab !== tab) useMtkStore.getState().setCurrentTab(tab);
   return `${isp}|${tab}`;
 }
 
 function applyRemoteSelection(message: ImageSyncMessage): ImageSyncResult {
-  if (message.protocolVersion !== 1) return { accepted: false, reason: "unsupported-version" };
-  const paths = selectionPaths(message);
+  const paths = [...new Set([...(message.imagePaths ?? []), ...(message.imagePath ? [message.imagePath] : [])]
+    .filter((path) => /^(?:[a-z]:[\\/]|\\\\)/i.test(path)))];
   if (!paths.length) return { accepted: false, reason: "image-not-indexed" };
-  const { match, ambiguous } = findIndexedImage(paths);
+  const { match, ambiguous } = findIndexedImage(useMtkStore.getState().imageDir, paths);
   if (ambiguous) return { accepted: false, reason: "ambiguous-workspace" };
   if (!match) return { accepted: false, reason: "image-not-indexed" };
   const { imageDirKey, index } = match;
   const workspaceKey = routeToWorkspace(imageDirKey);
   if (!workspaceKey) return { accepted: false, reason: "image-not-indexed" };
   const image = useMtkStore.getState().imageDir[imageDirKey];
-  if (!image?.entries.length) return { accepted: false, reason: "image-not-indexed" };
-  const entry = image.entries[index];
+  const entry = image?.entries[index];
+  if (!entry || entry.jpg_path !== match.path) return { accepted: false, reason: "image-not-indexed" };
   useMtkStore.getState().setExternalImageSelection(imageDirKey, workspaceKey, index, entry.jpg_path);
+  const revision = useMtkStore.getState().imageRevisions[imageDirKey];
+  const isCurrent = () => {
+    const latest = useMtkStore.getState();
+    return latest.imageRevisions[imageDirKey] === revision && latest.imageDir[imageDirKey]?.entries === image.entries
+      && latest.imageSelection[workspaceKey] === entry.jpg_path;
+  };
+  const [isp, tab] = imageDirKey.split("|");
   void loadImageToml(entry.toml_path).then((tomlData) => {
-    const latest = useMtkStore.getState().imageDir[imageDirKey];
-    if (latest?.entries[latest.current]?.jpg_path !== entry.jpg_path) return;
-    useMtkStore.getState().setImageDir(
-      imageDirKey.split("|")[0] as IspId,
-      Number(imageDirKey.split("|")[1]),
-      { tomlData, status: "done", message: `当前 ${entry.name}` },
-    );
+    if (!isCurrent()) return;
+    useMtkStore.getState().setImageDir(isp as IspId, Number(tab), {
+      tomlData, status: "done", message: i18n.t("image_sync.current", { name: entry.name }),
+    });
   }).catch(() => {
-    const latest = useMtkStore.getState().imageDir[imageDirKey];
-    if (latest?.entries[latest.current]?.jpg_path === entry.jpg_path) {
-      useMtkStore.getState().setImageDir(
-        imageDirKey.split("|")[0] as IspId,
-        Number(imageDirKey.split("|")[1]),
-        { tomlData: {}, status: "done", message: `当前 ${entry.name}（未找到同名 TOML，暂显示 -）` },
-      );
-    }
+    if (!isCurrent()) return;
+    useMtkStore.getState().setImageDir(isp as IspId, Number(tab), {
+      tomlData: {}, status: "done", message: i18n.t("image_sync.current_without_toml", { name: entry.name }),
+    });
   });
+  // ACK confirms index/selection mutation; sidecar TOML loading is independent.
   return { accepted: true };
 }
 
 export async function publishImageSelection(imagePath: string): Promise<void> {
-  await call<void>("publish_image_selection", { imagePath });
+  for (const cancel of localSelectionObservers) cancel();
+  await publishSelection(imagePath);
 }
 
-export async function startImageSyncListener(): Promise<() => void> {
-  let pending: ImageSyncMessage | null = null;
-  let applyingPending = false;
-  const lastSequenceBySource = new Map<string, number>();
-
-  const acceptMessage = (message: ImageSyncMessage): boolean => {
-    if (message.kind !== "selection" || message.sourceInstance.startsWith("luxe-")) return false;
-    const lastSequence = lastSequenceBySource.get(message.sourceInstance) ?? 0;
-    if (message.sequence <= lastSequence) return false;
-    if (!lastSequenceBySource.has(message.sourceInstance) && lastSequenceBySource.size >= MAX_SYNC_SOURCES) return false;
-    lastSequenceBySource.set(message.sourceInstance, message.sequence);
-    return true;
-  };
-
-  const queueOrApply = (message: ImageSyncMessage) => {
-    if (!acceptMessage(message)) return;
-    const result = applyRemoteSelection(message);
-    pending = null;
-    if (!result.accepted && result.reason === "image-not-indexed") {
-      if (Object.values(useMtkStore.getState().imageDir).some((image) => image.status === "scanning" || image.status === "loading")) {
-        pending = message;
-      }
-    }
-    if (!result.accepted) {
-      console.info("image sync selection was not applied", result.reason, selectionPaths(message));
-    }
-  };
-
-  const tryPending = () => {
-    if (!pending || applyingPending) return;
-    applyingPending = true;
-    const message = pending;
-    pending = null;
-    try {
+export async function startImageSyncListener(onApplied?: () => void): Promise<() => void> {
+  const receiver = createImageSyncReceiver({
+    apply: (message) => {
       const result = applyRemoteSelection(message);
-      if (!result.accepted && result.reason === "image-not-indexed") {
-        if (Object.values(useMtkStore.getState().imageDir).some((image) => image.status === "scanning" || image.status === "loading")) pending = message;
-      }
-    } finally {
-      applyingPending = false;
-    }
-  };
-  const unlistenStore = useMtkStore.subscribe(() => tryPending());
-  const unlistenEvent = await listen<ImageSyncMessage>(EVENT, ({ payload }) => queueOrApply(payload));
+      if (result.accepted) onApplied?.();
+      return result;
+    },
+    isLoading: () => Object.values(useMtkStore.getState().imageDir)
+      .some((image) => image.status === "scanning" || image.status === "loading"),
+    complete: (delivery, result) => {
+      void completeSelection(delivery.deliveryId, result).catch((error) =>
+        console.warn("image sync completion failed", error));
+    },
+  });
+  // A failed event registration leaves no synchronous store subscription behind.
+  let unlistenEvent: () => void;
+  try { unlistenEvent = await listenForSelection(receiver.receive); }
+  catch (error) { receiver.dispose(); throw error; }
+  const unlistenStore = useMtkStore.subscribe((next, previous) => {
+    if (receiver.isApplying()) return;
+    if (next.imageSelection !== previous.imageSelection) receiver.localSelection();
+    else if (next.imageDir !== previous.imageDir) receiver.retry();
+  });
+  localSelectionObservers.add(receiver.localSelection);
   return () => {
     unlistenStore();
     unlistenEvent();
+    localSelectionObservers.delete(receiver.localSelection);
+    receiver.dispose();
   };
 }

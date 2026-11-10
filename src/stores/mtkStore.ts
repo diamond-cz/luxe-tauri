@@ -39,6 +39,8 @@ interface MtkState {
   imageDir: Record<string, ImageDirState>;
   /** Per-workspace image selection. AE Basic and ToneMap can opt out of syncing. */
   imageSelection: Record<string, string | null>;
+  /** Ephemeral generation; invalidates async TOML results including A -> B -> A. */
+  imageRevisions: Record<string, number>;
 
   hydrate: (value: Mtk) => void;
   setCurrentIsp:  (idx: number) => void;
@@ -61,6 +63,7 @@ export const useMtkStore = create<MtkState>()(
     imports:  {},
     imageDir: {},
     imageSelection: {},
+    imageRevisions: {},
 
     hydrate: (value) => set((s) => {
       s.mtk = value;
@@ -69,6 +72,7 @@ export const useMtkStore = create<MtkState>()(
         key, { ...DEFAULT_IMPORT, filePath },
       ]));
       s.imageSelection = {};
+      for (const key of Object.keys(s.imageRevisions)) s.imageRevisions[key] += 1;
       if (value.cpp_path && !s.imports["ISP6S|0"]) {
         s.imports["ISP6S|0"] = { ...DEFAULT_IMPORT, filePath: value.cpp_path };
       }
@@ -92,6 +96,9 @@ export const useMtkStore = create<MtkState>()(
     }),
     setImageDir: (isp, tabIdx, patch) => set((s) => {
       const key = `${isp}|${tabIdx}`;
+      if (patch.dir !== undefined || patch.entries !== undefined || patch.current !== undefined || patch.status === "scanning") {
+        s.imageRevisions[key] = (s.imageRevisions[key] ?? 0) + 1;
+      }
       s.imageDir[key] = { ...(s.imageDir[key] ?? DEFAULT_IMAGE_DIR), ...patch };
       const image = s.imageDir[key];
       if (image.dir && image.status === "scanning") {
@@ -110,11 +117,14 @@ export const useMtkStore = create<MtkState>()(
       }
     }),
     setImageSelection: (workspaceKey, path) => set((s) => {
+      const imageDirKey = workspaceKey === "ISP6S|1" ? "ISP6S|0" : workspaceKey;
+      s.imageRevisions[imageDirKey] = (s.imageRevisions[imageDirKey] ?? 0) + 1;
       s.imageSelection[workspaceKey] = path;
     }),
     setExternalImageSelection: (imageDirKey, workspaceKey, index, path) => set((s) => {
       const image = s.imageDir[imageDirKey];
       if (!image || index < 0 || index >= image.entries.length || image.entries[index].jpg_path !== path) return;
+      s.imageRevisions[imageDirKey] = (s.imageRevisions[imageDirKey] ?? 0) + 1;
       image.current = index;
       image.tomlData = {};
       image.status = "loading";

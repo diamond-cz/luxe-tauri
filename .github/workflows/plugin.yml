@@ -5,12 +5,20 @@ on:
     branches: [main]
     paths:
       - "plugins/luxe-image-sync/**"
+      - "src-tauri/src/image_sync/protocol.rs"
+      - "src-tauri/resources/translations/**"
+      - "src/services/imageSync*.ts"
+      - "scripts/image-sync.test.mjs"
       - "scripts/plugin-package.mjs"
       - "package.json"
       - ".github/workflows/plugin.yml"
   pull_request:
     paths:
       - "plugins/luxe-image-sync/**"
+      - "src-tauri/src/image_sync/protocol.rs"
+      - "src-tauri/resources/translations/**"
+      - "src/services/imageSync*.ts"
+      - "scripts/image-sync.test.mjs"
       - "scripts/plugin-package.mjs"
       - "package.json"
       - ".github/workflows/plugin.yml"
@@ -35,11 +43,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+
+      - run: npm ci
+      - run: npm run sync:test
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.95.0"
           targets: x86_64-pc-windows-msvc
+
+      - name: Test native protocol and reconnect queue
+        run: cargo test --locked --manifest-path plugins/luxe-image-sync/native/Cargo.toml --target x86_64-pc-windows-msvc
 
       - name: Build native-view backend
         run: cargo build --locked --release --manifest-path plugins/luxe-image-sync/native/Cargo.toml --target x86_64-pc-windows-msvc
@@ -55,7 +70,8 @@ jobs:
           npm run plugin -- check $pluginRoot
           $artifactDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-artifact'
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
-          $package = Join-Path $artifactDir 'luxe-image-sync-0.1.2-windows-x86_64.hvp'
+          $pluginVersion = (Get-Content -LiteralPath (Join-Path $pluginRoot 'manifest.json') -Raw | ConvertFrom-Json).version
+          $package = Join-Path $artifactDir "luxe-image-sync-$pluginVersion-windows-x86_64.hvp"
           npm run plugin -- pack $pluginRoot $package
           $zipProbe = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe.zip'
           $probeDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe'
@@ -74,6 +90,10 @@ jobs:
             $checksum = $checksums.PSObject.Properties[$required].Value
             if ($checksum -notmatch '^[0-9a-f]{64}$') {
               throw "invalid checksum for $required"
+            }
+            $actualChecksum = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $probeDir $required)).Hash.ToLowerInvariant()
+            if ($actualChecksum -ne $checksum) {
+              throw "checksum mismatch for $required"
             }
           }
           $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()

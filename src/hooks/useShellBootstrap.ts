@@ -85,13 +85,13 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           void saveStateSection("mtk", next.mtk).catch((error) => console.warn("save mtk", error));
         }
       }));
-      const stopImageSync = await startImageSyncListener();
-      if (disposed) stopImageSync();
-      else unlisteners.push(stopImageSync);
       useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
       const route = ["/home", "/mtk", "/qualcomm", "/unisoc", "/settings"].includes(root.last_route ?? "")
         ? root.last_route! : "/home";
       handlersRef.current.onNavigate?.(route);
+      // Optional bridge failure must not prevent shell startup or other listeners.
+      void track(startImageSyncListener(() => handlersRef.current.onNavigate?.("/mtk")))
+        .catch((error) => console.warn("image sync listener unavailable", error));
       handlersRef.current.onReady?.();
       void win.show().catch((err) => console.warn("show main window failed", err));
 

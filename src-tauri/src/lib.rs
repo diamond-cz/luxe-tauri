@@ -153,6 +153,7 @@ pub fn run() {
             commands::image_cmds::load_image_preview,
             commands::image_cmds::load_image_hover_preview,
             commands::image_sync_cmds::publish_image_selection,
+            commands::image_sync_cmds::complete_image_sync_selection,
             commands::text_cmds::read_text_file,
             commands::text_cmds::write_temp_text_file,
             commands::text_cmds::write_text_file,

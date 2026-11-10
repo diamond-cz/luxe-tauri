@@ -12,5 +12,12 @@ export interface ImageSyncMessage {
 
 export interface ImageSyncResult {
   accepted: boolean;
-  reason?: "image-not-indexed" | "ambiguous-workspace" | "unsupported-version";
+  reason?: "image-not-indexed" | "ambiguous-workspace" | "unsupported-version"
+    | "stale-sequence" | "too-many-sources" | "superseded" | "local-selection"
+    | "listener-stopped" | "invalid-message";
+}
+
+/** Private WebView delivery identity; never sent over the pipe. */
+export interface ImageSyncDelivery extends ImageSyncMessage {
+  deliveryId: string;
 }
