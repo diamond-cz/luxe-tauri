@@ -2549,4 +2549,22 @@
 
 **验证**
 
-- 本轮将运行 `npm run typecheck`、受影响 Rust 文件 `rustfmt --check`、插件 Rust `rustfmt --check`、`git diff --check`；不运行本地 Cargo/Tauri 编译，Windows 构建和插件包由 GitHub Actions 完成。
+- `npm run typecheck`、受影响 Rust 文件 `rustfmt --check`、插件 Rust `rustfmt --check`、`git diff --check` 均通过；GitHub Actions `42758868085` 与 `42758867958` 成功，artifact `luxe-image-sync-windows-x86_64` 已上传。
+
+### 2026-11-10：插件窗口命令状态注入修复
+
+**亮点**
+
+- 插件 Tauri `select_image` 命令改为读取已注册的 `Arc<BridgeState>`，与 `.manage(state.clone())` 的实际类型一致；窗口新增 LUXE 连接状态和禁用态按钮，错误信息直接显示发送阶段。
+
+**痛点**
+
+- 旧包能启动并接收 HiViewer 快照，但 A/D 调用在 Tauri 命令解析阶段报 `state: not managed`，因此用户看到窗口却无法反向控制 LUXE。
+
+**闭坑**
+
+- Tauri 命令的 `State<T>` 必须与 `Builder.manage(...)` 注册的精确类型一致；使用 `Arc<T>` 管理共享后台状态时，命令签名必须使用 `State<Arc<T>>`。
+
+**验证**
+
+- `npm run typecheck`、插件 Rust `rustfmt --check`、`git diff --check` 均通过；没有运行本地 Cargo/Tauri 编译。`npm run plugin -- check plugins/luxe-image-sync` 因本地没有 CI 生成的 `bin/luxe-image-sync.exe` 而失败，完整包检查由 Actions 执行；`.hvp` 安装和按钮现场交互仍需用户验收。

@@ -6,9 +6,9 @@
 
 ## 获取插件包
 
-GitHub Actions 的 artifact `luxe-image-sync-windows-x86_64` 是一个下载容器，下载后必须先解压 artifact，再从里面取出 `luxe-image-sync-0.1.0-windows-x86_64.hvp`。HiViewer 安装时选择这个 `.hvp` 文件，不要直接选择 artifact 外层 ZIP；旧版本包如果提示 `Invalid Central Directory header`，请删除后重新下载最新 Actions artifact。
+GitHub Actions 的 artifact `luxe-image-sync-windows-x86_64` 是一个下载容器，下载后必须先解压 artifact，再从里面取出 `luxe-image-sync-0.1.1-windows-x86_64.hvp`。HiViewer 安装时选择这个 `.hvp` 文件，不要直接选择 artifact 外层 ZIP；旧版本包如果提示 `Invalid Central Directory header`，请删除后重新下载最新 Actions artifact。
 
-每次推送 main 且插件文件有变化时，GitHub Actions 的 **Build HiViewer plugin** workflow 会构建并校验 `.hvp`。在该次运行的 Artifacts 下载 `luxe-image-sync-0.1.0-windows-x86_64.hvp`。workflow_dispatch 也可手动构建指定分支。
+每次推送 main 且插件文件有变化时，GitHub Actions 的 **Build HiViewer plugin** workflow 会构建并校验 `.hvp`。在该次运行的 Artifacts 下载 `luxe-image-sync-0.1.1-windows-x86_64.hvp`。workflow_dispatch 也可手动构建指定分支。
 
 ## 手动安装 SOP
 

@@ -50,6 +50,7 @@ struct BridgeState {
     pending_selection: Mutex<Option<Vec<String>>>,
     pending_sequence: Mutex<Option<u64>>,
     sequence: std::sync::atomic::AtomicU64,
+    luxe_connected: std::sync::atomic::AtomicBool,
     snapshot: RwLock<ViewerSnapshot>,
 }
 
@@ -60,13 +61,14 @@ impl Default for BridgeState {
             pending_selection: Mutex::new(None),
             pending_sequence: Mutex::new(None),
             sequence: std::sync::atomic::AtomicU64::new(0),
+            luxe_connected: std::sync::atomic::AtomicBool::new(false),
             snapshot: RwLock::new(ViewerSnapshot::default()),
         }
     }
 }
 
 #[tauri::command]
-fn select_image(image_path: String, state: State<'_, BridgeState>) -> Result<(), String> {
+fn select_image(image_path: String, state: State<'_, Arc<BridgeState>>) -> Result<(), String> {
     if !is_absolute_windows_path(&image_path) {
         return Err("image path must be absolute".into());
     }
@@ -85,6 +87,13 @@ fn select_image(image_path: String, state: State<'_, BridgeState>) -> Result<(),
     }
     drop(snapshot);
     queue_image_selection(&state, vec![image_path])
+}
+
+#[tauri::command]
+fn is_luxe_connected(state: State<'_, Arc<BridgeState>>) -> bool {
+    state
+        .luxe_connected
+        .load(std::sync::atomic::Ordering::Acquire)
 }
 
 fn selection_message(state: &BridgeState, paths: &[String]) -> Result<(u64, Vec<u8>), String> {
@@ -223,7 +232,7 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                     &stdout,
                     json!({
                         "jsonrpc": "2.0", "id": id,
-                        "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": "0.1.0" }, "capabilities": [] }
+                        "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": "0.1.1" }, "capabilities": [] }
                     }),
                 ),
                 Some("view/open") | Some("viewer/update") => {
@@ -333,6 +342,9 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
             let (read_half, mut write_half) = tokio::io::split(client);
             let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
             *state.pipe_tx.lock().unwrap() = Some(tx);
+            state
+                .luxe_connected
+                .store(true, std::sync::atomic::Ordering::Release);
             flush_pending_selection(&state);
             let _ = app.emit("luxe-connection", true);
             let mut reader = BufReader::new(read_half);
@@ -373,6 +385,9 @@ fn start_pipe_bridge(app: tauri::AppHandle, state: Arc<BridgeState>) {
                 }
             }
             *state.pipe_tx.lock().unwrap() = None;
+            state
+                .luxe_connected
+                .store(false, std::sync::atomic::Ordering::Release);
             let _ = app.emit("luxe-connection", false);
             sleep(Duration::from_secs(1)).await;
         }
@@ -418,7 +433,7 @@ fn main() {
     let protocol_state = state.clone();
     tauri::Builder::default()
         .manage(state.clone())
-        .invoke_handler(tauri::generate_handler![select_image])
+        .invoke_handler(tauri::generate_handler![select_image, is_luxe_connected])
         .setup(move |app| {
             start_host_protocol(app.handle().clone(), protocol_state.clone());
             start_pipe_bridge(app.handle().clone(), protocol_state.clone());
