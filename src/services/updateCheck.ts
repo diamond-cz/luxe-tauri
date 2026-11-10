@@ -7,6 +7,7 @@ export const GITHUB_REPOSITORY_NAME = "luxe-tauri";
 export const GITHUB_REPOSITORY_URL = `https://github.com/${GITHUB_REPOSITORY_OWNER}/${GITHUB_REPOSITORY_NAME}`;
 export const GITHUB_RELEASES_URL = `${GITHUB_REPOSITORY_URL}/releases`;
 export const CURRENT_VERSION = APP_VERSION;
+const DIRECT_UPDATER_MANIFEST_URL = `${GITHUB_REPOSITORY_URL}/releases/latest/download/latest.json`;
 
 export interface UpdateCheckResult {
   status: "ok" | "available" | "manual";
@@ -21,45 +22,72 @@ export interface UpdateCheckResult {
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   const currentVersion = await getVersion();
-  const update = await check({
-    timeout: 15000,
-    headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-  });
-  if (!update) {
-    const endpoint = new URL(UPDATER_MANIFEST_URL);
-    endpoint.searchParams.set("checked_at", String(Date.now()));
-    const response = await fetch(endpoint, { cache: "no-store", signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error(`更新清单读取失败：HTTP ${response.status}`);
-    const manifest: unknown = await response.json();
-    if (!manifest || typeof manifest !== "object" || !("version" in manifest)
-      || typeof manifest.version !== "string" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
-      throw new Error("更新清单缺少有效版本号");
+  try {
+    const update = await check({
+      timeout: 15000,
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    });
+    if (update) {
+      return {
+        status: "available",
+        currentVersion: update.currentVersion || currentVersion,
+        latestVersion: update.version,
+        releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${update.version}`,
+        publishedAt: update.date,
+        notes: update.body,
+        checkedAt: Date.now(),
+        update,
+      };
     }
-    const newer = isNewerStableVersion(manifest.version, currentVersion);
-    if (newer === null) throw new Error("无法比较当前版本与更新清单版本");
-    return {
-      status: newer ? "manual" : "ok",
-      currentVersion,
-      latestVersion: manifest.version,
-      releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${manifest.version}`,
-      notes: "notes" in manifest && typeof manifest.notes === "string" ? manifest.notes : undefined,
-      checkedAt: Date.now(),
-      update: null,
-    };
+  } catch (error) {
+    console.warn("Tauri updater check failed; trying release metadata", error);
   }
-  return {
-    status: "available",
-    currentVersion: update.currentVersion || currentVersion,
-    latestVersion: update.version,
-    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${update.version}`,
-    publishedAt: update.date,
-    notes: update.body,
-    checkedAt: Date.now(),
-    update,
-  };
+  return readReleaseMetadata(currentVersion);
 }
 
-function isNewerStableVersion(remote: string, current: string): boolean | null {
+type ReleaseMetadata = { version: string; notes?: string; pub_date?: string };
+
+async function readReleaseMetadata(currentVersion: string): Promise<UpdateCheckResult> {
+  let lastError: unknown;
+  for (const manifestUrl of [UPDATER_MANIFEST_URL, DIRECT_UPDATER_MANIFEST_URL]) {
+    try {
+      const endpoint = new URL(manifestUrl);
+      endpoint.searchParams.set("checked_at", String(Date.now()));
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15000),
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`更新清单读取失败：HTTP ${response.status}`);
+      const manifest: unknown = await response.json();
+      if (!isReleaseMetadata(manifest)) throw new Error("更新清单缺少有效版本号");
+      const newer = isNewerStableVersion(manifest.version, currentVersion);
+      if (newer === null) throw new Error("无法比较当前版本与更新清单版本");
+      return {
+        status: newer ? "manual" : "ok",
+        currentVersion,
+        latestVersion: manifest.version,
+        releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${manifest.version}`,
+        publishedAt: manifest.pub_date,
+        notes: manifest.notes,
+        checkedAt: Date.now(),
+        update: null,
+      };
+    } catch (error) {
+      lastError = error;
+      console.warn(`Release metadata request failed: ${manifestUrl}`, error);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("无法读取更新清单");
+}
+
+export function isReleaseMetadata(value: unknown): value is ReleaseMetadata {
+  return typeof value === "object" && value !== null && "version" in value
+    && typeof value.version === "string" && /^\d+\.\d+\.\d+$/.test(value.version);
+}
+
+export function isNewerStableVersion(remote: string, current: string): boolean | null {
+  if (!/^\d+\.\d+\.\d+$/.test(remote)) return null;
   const currentMatch = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(current);
   if (!currentMatch) return null;
   const remoteParts = remote.split(".").map(Number);

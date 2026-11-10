@@ -2605,3 +2605,22 @@
 **验证**
 
 - `npm run sync:test` 17 项通过，`npm run typecheck` 通过，受影响 Rust 文件 `rustfmt --check --edition 2021` 通过，插件 `bridge.js` 的 `node --check` 通过，`git diff --check` 通过。未运行 Cargo/Tauri 编译或测试；HiViewer 与 LUXE 桌面双向验收未执行。
+
+### 2026-11-10：更新检查代理失败回退与版本清单校验
+
+**亮点**
+
+- `src/services/updateCheck.ts` 保留 Tauri updater 的签名更新路径；当 updater 因代理、清单或签名读取异常失败时，改为读取代理和 GitHub 直连的 `latest.json` 元数据，并返回 Release 手动更新入口，避免网络故障直接显示通用失败。
+- 远端清单与当前版本比较前同时校验两侧稳定语义版本，异常版本不再被误判为“已是最新”。
+
+**痛点**
+
+- 旧流程只在 `check()` 返回空值时读取清单；`check()` 抛出网络或签名异常会直接结束，代理临时不可用时无法获得 Release 入口。
+
+**闭坑**
+
+- 元数据 fallback 只负责发现版本和打开 Release 页面，不执行未签名安装；实际下载与安装仍必须由 Tauri updater 完成签名校验。代理端点失败后才尝试 GitHub 直连，并记录两次请求错误。
+
+**验证**
+
+- `npm run release:test` 29 项通过，`npm run typecheck` 通过，`git diff --check` 通过。当前环境无法访问 GitHub/gh-proxy，未进行远端 `latest.json` 实时读取；桌面更新下载和安装未实测。
