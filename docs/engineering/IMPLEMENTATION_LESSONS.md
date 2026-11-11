@@ -2624,3 +2624,23 @@
 **验证**
 
 - `npm run release:test` 29 项通过，`npm run typecheck` 通过，`git diff --check` 通过。当前环境无法访问 GitHub/gh-proxy，未进行远端 `latest.json` 实时读取；桌面更新下载和安装未实测。
+
+### 2026-11-10：收敛 GitHub Actions 为三条工作流
+
+**亮点**
+
+- `.github/workflows/` 保留 `ci.yml` 代码验证、`plugin.yml` HiViewer `.hvp` 构建、`release.yml` LUXE 正式发布三条职责独立的工作流；README 的触发条件、产物与发版步骤与实际 YAML 对齐。
+- 删除 Star 事件触发并覆盖稳定 Release 资产的 `star-release.yml`，同步移除只供该流程使用的 `prepare-star-version` 脚本、测试和 `prepare-release.mjs` Star 分支。
+
+**痛点**
+
+- Star 工作流使用带预发布版本的构建产物替换稳定 Release 的安装包和 `latest.json`，让用户事件可以改变正式更新通道，且产生的行为与固定稳定 tag 的发版说明不一致。
+- README 在许可声明之后残留英文 Star-triggered build 章节，工作流表和方案依据也继续描述已取消的覆盖行为。
+
+**闭坑**
+
+- 新增、删除或合并 workflow 时，同步检查 README 自动化流程、触发路径、artifact、脚本入口和 package scripts；正式 Release 资产只允许 `release.yml` 产生。
+
+**验证**
+
+- `npm run release:test` 24 项通过，`npm run typecheck`、`npm run version:check`、`git diff --check` 通过；`.github/workflows/` 仅剩 `ci.yml`、`plugin.yml` 和 `release.yml`，README、package scripts 与 scripts 中无 Star workflow/版本脚本引用。本次未触发远端 GitHub Actions。

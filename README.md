@@ -121,12 +121,15 @@ git push origin vX.Y.Z
 
 ### 自动化流程
 
+仓库只保留三条 GitHub Actions 工作流，各自负责代码验证、HiViewer 插件构建和 LUXE 正式版本发布：
 
-| 工作流                                                   | 触发与行为                                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| [Validate changes](.github/workflows/ci.yml)             | PR、`main` 推送或手动运行；检查版本、发布脚本、前端和 Rust。PR 与 `main` 推送仅在非 Markdown 改动时运行 |
-| [Publish Windows release](.github/workflows/release.yml) | 推送 `v*` tag 或手动指定已有 tag；严格校验稳定版本后构建、签名、上传并发布 |
-| [Publish latest build on Star](.github/workflows/star-release.yml) | 仓库所有者 Star 或手动运行；基于 `main` 构建带运行编号的 Star 版本，替换最新稳定 Release 的更新资产 |
+| 工作流 | 触发条件 | 职责 |
+| --- | --- | --- |
+| [Validate changes](.github/workflows/ci.yml) | Pull request、`main` 推送、手动运行 | 校验版本同步，运行发布和图片联动脚本测试，构建前端并运行 LUXE Rust 测试；Pull request 和 `main` 推送忽略纯 Markdown 变更 |
+| [Build HiViewer plugin](.github/workflows/plugin.yml) | 插件、联动协议/服务、插件打包相关文件变更，手动运行 | 测试并编译 Windows x64 sidecar，校验 `.hvp` 包结构与 SHA-256，上传插件 artifact；不发布 LUXE 正式版 |
+| [Publish Windows release](.github/workflows/release.yml) | 推送 `vX.Y.Z` tag，或手动指定已有 tag | 校验 tag、版本和签名密钥，测试并构建 Windows x64 安装包，生成更新清单后发布 GitHub Release |
+
+日常代码改动由 `ci.yml` 验证；改动 HiViewer 联动时，`plugin.yml` 独立生成可安装插件包；正式发版时推送与 `src-tauri/tauri.conf.json` 版本一致的 `vX.Y.Z` tag，由 `release.yml` 发布签名安装包。插件构建与正式应用发布互不替代。
 
 发布任务固定 Node.js 22、Rust 1.95.0，复用 npm/Rust 依赖缓存，并按以下顺序执行：
 
@@ -145,7 +148,7 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 
 ### 更新行为与失败恢复
 
-客户端从 [最新 Release 的 latest.json](https://github.com/diamond-cz/luxe-tauri/releases/latest/download/latest.json) 检查更新；清单中的 NSIS 地址使用 `gh-proxy.com` 加速，Tauri updater 验证安装包签名。
+客户端通过 Tauri updater 检查 [最新 Release 的 latest.json](https://github.com/diamond-cz/luxe-tauri/releases/latest/download/latest.json)；清单中的 NSIS 地址使用 `gh-proxy.com` 加速并由 Tauri updater 验证安装包签名。updater 检查失败时，应用会尝试从代理或 GitHub 直连读取版本元数据，并提供 Release 页面入口；手动下载不绕过签名验证流程。
 
 `auto_update` 只控制启动检查，默认关闭；`update_notify` 控制更新提示。用户点击“下载并安装”后才执行升级。首次接入 updater 的旧版本需手动安装；真实升级须从上一版已安装的 NSIS 客户端验证。
 
@@ -161,7 +164,7 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 
 ### 方案依据
 
-稳定版采用 tag + GitHub Actions + Draft 校验后发布，适合当前单应用、人工选择版本的节奏；Star 工作流只替换最新稳定 Release 的安装包和 `latest.json`，不会创建新的稳定 tag。[release-please](https://github.com/googleapis/release-please) 通过规范提交生成版本 PR，[semantic-release](https://github.com/semantic-release/semantic-release) 通过提交信息自动决定版本；后续统一提交规范并需要更高发布频率时可再引入。
+稳定版采用 tag + GitHub Actions + Draft 校验后发布，正式 Release 资产由 `release.yml` 创建；该流程适合当前单应用、人工选择版本的节奏。[release-please](https://github.com/googleapis/release-please) 通过规范提交生成版本 PR，[semantic-release](https://github.com/semantic-release/semantic-release) 通过提交信息自动决定版本；后续统一提交规范并需要更高发布频率时可再引入。
 
 - [Tauri GitHub Actions 发布指南](https://v2.tauri.app/distribute/pipelines/github/)：工具链、缓存、构建与 Release。
 - [Tauri updater](https://v2.tauri.app/plugin/updater/)：签名、安装包与更新清单。
@@ -170,8 +173,3 @@ Release 包含 NSIS `.exe`、对应 `.exe.sig`、MSI、`latest.json` 和 `SHA256
 ## 许可
 
 © 2026 diamond-cz · 仅内部 Camera Tuning 使用。
-
-
-### Star-triggered build
-
-A Star by the repository owner runs `.github/workflows/star-release.yml`. It checks out the latest default-branch source, finds the highest stable `vX.Y.Z` tag, and builds signed NSIS/MSI installers using the unique numeric pre-release version `X.Y.(Z+1)-<Actions run number>`; the run number must be no greater than `65535` for MSI compatibility. After verification it replaces the updater assets and `latest.json` on that stable release without creating a new stable tag. Only the repository owner's Star event runs the publishing job, protecting signing secrets from public-trigger abuse. The client Overwrite Update action checks for and installs this build.
