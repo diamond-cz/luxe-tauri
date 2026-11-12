@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use luxe_tauri_lib::image_scan::{
     load_prepared_image_exif, load_prepared_image_toml, load_prepared_image_toml_batch,
-    load_prepared_image_toml_fields_batch, load_prepared_image_toml_sections,
+    load_prepared_image_toml_fields_batch, load_prepared_image_toml_sections, merge_image_metadata,
     prepare_image_metadata,
 };
 
@@ -84,10 +84,11 @@ fn after_import_all_projections_use_toml_even_when_jpeg_is_no_longer_readable() 
     let document = load_prepared_image_exif(&path).unwrap();
     assert_eq!(document.source.kind, "toml");
     assert_eq!(document.source.parser, "native");
-    let provenance = document.preparation.unwrap();
-    assert_eq!(provenance.first_source, "jpeg");
-    assert_eq!(provenance.selected_source, "jpeg");
-    assert_eq!(provenance.decision, "native_created");
+    assert!(
+        document.preparation.is_none(),
+        "new files use a single source marker, not first/latest history"
+    );
+    assert_eq!(document.source.content_mode.as_deref(), Some("native"));
     assert!(load_prepared_image_toml_sections(&path)
         .unwrap()
         .iter()
@@ -120,18 +121,61 @@ fn bare_legacy_ae_tags_can_be_upgraded_without_treating_unknown_roots_as_aliases
     fs::write(dir.0.join("bare.jpg"), jpeg()).unwrap();
     let path = dir.0.join("bare.toml");
     fs::write(&path, "AE_TAG_ALGO_VER = 99\n").unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let before = fs::read(&path).unwrap();
+    let automatic = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    assert_eq!(automatic.summary.cached, 1);
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
     assert_eq!(result.summary.replaced, 1);
     let fields = load_prepared_image_toml(&path).unwrap();
-    assert_eq!(fields["AE_TAG_ALGO_VER"], "123");
+    assert_eq!(
+        fields["AE_TAG_ALGO_VER"], "99",
+        "manual merge preserves existing same-key values"
+    );
     assert_eq!(fields["AE_TAG_DEBUG_VER"], "11");
     fs::write(&path, "[my_custom_section]\nAE_TAG_ALGO_VER = 99\n").unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(result.summary.retained, 1);
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!(result.summary.replaced, 1);
+    let root: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        root["my_custom_section"]["AE_TAG_ALGO_VER"].as_integer(),
+        Some(99)
+    );
     assert_eq!(
         load_prepared_image_toml(&path).unwrap()["AE_TAG_ALGO_VER"],
         "99"
     );
+}
+
+#[test]
+fn old_native_merge_diagnostic_history_is_normalized_without_rewriting_the_toml() {
+    let dir = TempDir::new();
+    let path = dir.0.join("merged.toml");
+    let text = "[AE]\nA=7\nB=8\n[AF]\nPOS=[1,2,3]\n[Vendor_Raw]\nDATA='keep'\n[__luxe_exif]\nschema_version=1\nparser='native'\ncontent_mode='native_merge'\nneeds_fallback=false\n[[__luxe_exif.modules]]\nmodule='AE'\nheader='old.h'\nstatus='matched'\nidentity_source='directory'\ndecoded_fields=999\nparse_status='decoded'\n[[__luxe_exif.modules]]\nmodule='AE'\nheader='new.h'\nstatus='matched'\nidentity_source='directory'\ndecoded_fields=1000\nparse_status='decoded'\n";
+    fs::write(&path, text).unwrap();
+    for _ in 0..2 {
+        let document = load_prepared_image_exif(&path).unwrap();
+        assert_eq!(
+            document.source.content_mode.as_deref(),
+            Some("native_merge")
+        );
+        for (name, expected) in [("AE", 2), ("AF", 3), ("Vendor_Raw", 1)] {
+            let rows: Vec<_> = document
+                .modules
+                .iter()
+                .filter(|row| row.module == name)
+                .collect();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].decoded_fields, expected);
+            assert!(rows[0].header.is_none());
+            assert_eq!(rows[0].identity_source, "toml");
+        }
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            text,
+            "source normalization is a read projection, not an import rewrite"
+        );
+    }
 }
 
 #[test]
@@ -145,8 +189,13 @@ fn metadata_only_toml_preserves_unavailable_and_fallback_status_for_detail() {
     assert!(detail.needs_fallback);
     assert!(detail.sections.is_empty());
     assert!(detail.ae_tables.is_empty());
-    let info = detail.preparation.unwrap();
-    assert_eq!(info.selected_source, "none");
-    assert_eq!(info.decision, "unavailable");
+    assert!(detail.preparation.is_none());
+    assert_eq!(detail.source.content_mode.as_deref(), Some("metadata_only"));
     assert!(load_prepared_image_toml(&path).unwrap().is_empty());
+    fs::write(dir.0.join("old-empty.toml"), "# empty legacy data\n").unwrap();
+    let legacy = load_prepared_image_exif(&dir.0.join("old-empty.toml")).unwrap();
+    assert!(
+        legacy.needs_fallback,
+        "an empty old TOML cannot claim complete EXIF"
+    );
 }

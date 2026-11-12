@@ -15,11 +15,6 @@ export function ExifSource({ document }: { document: ImageExifDocument }) {
       data-tooltip-max-width={640}>
       {t(exifSourceKey(document.source))}
     </Badge>
-    {document.preparation && <div className="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-1" style={{ color: "var(--colorNeutralForeground2)" }}>
-      <span>{t("image_exif.import.first_source", { source: t(`image_exif.origin.${document.preparation.first_source}`) })}</span>
-      <span>{t("image_exif.import.selected_source", { source: t(`image_exif.origin.${document.preparation.selected_source}`) })}</span>
-      <span style={{ color: "var(--colorNeutralForeground3)" }}>{t(`image_exif.decision.${document.preparation.decision}`)}</span>
-    </div>}
     {document.needs_fallback && <Badge className="ml-auto" appearance="outline" color="warning">{t("image_exif.detail.partial")}</Badge>}
   </div>;
 }

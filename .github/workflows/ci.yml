@@ -9,6 +9,12 @@ on:
     paths-ignore:
       - "**/*.md"
   workflow_dispatch:
+    inputs:
+      metadata_benchmarks:
+        description: "Run release-mode EXIF fixture benchmarks (no speed claims until compared on the same runner)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,3 +55,6 @@ jobs:
       # Rust tests embed the configured frontendDist.
       - run: npm run build
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Observe EXIF fixture throughput
+        if: github.event_name == 'workflow_dispatch' && inputs.metadata_benchmarks
+        run: cargo test --release --locked --manifest-path src-tauri/Cargo.toml benchmark_ -- --ignored --nocapture --test-threads=1

@@ -5,7 +5,7 @@
 | 领域 | 文档 | 内容 |
 | --- | --- | --- |
 | 功能 | [Face 表格与热力图](features/FACE_TABLE_HEATMAP.md) | 表格数据、编辑、轴命中和热力图接入约定 |
-| 功能 | [MTK JPEG 私有 EXIF](features/MTK_NATIVE_EXIF.md) | 导入期 JPEG 对账/TOML 缓存、首次/最新来源、AE_Table/Detail、安全清理与内存预算 |
+| 功能 | [MTK JPEG 私有 EXIF](features/MTK_NATIVE_EXIF.md) | TOML优先复用、JPEG补缺合并/DP权威覆盖、单一来源、SIMD/有界并发与验证 |
 | 性能 | [CPU 与内存维护](performance/MEMORY_RECOVERY.md) | 缓存预算、异步请求隔离、清理入口及验证方法 |
 | 配置 | [本地工作状态](config/LOCAL_STATE.md) | 状态文件位置、迁移和开发验证 |
 | 工程 | [实现亮点与痛点账本](engineering/IMPLEMENTATION_LESSONS.md) | 可复用方案、实际根因、闭坑条件和验证记录 |

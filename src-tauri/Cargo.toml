@@ -47,6 +47,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 regex = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rayon = "=1.10.0"
+# Runtime-dispatched SIMD byte search for bounded MTK metadata scans (not pixels).
+memchr = "=2.8.0"
 turbojpeg = { version = "1.5.1", default-features = false, features = ["cmake", "require-simd"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 windows = { version = "0.61.3", features = [

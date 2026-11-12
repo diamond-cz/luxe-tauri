@@ -28,7 +28,7 @@ const preparedSummary = { total: 2, created: 1, replaced: 0, retained: 1, cached
 
 function harness() {
   const { useMtkStore } = loadModule('../src/stores/mtkStore.ts');
-  const parses = [], scans = [], loads = [], previews = [], cleanups = [], preparations = [];
+  const parses = [], scans = [], loads = [], merges = [], preparations = [];
   const service = loadModule('../src/services/imageExifService.ts', {
     '@/stores/mtkStore': { useMtkStore },
     '@/ipc/imageScan': {
@@ -37,8 +37,7 @@ function harness() {
         parses.push(task); return task.promise;
       },
       prepareImageMetadata: (dir, progress) => { const task = { dir, progress, ...deferred() }; preparations.push(task); return task.promise; },
-      listImageSidecars: (dir, paths) => { const task = { dir, paths, ...deferred() }; previews.push(task); return task.promise; },
-      clearImageSidecars: (dir, paths, files) => { const task = { dir, paths, files, ...deferred() }; cleanups.push(task); return task.promise; },
+      mergeImageMetadata: (dir, paths, progress) => { const task = { dir, paths, progress, ...deferred() }; merges.push(task); return task.promise; },
       scanImageDir: (dir) => { const task = { dir, ...deferred() }; scans.push(task); return task.promise; },
       loadImageToml: (path) => { const task = { path, ...deferred() }; loads.push(task); return task.promise; },
     },
@@ -47,8 +46,8 @@ function harness() {
     dir: 'C:/images', entries: [entry('a'), entry('b')], current: 0,
     metadataRevision: 0, status: 'done',
   });
-  return { ...service, useMtkStore, parses, scans, loads, previews, cleanups, preparations,
-    start: (progress, workspaceKey, signal) => service.parseWorkspaceImageExif('ISP6S', 0, null, progress, workspaceKey, signal),
+  return { ...service, useMtkStore, parses, scans, loads, merges, preparations,
+    start: (progress, workspaceKey, signal) => service.parseWorkspaceImageExif('ISP6S', 0, 'C:/tools/DebugParser.exe', progress, workspaceKey, signal),
   };
 }
 async function finishScan(h, rows = [entry('a'), entry('b')]) {
@@ -190,75 +189,62 @@ test('a disposed progress subscriber detaches while the shared job continues', a
   await pending;
 });
 
-test('a different directory cannot accumulate jobs behind the current workspace task', async () => {
+test('a newly selected directory supersedes an old DP generation without allowing stale publication', async () => {
   const h = harness();
-  const pending = h.start();
-  await tick();
-  h.useMtkStore.getState().setImageDir('ISP6S', 0, { dir: 'D:/new', entries: [entry('new', 'D:/new')], status: 'done' });
-  await assert.rejects(h.start(), (error) => error instanceof h.ImageExifTaskError && error.code === 'busy');
-  assert.equal(h.parses.length, 1);
-  h.parses[0].resolve(summary);
-  await pending;
+  const old = h.start(); await tick();
+  const replacement = [entry('fresh', 'D:/new')];
+  h.useMtkStore.getState().setImageDir('ISP6S', 0, { dir: 'D:/new', entries: replacement, status: 'done' });
+  h.parses[0].resolve(summary); await old;
+  assert.equal(h.scans.length, 0, 'the old parser completion must not rescan the replacement directory');
+  assert.equal(h.useMtkStore.getState().imageDir['ISP6S|0'].dir, 'D:/new');
 });
 
-test('cleanup preview never deletes, and confirmed deletion refreshes the latest selection', async () => {
-  const h = harness();
-  const pending = h.prepareWorkspaceImageSidecars('ISP6S', 0, [entry('a').jpg_path, entry('a').jpg_path]);
-  assert.equal(h.cleanups.length, 0);
-  assert.deepEqual(h.previews[0].paths, [entry('a').jpg_path]);
-  const files = ['C:/images/a.toml', 'C:/images/a.jpg.exif'];
-  h.previews[0].resolve(files);
-  const plan = await pending;
-  assert.equal(h.cleanups.length, 0, 'preview or cancel must have no destructive IPC');
-  const deleting = h.clearWorkspaceImageSidecars('ISP6S', 0, plan);
-  assert.deepEqual(h.cleanups[0].files, files);
+test('explicit native merge targets selected paths, preserves current selection and excludes DP writes', async () => {
+  const h = harness(); const progress = [];
+  const pending = h.mergeWorkspaceImageMetadata('ISP6S', 0, [entry('a').jpg_path, entry('a').jpg_path], (value) => progress.push(value));
+  assert.deepEqual(h.merges[0].paths, [entry('a').jpg_path]);
   await assert.rejects(h.start(), (error) => error.code === 'busy');
   h.useMtkStore.getState().setImageDir('ISP6S', 0, { current: 1 });
-  h.cleanups[0].resolve({ deleted: files, failed: [] }); await tick();
+  h.merges[0].progress({ stage: 'JPEG', completed: 1, total: 1 });
+  assert.equal(progress.length, 1);
   const rows = [entry('a'), entry('b')];
-  h.preparations[0].resolve({ entries: rows, summary: preparedSummary }); await tick();
+  h.merges[0].resolve({ entries: rows, summary: { ...preparedSummary, replaced: 1 } }); await tick();
   assert.equal(h.loads[0].path, entry('b').toml_path);
-  h.loads[0].resolve({ fresh: 'jpeg' });
-  const result = await deleting;
-  assert.equal(result.deleted.length, 2);
+  h.loads[0].resolve({ fresh: 'jpeg-merged-toml' });
+  const result = await pending;
+  assert.equal(result.summary.replaced, 1);
   assert.equal(h.useMtkStore.getState().imageDir['ISP6S|0'].metadataRevision, 1);
   assert.equal(h.useMtkStore.getState().imageDir['ISP6S|0'].current, 1);
+  h.merges[0].progress({ stage: 'JPEG', completed: 0, total: 1 }); assert.equal(progress.length, 1);
 });
 
-test('directory changes invalidate cleanup confirmations, and EXIF jobs exclude cleanup', async () => {
+test('native merge rejects out-of-index paths and live DP work without mutating any files', async () => {
   const h = harness();
-  const pending = h.prepareWorkspaceImageSidecars('ISP6S', 0, [entry('a').jpg_path]);
-  h.previews[0].resolve(['C:/images/a.toml']);
-  const plan = await pending;
   const parsing = h.start(); await tick();
-  await assert.rejects(h.clearWorkspaceImageSidecars('ISP6S', 0, plan), (error) => error.code === 'busy');
+  await assert.rejects(h.mergeWorkspaceImageMetadata('ISP6S', 0, []), (error) => error.code === 'busy');
   h.parses[0].reject(new Error('stopped')); await assert.rejects(parsing);
-  h.useMtkStore.getState().setImageDir('ISP6S', 0, { dir: 'D:/other', entries: [entry('new', 'D:/other')] });
-  await assert.rejects(h.clearWorkspaceImageSidecars('ISP6S', 0, plan), (error) => error.code === 'changed');
-  assert.equal(h.cleanups.length, 0);
+  await assert.rejects(h.mergeWorkspaceImageMetadata('ISP6S', 0, ['D:/outside/a.jpg']), (error) => error.code === 'changed');
+  assert.equal(h.merges.length, 0);
+  await assert.rejects(h.parseWorkspaceImageExif('ISP6S', 0, null), (error) => error.code === 'parser_required');
+  assert.equal(h.parses.length, 1, 'missing DP must not silently trigger native writes');
 });
 
-test('a failed cleanup still invalidates old fields and releases its task slot', async () => {
+test('a failed merge still refreshes partial changes and releases its slot for retry', async () => {
   const h = harness();
-  const preparing = h.prepareWorkspaceImageSidecars('ISP6S', 0, [entry('a').jpg_path]);
-  h.previews[0].resolve(['C:/images/a.toml']); const plan = await preparing;
-  const deleting = h.clearWorkspaceImageSidecars('ISP6S', 0, plan);
-  h.cleanups[0].reject(new Error('permission denied')); await tick();
-  h.preparations[0].resolve({ entries: [], summary: { ...preparedSummary, total: 0 } });
-  await assert.rejects(deleting, /permission denied/);
+  const pending = h.mergeWorkspaceImageMetadata('ISP6S', 0, []);
+  h.merges[0].reject(new Error('permission denied')); await tick();
+  h.scans[0].resolve([]);
+  await assert.rejects(pending, /permission denied/);
   assert.equal(h.useMtkStore.getState().imageDir['ISP6S|0'].metadataRevision, 1);
-  const retry = h.prepareWorkspaceImageSidecars('ISP6S', 0, []);
-  await assert.rejects(retry, (error) => error.code === 'empty');
+  await assert.rejects(h.mergeWorkspaceImageMetadata('ISP6S', 0, []), (error) => error.code === 'empty');
 });
 
-test('cleanup completion cannot rescan or overwrite a replacement workspace', async () => {
+test('native merge completion cannot rescan or overwrite a replacement workspace', async () => {
   const h = harness();
-  const preparing = h.prepareWorkspaceImageSidecars('ISP6S', 0, [entry('a').jpg_path]);
-  h.previews[0].resolve(['C:/images/a.toml']); const plan = await preparing;
-  const deleting = h.clearWorkspaceImageSidecars('ISP6S', 0, plan);
+  const pending = h.mergeWorkspaceImageMetadata('ISP6S', 0, []);
   const replacement = [entry('replacement', 'D:/new')];
   h.useMtkStore.getState().setImageDir('ISP6S', 0, { dir: 'D:/new', entries: replacement, tomlData: { local: 'new' } });
-  h.cleanups[0].resolve({ deleted: plan.files, failed: [] }); await deleting;
+  h.merges[0].resolve({ entries: [entry('a')], summary: preparedSummary }); await pending;
   assert.equal(h.scans.length, 0);
   assert.equal(h.useMtkStore.getState().imageDir['ISP6S|0'].entries, replacement);
   assert.deepEqual(h.useMtkStore.getState().imageDir['ISP6S|0'].tomlData, { local: 'new' });
@@ -334,17 +320,15 @@ test('all five EXIF locales have matching keys and interpolation fields', () => 
     const shape = keys.map((key) => [key, [...bundle[key].matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort()]);
     if (expected) assert.deepEqual(shape, expected, locale); else expected = shape;
     for (const key of ['error.empty', 'error.busy', 'fallback_hint', 'unavailable',
-      'source.jpeg', 'source.debug_parser', 'source.native_toml', 'source.unknown_toml',
+      'source.jpeg', 'source.debug_parser', 'source.native_toml', 'source.native_merged', 'source.metadata_only', 'source.unknown_toml',
       'detail.field_count', 'ae_table.block', 'ae_table.all', 'ae_table.empty',
       'match.matched', 'match.missing_header', 'match.invalid_header', 'match.ambiguous', 'match.unknown', 'match.unrecorded',
       'identity.directory', 'identity.directory_layout', 'identity.payload', 'identity.toml', 'identity.unrecorded',
       'parse.empty', 'parse.version_only', 'parse.unsupported', 'parse.unavailable',
-      'cleanup.current', 'cleanup.selected', 'cleanup.confirm', 'cleanup.warning', 'cleanup.summary',
-      'cleanup.delete', 'cleanup.cancel', 'cleanup.none', 'cleanup.failed', 'error.changed',
+      'merge.current', 'merge.selected', 'merge.all', 'merge.completed', 'merge.failed',
+      'overwrite.title', 'overwrite.confirm', 'overwrite.warning', 'overwrite.run', 'overwrite.cancel', 'overwrite.summary', 'error.changed', 'error.parser_required',
       'stage.JPEG', 'stage.EXIF', 'stage.DP', 'stage.TOML',
-      'import.completed', 'import.failed', 'import.summary', 'import.first_source', 'import.selected_source',
-      'origin.jpeg', 'origin.toml', 'origin.debug_parser', 'origin.none',
-      'decision.native_created', 'decision.native_replaced', 'decision.existing_retained', 'decision.native_unavailable', 'decision.fallback', 'decision.unavailable']) {
+      'import.completed', 'import.failed', 'import.summary', 'source.native_merged', 'source.metadata_only']) {
       assert.ok(bundle[`image_exif.${key}`], `${locale}:${key}`);
     }
     assert.deepEqual([...bundle['image_exif.summary'].matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort(),
@@ -666,7 +650,7 @@ test('source path is tooltip-only and Detail has six aligned columns without ide
   assert.equal(rows[0].props.style.gridTemplateColumns, rows[1].props.style.gridTemplateColumns);
 });
 
-test('Detail distinguishes first source, latest content and current TOML read without a JPEG refresh', () => {
+test('Detail has one descriptive source badge, never first/latest history fields', () => {
   const jsx = (type, props) => ({ type, props });
   const { ExifSource } = loadModule('../src/views/mtk/isp6s/TablePane/ExifMetadataViews.tsx', {
     react: hookRunner().hooks, 'react/jsx-runtime': { jsx, jsxs: jsx },
@@ -674,14 +658,13 @@ test('Detail distinguishes first source, latest content and current TOML read wi
     '@fluentui/react-components': { Badge: 'Badge' },
     './exifPresentation': loadModule('../src/views/mtk/isp6s/TablePane/exifPresentation.ts'),
   });
-  const document = { ...exifDocument('7'), source: { kind: 'toml', parser: 'native', path: 'C:/images/a.toml' },
+  const document = { ...exifDocument('7'), source: { kind: 'toml', parser: 'native', path: 'C:/images/a.toml', content_mode: 'native_merge' },
     preparation: { first_source: 'toml', selected_source: 'jpeg', decision: 'native_replaced' } };
   const tree = ExifSource({ document });
-  assert.equal(nodesOfType(tree, 'Badge')[0].props.children, 'image_exif.source.native_toml');
-  const labels = nodesOfType(tree, 'span').map((node) => node.props.children);
-  assert.ok(labels.includes('image_exif.import.first_source:image_exif.origin.toml'));
-  assert.ok(labels.includes('image_exif.import.selected_source:image_exif.origin.jpeg'));
-  assert.ok(labels.includes('image_exif.decision.native_replaced'));
+  assert.equal(nodesOfType(tree, 'Badge')[0].props.children, 'image_exif.source.native_merged');
+  assert.equal(nodesOfType(tree, 'span').length, 0, 'old preparation history remains compatible but is not displayed');
+  const plain = ExifSource({ document: { ...document, source: { ...document.source, content_mode: 'metadata_only' } } });
+  assert.equal(nodesOfType(plain, 'Badge')[0].props.children, 'image_exif.source.metadata_only');
 });
 
 test('only the import IPC starts a progress channel; normal readers receive a path only', async () => {
@@ -698,6 +681,12 @@ test('only the import IPC starts a progress channel; normal readers receive a pa
   assert.deepEqual(requests[0].args, { path: 'a.toml' }); assert.deepEqual(requests[1].args, { path: 'a.toml' });
   requests[2].args.onProgress.onmessage({ stage: 'JPEG', completed: 1, total: 2 });
   assert.equal(progress.length, 1);
+  await ipc.mergeImageMetadata('C:/images', ['C:/images/a.jpg'], (value) => progress.push(value));
+  assert.equal(requests[3].command, 'merge_image_metadata');
+  requests[3].args.onProgress.onmessage({ stage: 'JPEG', completed: 1, total: 1 });
+  assert.equal(progress.length, 2);
+  assert.equal(ipc.clearImageSidecars, undefined, 'deleted sidecar IPC remains removed');
+  assert.equal(ipc.listImageSidecars, undefined, 'deleted sidecar preview remains removed');
 });
 
 test('metadata progress is indeterminate only while queued and uses actual work counts', () => {
@@ -730,7 +719,7 @@ test('the EXIF context menu retains left-click parsing and targets current or se
   let menu;
   const visit = (node) => {
     if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === 'Menu'
-      && node.getText(source).includes('onClearSidecars')) menu = node;
+      && node.getText(source).includes('onMergeExif')) menu = node;
     ts.forEachChild(node, visit);
   };
   visit(source); assert.ok(menu);
@@ -742,37 +731,36 @@ test('the EXIF context menu retains left-click parsing and targets current or se
     '@fluentui/react-icons': { DocumentData24Regular: 'DocumentData24Regular' },
   }, {}, `import {${components.join(',')}} from '@fluentui/react-components';
     import {DocumentData24Regular} from '@fluentui/react-icons';
-    export function Probe({entries,current,selectedImageIndexes,onClearSidecars,onParseExif,exifParsing=false}) {
+    export function Probe({entries,current,selectedImageIndexes,onMergeExif,onParseExif,exifParsing=false}) {
       const t = key => key; return (${menu.getText(source)});
     }`).Probe;
   let parsed = 0; const clears = [];
   const rows = [entry('a'), entry('b')];
   const tree = component({ entries: rows, current: 1, selectedImageIndexes: [0, 1],
-    onClearSidecars: (paths) => clears.push(paths), onParseExif: () => parsed++ });
+    onMergeExif: (paths) => clears.push(paths), onParseExif: () => parsed++ });
   assert.equal(tree.props.openOnContext, true);
   nodesOfType(tree, 'Button')[0].props.onClick(); assert.equal(parsed, 1); assert.equal(clears.length, 0);
   const items = nodesOfType(tree, 'MenuItem');
-  items[0].props.onClick(); items[1].props.onClick();
-  assert.deepEqual(clears, [[rows[1].jpg_path], rows.map((row) => row.jpg_path)]);
+  items[0].props.onClick(); items[1].props.onClick(); items[2].props.onClick();
+  assert.deepEqual(clears, [[rows[1].jpg_path], [], rows.map((row) => row.jpg_path)]);
+  assert.ok(items.every((item) => !item.props.children.includes('cleanup')), 'context menu must contain no deletion action');
 });
 
-test('cleanup dialog requires explicit confirmation and blocks dismissing an active deletion', () => {
+test('authoritative DP replacement has an explicit directory-scoped confirmation without any deletion action', () => {
   const jsx = (type, props) => ({ type, props });
   const components = ['Button', 'Dialog', 'DialogActions', 'DialogBody', 'DialogContent', 'DialogSurface', 'DialogTitle'];
-  const { ImageSidecarCleanupDialog } = loadModule('../src/views/mtk/isp6s/TablePane/ImageSidecarCleanupDialog.tsx', {
+  const { ImageExifOverwriteDialog } = loadModule('../src/views/mtk/isp6s/TablePane/ImageExifOverwriteDialog.tsx', {
     'react/jsx-runtime': { jsx, jsxs: jsx }, '@fluentui/react-components': Object.fromEntries(components.map((name) => [name, name])),
     'react-i18next': { useTranslation: () => ({ t: (key) => key }) },
   });
-  let deleted = 0, cancelled = 0;
-  const props = { files: ['C:/images/a.toml'], imageCount: 1, deleting: false,
-    onCancel: () => cancelled++, onConfirm: () => deleted++ };
-  const tree = ImageSidecarCleanupDialog(props);
-  assert.equal(deleted, 0); assert.equal(nodesOfType(tree, 'pre')[0].props.children, props.files[0]);
-  tree.props.onOpenChange(null, { open: false }); assert.equal(cancelled, 1); assert.equal(deleted, 0);
-  nodesOfType(tree, 'Button')[1].props.onClick(); assert.equal(deleted, 1);
-  const busy = ImageSidecarCleanupDialog({ ...props, deleting: true });
-  assert.ok(nodesOfType(busy, 'Button').every((button) => button.props.disabled));
-  busy.props.onOpenChange(null, { open: false }); assert.equal(cancelled, 1);
+  let run = 0, cancelled = 0;
+  const props = { imageDir: 'C:/images', imageCount: 2, onCancel: () => cancelled++, onConfirm: () => run++ };
+  const tree = ImageExifOverwriteDialog(props);
+  assert.equal(run, 0);
+  assert.ok(nodesOfType(tree, 'p').some((node) => node.props.children === props.imageDir));
+  tree.props.onOpenChange(null, { open: false }); assert.equal(cancelled, 1); assert.equal(run, 0);
+  nodesOfType(tree, 'Button')[1].props.onClick(); assert.equal(run, 1);
+  assert.equal(nodesOfType(ImageExifOverwriteDialog({ ...props, imageCount: 0 }), 'Button')[1].props.disabled, true);
 });
 
 function fieldIpcHarness() {

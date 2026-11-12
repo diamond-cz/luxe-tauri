@@ -1,5 +1,6 @@
 //! Bounded, data-only enum loader. No preprocessor/compiler or header code runs.
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 pub(super) const MAX_ENUM_TAGS: usize = 16_384;
 const MAX_HEADER_BYTES: usize = 512 * 1024;
@@ -23,6 +24,7 @@ pub(super) enum SelectionError {
     Invalid,
 }
 
+#[cfg(test)]
 pub(super) fn select(
     module: &str,
     generation: u8,
@@ -32,6 +34,7 @@ pub(super) fn select(
     select_from(HEADER_SOURCES, module, generation, version, signature)
 }
 
+#[cfg(test)]
 fn select_from(
     sources: &[HeaderSource],
     module: &str,
@@ -39,53 +42,110 @@ fn select_from(
     version: u32,
     signature: Option<u32>,
 ) -> Result<(&'static str, Vec<&'static str>), SelectionError> {
-    let candidates: Vec<_> = sources
-        .iter()
-        .filter(|source| {
-            source.module == module && source.generation == generation && source.version == version
-        })
-        .collect();
-    if candidates.is_empty() {
-        return Err(SelectionError::Missing);
+    let source = select_source(sources, module, generation, version, signature)?;
+    Ok((source.path, load_enum(source.text, signature)?))
+}
+
+fn select_source<'a>(
+    sources: &'a [HeaderSource],
+    module: &str,
+    generation: u8,
+    version: u32,
+    signature: Option<u32>,
+) -> Result<&'a HeaderSource, SelectionError> {
+    let mut selected = None;
+    let mut best_priority = 0;
+    let mut count = 0;
+    for source in sources.iter().filter(|source| {
+        source.module == module && source.generation == generation && source.version == version
+    }) {
+        if signature.is_none() && source.signature.is_some() {
+            return Err(SelectionError::Ambiguous);
+        }
+        if source.signature.is_some() && source.signature != signature {
+            continue;
+        }
+        // A signature-specific .ha still outranks a shared .h. Only equal
+        // priority duplicates are ambiguous; no candidate vectors are needed.
+        let priority =
+            1 + u8::from(source.path.ends_with(".h")) + 2 * u8::from(source.signature.is_some());
+        if priority > best_priority {
+            selected = Some(source);
+            best_priority = priority;
+            count = 1;
+        } else if priority == best_priority {
+            count += 1;
+        }
     }
-    // An explicit signature variant takes precedence over its shared header.
-    // Without a signature a shared header plus variants is not a unique layout.
-    if signature.is_none() && candidates.iter().any(|source| source.signature.is_some()) {
-        return Err(SelectionError::Ambiguous);
+    match (selected, count) {
+        (Some(source), 1) => Ok(source),
+        (Some(_), _) => Err(SelectionError::Ambiguous),
+        _ => Err(SelectionError::Missing),
     }
-    let variants: Vec<_> = candidates
-        .iter()
-        .copied()
-        .filter(|source| source.signature.is_some() && source.signature == signature)
-        .collect();
-    let eligible: Vec<_> = if variants.is_empty() {
-        candidates
-            .into_iter()
-            .filter(|source| source.signature.is_none())
-            .collect()
-    } else {
-        variants
-    };
-    let preferred: Vec<_> = eligible
-        .iter()
-        .copied()
-        .filter(|source| source.path.ends_with(".h"))
-        .collect();
-    let preferred = if preferred.is_empty() {
-        eligible
-    } else {
-        preferred
-    };
-    if preferred.len() != 1 {
-        return Err(if preferred.is_empty() {
-            SelectionError::Missing
-        } else {
-            SelectionError::Ambiguous
-        });
+}
+
+const MAX_LOCAL_ENUMS: usize = 16;
+const MAX_LOCAL_ENUM_BYTES: usize = 2 * 1024 * 1024;
+type SharedTags = Rc<Vec<&'static str>>;
+
+struct CachedEnum {
+    path: &'static str,
+    signature: Option<u32>,
+    tags: Result<SharedTags, SelectionError>,
+    bytes: usize,
+}
+
+/// Inspection-owned reuse for infer -> resolve and repeated declarations.
+/// FIFO bounded by 16 identities / 2 MiB of tag vectors; discarded at return,
+/// with no global state, locks, per-directory retention, or trim dependency.
+#[derive(Default)]
+pub(super) struct EnumCache {
+    entries: Vec<CachedEnum>,
+    bytes: usize,
+    #[cfg(test)]
+    parses: usize,
+}
+
+impl EnumCache {
+    pub(super) fn select(
+        &mut self,
+        module: &str,
+        generation: u8,
+        version: u32,
+        signature: Option<u32>,
+    ) -> Result<(&'static str, SharedTags), SelectionError> {
+        let source = select_source(HEADER_SOURCES, module, generation, version, signature)?;
+        if let Some(entry) = self
+            .entries
+            .iter()
+            .find(|entry| entry.path == source.path && entry.signature == signature)
+        {
+            return entry.tags.clone().map(|tags| (source.path, tags));
+        }
+        #[cfg(test)]
+        {
+            self.parses += 1;
+        }
+        let tags = load_enum(source.text, signature).map(Rc::new);
+        let bytes = tags
+            .as_ref()
+            .map_or(0, |tags| tags.capacity() * std::mem::size_of::<&str>());
+        while !self.entries.is_empty()
+            && (self.entries.len() >= MAX_LOCAL_ENUMS || self.bytes + bytes > MAX_LOCAL_ENUM_BYTES)
+        {
+            self.bytes -= self.entries.remove(0).bytes;
+        }
+        if bytes <= MAX_LOCAL_ENUM_BYTES {
+            self.entries.push(CachedEnum {
+                path: source.path,
+                signature,
+                tags: tags.clone(),
+                bytes,
+            });
+            self.bytes += bytes;
+        }
+        tags.map(|tags| (source.path, tags))
     }
-    let source = preferred[0];
-    let tags = load_enum(source.text, signature)?;
-    Ok((source.path, tags))
 }
 
 fn is_identifier(value: &str) -> bool {
@@ -267,7 +327,7 @@ fn precedence(token: &str) -> Option<u8> {
 fn expression(
     input: &[&str],
     cursor: &mut usize,
-    symbols: &BTreeMap<&str, i64>,
+    symbols: &HashMap<&str, i64>,
     minimum: u8,
     depth: usize,
 ) -> Option<i64> {
@@ -322,8 +382,8 @@ pub(super) fn load_enum(
 ) -> Result<Vec<&'static str>, SelectionError> {
     let input = tokens(text, signature)?;
     let mut cursor = 0;
-    let mut symbols = BTreeMap::new();
-    let mut names = BTreeMap::new();
+    let mut symbols = HashMap::with_capacity((input.len() / 2).min(MAX_ENUM_TAGS));
+    let mut tags = Vec::new();
     let mut found = false;
     while cursor < input.len() {
         if input[cursor] != "enum" {
@@ -365,11 +425,17 @@ pub(super) fn load_enum(
                     return Err(SelectionError::Invalid);
                 }
             }
-            if !(0..MAX_ENUM_TAGS as i64).contains(&index)
-                || names.insert(index as usize, name).is_some()
-            {
+            if !(0..MAX_ENUM_TAGS as i64).contains(&index) {
                 return Err(SelectionError::Invalid);
             }
+            let slot = index as usize;
+            if slot >= tags.len() {
+                tags.resize(slot + 1, "");
+            }
+            if !tags[slot].is_empty() {
+                return Err(SelectionError::Invalid);
+            }
+            tags[slot] = name;
             symbols.insert(name, index);
             index += 1;
             match input.get(cursor) {
@@ -384,10 +450,6 @@ pub(super) fn load_enum(
     }
     if !found {
         return Err(SelectionError::Invalid);
-    }
-    let mut tags = vec![""; names.last_key_value().map_or(0, |(index, _)| index + 1)];
-    for (index, name) in names {
-        tags[index] = name;
     }
     Ok(tags)
 }
@@ -493,6 +555,63 @@ mod tests {
             select_from(&variant, "AE", 6, 1, None),
             Err(SelectionError::Ambiguous)
         );
+    }
+
+    #[test]
+    fn inspection_cache_reuses_exact_identity_and_keeps_signature_layouts_separate() {
+        let mut cache = EnumCache::default();
+        let (_, first) = cache
+            .select("ISP", 6, 0x0002_000a, Some(0xdf19_2ca9))
+            .unwrap();
+        let (_, same) = cache
+            .select("ISP", 6, 0x0002_000a, Some(0xdf19_2ca9))
+            .unwrap();
+        assert!(Rc::ptr_eq(&first, &same));
+        assert_eq!(cache.parses, 1);
+        let (_, samsung) = cache
+            .select("ISP", 6, 0x0002_000a, Some(0xa561_21c4))
+            .unwrap();
+        assert_eq!(first.len(), samsung.len() + 2);
+        assert_eq!(cache.parses, 2);
+        assert_eq!(
+            cache.select("ISP", 6, 0x0002_000a, None),
+            Err(SelectionError::Ambiguous)
+        );
+        assert_eq!(
+            cache.select("AWB", 6, 0x0009_000a, Some(0)),
+            Err(SelectionError::Invalid)
+        );
+        let parses = cache.parses;
+        assert_eq!(
+            cache.select("AWB", 6, 0x0009_000a, Some(0)),
+            Err(SelectionError::Invalid)
+        );
+        assert_eq!(
+            cache.parses, parses,
+            "invalid layouts are not reparsed during one inspection"
+        );
+        drop(cache);
+        let mut next_image = EnumCache::default();
+        let (_, fresh) = next_image
+            .select("ISP", 6, 0x0002_000a, Some(0xdf19_2ca9))
+            .unwrap();
+        assert!(!Rc::ptr_eq(&first, &fresh));
+        assert_eq!(next_image.parses, 1, "no hidden cross-image cache");
+    }
+
+    #[test]
+    fn inspection_cache_is_bounded_even_for_many_unknown_signature_declarations() {
+        let mut cache = EnumCache::default();
+        for source in HEADER_SOURCES
+            .iter()
+            .filter(|source| source.signature.is_none())
+            .take(64)
+        {
+            let _ = cache.select(source.module, source.generation, source.version, Some(0));
+            assert!(cache.entries.len() <= MAX_LOCAL_ENUMS);
+            assert!(cache.bytes <= MAX_LOCAL_ENUM_BYTES);
+        }
+        assert!(cache.parses > MAX_LOCAL_ENUMS);
     }
 
     #[test]

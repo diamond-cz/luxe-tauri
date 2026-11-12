@@ -1,15 +1,16 @@
-//! Synthetic import fixtures only. Rust compilation and execution run in CI.
+//! Synthetic pipeline fixtures only. Rust compilation/execution belongs to CI.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::rc::Rc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use luxe_tauri_lib::image_scan::{
-    load_image_exif, load_image_toml, parse_exif_directory, prepare_image_metadata,
+    load_image_exif, load_image_toml, merge_image_metadata, prepare_image_metadata,
 };
 
 const META: &str = "__luxe_exif";
-
 struct TempDir(PathBuf);
 impl TempDir {
     fn new(name: &str) -> Self {
@@ -24,13 +25,14 @@ impl TempDir {
         fs::create_dir(&path).unwrap();
         Self(path)
     }
-
     fn image(&self, name: &str, bytes: &[u8]) {
         fs::write(self.0.join(name), bytes).unwrap();
     }
-
     fn root(&self, name: &str) -> toml::Value {
         toml::from_str(&fs::read_to_string(self.0.join(name)).unwrap()).unwrap()
+    }
+    fn bytes(&self, name: &str) -> Vec<u8> {
+        fs::read(self.0.join(name)).unwrap()
     }
 }
 impl Drop for TempDir {
@@ -77,7 +79,6 @@ fn segment(
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
 }
-
 fn ae_jpeg(version: u32, values: &[(u32, u32)]) -> Vec<u8> {
     let mut words = Vec::new();
     for (index, value) in values {
@@ -91,11 +92,9 @@ fn ae_jpeg(version: u32, values: &[(u32, u32)]) -> Vec<u8> {
         &[words],
     )
 }
-
 fn native_jpeg(value: u32) -> Vec<u8> {
     ae_jpeg(11, &[(0, 11), (1, value)])
 }
-
 fn partial_jpeg(value: u32) -> Vec<u8> {
     segment(
         native_jpeg(value),
@@ -104,7 +103,6 @@ fn partial_jpeg(value: u32) -> Vec<u8> {
         &[],
     )
 }
-
 fn stat_jpeg() -> Vec<u8> {
     let len = 16 + 4 * 256 * 2 + 3 * 256 * 4;
     let mut block = Vec::new();
@@ -121,26 +119,26 @@ fn stat_jpeg() -> Vec<u8> {
         &[block],
     )
 }
-
-fn business(mut root: toml::Value) -> toml::Value {
-    root.as_table_mut().unwrap().remove(META);
-    root
-}
-
 fn fixed_mtime(path: &Path) -> SystemTime {
-    let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     fs::OpenOptions::new()
         .write(true)
         .open(path)
         .unwrap()
-        .set_modified(time)
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_700_000_000))
         .unwrap();
     fs::metadata(path).unwrap().modified().unwrap()
 }
+fn no_temporaries(dir: &TempDir) {
+    assert!(fs::read_dir(&dir.0).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .ends_with(".tmp")));
+}
 
 #[test]
-fn first_import_saves_native_and_partial_with_truthful_modules_and_image_progress() {
-    let dir = TempDir::new("partial");
+fn missing_tomls_generate_native_and_truthful_partial_without_preparation_fingerprints() {
+    let dir = TempDir::new("missing");
     dir.image("one.jpg", &native_jpeg(123));
     dir.image("two.JPG", &partial_jpeg(456));
     let mut progress = Vec::new();
@@ -164,25 +162,15 @@ fn first_import_saves_native_and_partial_with_truthful_modules_and_image_progres
     let root = dir.root("two.toml");
     assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(456));
     assert_eq!(root[META]["parser"].as_str(), Some("native"));
+    assert_eq!(root[META]["content_mode"].as_str(), Some("native"));
     assert_eq!(root[META]["needs_fallback"].as_bool(), Some(true));
+    assert!(root[META].get("preparation").is_none());
     assert!(root[META]["modules"]
         .as_array()
         .unwrap()
         .iter()
         .any(|module| module["module"].as_str() == Some("Sensor")
             && module["parse_status"].as_str() != Some("decoded")));
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(
-        root[META]["preparation"]["decision"].as_str(),
-        Some("native_created")
-    );
     let document = load_image_exif(&dir.0.join("two.toml")).unwrap();
     assert_eq!(
         (
@@ -199,162 +187,304 @@ fn first_import_saves_native_and_partial_with_truthful_modules_and_image_progres
 }
 
 #[test]
-fn statistics_without_enum_fields_are_still_saved_as_partial_content() {
-    let dir = TempDir::new("statistics-only");
-    dir.image("table.jpg", &stat_jpeg());
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            result.summary.created,
-            result.summary.partial,
-            result.summary.unavailable,
-            result.summary.failed
-        ),
-        (1, 1, 0, 0)
-    );
-    let document = load_image_exif(&dir.0.join("table.toml")).unwrap();
-    assert_eq!(document.ae_tables.len(), 7);
-    assert!(document.needs_fallback);
-    assert_eq!(
-        (
-            document.ae_tables[0].values.len(),
-            document.ae_tables[0].rows * document.ae_tables[0].columns
-        ),
-        (48, 48)
-    );
-}
-
-#[test]
-fn legacy_extra_fields_unknown_sections_and_repeated_values_are_never_lost() {
-    let dir = TempDir::new("legacy-retained");
-    let previous = "[AE]\nAE_TAG_ALGO_VER=999\nAE_TAG_DEBUG_VER=11\nAE_TAG_NOT_NATIVE=44\n[AF]\nPOS=[1,2,3]\n[Vendor_Raw]\nbytes='keep exactly as data'\n";
-    fs::write(dir.0.join("legacy.toml"), previous).unwrap();
-    dir.image("legacy.jpg", &native_jpeg(123));
-    let original: toml::Value = toml::from_str(previous).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            result.summary.retained,
-            result.summary.replaced,
-            result.summary.failed
-        ),
-        (1, 0, 0)
-    );
-    let root = dir.root("legacy.toml");
-    assert_eq!(business(root.clone()), original);
-    assert_eq!(root[META]["parser"].as_str(), Some("unknown"));
-    assert_eq!(
-        root[META]["preparation"]["decision"].as_str(),
-        Some("existing_retained")
-    );
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("toml")
-    );
-}
-
-#[test]
-fn more_native_fields_do_not_cover_a_missing_old_identity_or_array_element() {
-    let dir = TempDir::new("identity");
-    let first = "[AE]\nAE_TAG_ALGO_SUBVER=999\n";
-    let second = "[AE]\nAE_TAG_DEBUG_VER=[11,11]\n";
-    for (name, text) in [("missing", first), ("repeated", second)] {
-        dir.image(&format!("{name}.jpg"), &native_jpeg(123));
+fn automatic_import_reuses_every_valid_toml_marked_unmarked_empty_or_metadata_only() {
+    let dir = TempDir::new("reuse-all");
+    let fixtures = [
+        ("legacy", "# preserve exact byte layout\n[AE]\nAE_TAG_ALGO_VER = 999\n"),
+        ("marked", "[AF]\nPOS=[1,2,3]\n[__luxe_exif]\nschema_version=1\nparser='debug_parser'\nneeds_fallback=false\nmodules=[]\n"),
+        ("empty", "# valid TOML without payload\n"),
+        ("metadata", "[__luxe_exif]\nschema_version=1\nparser='unknown'\nneeds_fallback=true\nmodules=[]\n"),
+        ("reserved-user", "__luxe_exif = 'existing unknown user data'\n"),
+    ];
+    for (name, text) in fixtures {
+        dir.image(
+            &format!("{name}.jpg"),
+            b"not a JPEG: existing TOML must prevent native parsing",
+        );
         fs::write(dir.0.join(format!("{name}.toml")), text).unwrap();
     }
     let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
     assert_eq!(
         (
-            result.summary.retained,
+            result.summary.cached,
+            result.summary.created,
             result.summary.replaced,
             result.summary.failed
         ),
-        (2, 0, 0)
+        (5, 0, 0, 0)
     );
+    for (name, text) in fixtures {
+        assert_eq!(dir.bytes(&format!("{name}.toml")), text.as_bytes());
+    }
+    no_temporaries(&dir);
+}
+
+#[test]
+fn automatic_import_ignores_changed_jpeg_timestamps_and_obsolete_or_user_edited_signatures() {
+    let dir = TempDir::new("no-reconcile");
+    dir.image("capture.jpg", &partial_jpeg(123));
+    prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let mut root = dir.root("capture.toml");
+    root["AE"]
+        .as_table_mut()
+        .unwrap()
+        .insert("USER_EXTRA".into(), toml::Value::Integer(77));
+    root[META].as_table_mut().unwrap().insert("preparation".into(), toml::from_str::<toml::Value>("first_source='jpeg'\nselected_source='toml'\ndecision='existing_retained'\nsignature={parser_revision='obsolete',payload_fingerprint='user-edit'}\n").unwrap());
+    let text = toml::to_string(&root).unwrap();
+    fs::write(dir.0.join("capture.toml"), &text).unwrap();
+    let time = fixed_mtime(&dir.0.join("capture.toml"));
+    dir.image("capture.jpg", &ae_jpeg(11, &[(0, 11), (1, 456), (2, 7)]));
+    fixed_mtime(&dir.0.join("capture.jpg"));
+    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    assert_eq!((result.summary.cached, result.summary.failed), (1, 0));
+    assert_eq!(dir.bytes("capture.toml"), text.as_bytes());
     assert_eq!(
-        business(dir.root("missing.toml")),
-        toml::from_str::<toml::Value>(first).unwrap()
-    );
-    assert_eq!(
-        business(dir.root("repeated.toml")),
-        toml::from_str::<toml::Value>(second).unwrap()
+        fs::metadata(dir.0.join("capture.toml"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        time
     );
 }
 
 #[test]
-fn strict_native_superset_replaces_but_equal_coverage_preserves_user_values() {
-    let dir = TempDir::new("strict");
-    dir.image("superset.jpg", &native_jpeg(123));
-    fs::write(
-        dir.0.join("superset.toml"),
-        "[AE]\nAE_TAG_ALGO_VER=999\n[Detail]\nunknown='preserve auxiliary'\n",
-    )
-    .unwrap();
-    dir.image("equal.jpg", &native_jpeg(123));
-    fs::write(
-        dir.0.join("equal.toml"),
-        "[AE]\nAE_TAG_ALGO_VER=999\nAE_TAG_DEBUG_VER=11\n",
-    )
-    .unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+fn native_manual_merge_adds_missing_fields_but_preserves_old_values_unknown_sections_and_repeat_prefixes(
+) {
+    let dir = TempDir::new("manual-additive");
+    dir.image("merge.jpg", &ae_jpeg(11, &[(0, 11), (1, 123), (2, 7)]));
+    fs::write(dir.0.join("merge.toml"), "[AE]\nAE_TAG_ALGO_VER=999\nAE_TAG_DEBUG_VER=[42,43]\n[Vendor_Raw]\nDATA='preserve unknown'\n[Detail]\nextra='preserve auxiliary'\n[__luxe_exif]\nschema_version=1\nparser='debug_parser'\nneeds_fallback=false\n[[__luxe_exif.modules]]\nmodule='AE'\nheader='old.h'\nstatus='unrecorded'\nidentity_source='toml'\ndecoded_fields=900\nparse_status='decoded'\n").unwrap();
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
     assert_eq!(
         (
             result.summary.replaced,
             result.summary.retained,
             result.summary.failed
         ),
+        (1, 0, 0)
+    );
+    let root = dir.root("merge.toml");
+    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(999));
+    assert_eq!(root["AE"]["AE_TAG_ALGO_SUBVER"].as_integer(), Some(7));
+    assert_eq!(root["AE"]["AE_TAG_DEBUG_VER"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        root["AE"]["AE_TAG_DEBUG_VER"].as_array().unwrap()[0].as_integer(),
+        Some(42)
+    );
+    assert_eq!(
+        root["Vendor_Raw"]["DATA"].as_str(),
+        Some("preserve unknown")
+    );
+    assert_eq!(root["Detail"]["extra"].as_str(), Some("preserve auxiliary"));
+    assert_eq!(root[META]["parser"].as_str(), Some("native"));
+    assert_eq!(root[META]["content_mode"].as_str(), Some("native_merge"));
+    let modules = root[META]["modules"].as_array().unwrap();
+    let ae: Vec<_> = modules
+        .iter()
+        .filter(|row| row["module"].as_str() == Some("AE"))
+        .collect();
+    assert_eq!(
+        ae.len(),
+        1,
+        "new diagnostics replace parse history instead of accumulating it"
+    );
+    assert_eq!(ae[0]["decoded_fields"].as_integer(), Some(4));
+    assert_eq!(ae[0]["identity_source"].as_str(), Some("toml"));
+    assert!(ae[0].get("header").is_none());
+    assert!(modules
+        .iter()
+        .any(|row| row["module"].as_str() == Some("Vendor_Raw")
+            && row["decoded_fields"].as_integer() == Some(1)));
+    dir.image(
+        "merge.jpg",
+        &ae_jpeg(11, &[(0, 11), (1, 123), (2, 7), (3, 55)]),
+    );
+    assert_eq!(
+        merge_image_metadata(&dir.0, Vec::new(), |_| {})
+            .unwrap()
+            .summary
+            .replaced,
+        1
+    );
+    let document = load_image_exif(&dir.0.join("merge.toml")).unwrap();
+    let ae: Vec<_> = document
+        .modules
+        .iter()
+        .filter(|row| row.module == "AE")
+        .collect();
+    assert_eq!(
+        ae.len(),
+        1,
+        "repeated merges cannot duplicate the current module row"
+    );
+    assert_eq!(ae[0].decoded_fields, 5);
+    assert!(ae[0].header.is_none());
+}
+
+#[test]
+fn manual_merge_equal_fields_keeps_bytes_source_and_partial_flags_without_fake_success() {
+    let dir = TempDir::new("no-gain");
+    dir.image("equal.jpg", &native_jpeg(123));
+    let previous = "# no new fields means no rewrite\n[AE]\nAE_TAG_ALGO_VER=999\nAE_TAG_DEBUG_VER=11\n[__luxe_exif]\nschema_version=1\nparser='debug_parser'\nneeds_fallback=true\nmodules=[]\n";
+    fs::write(dir.0.join("equal.toml"), previous).unwrap();
+    let time = fixed_mtime(&dir.0.join("equal.toml"));
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!(
+        (
+            result.summary.retained,
+            result.summary.replaced,
+            result.summary.partial
+        ),
+        (1, 0, 1)
+    );
+    assert_eq!(dir.bytes("equal.toml"), previous.as_bytes());
+    assert_eq!(
+        fs::metadata(dir.0.join("equal.toml"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        time
+    );
+}
+
+#[test]
+fn only_explicit_manual_merge_retries_partial_after_image_changes() {
+    let dir = TempDir::new("manual-retry");
+    dir.image("retry.jpg", &partial_jpeg(123));
+    prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let original = dir.bytes("retry.toml");
+    dir.image("retry.jpg", &ae_jpeg(11, &[(0, 11), (1, 456), (2, 7)]));
+    assert_eq!(
+        prepare_image_metadata(&dir.0, |_| {})
+            .unwrap()
+            .summary
+            .cached,
+        1
+    );
+    assert_eq!(dir.bytes("retry.toml"), original);
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!(
+        (
+            result.summary.replaced,
+            result.summary.partial,
+            result.summary.failed
+        ),
+        (1, 0, 0)
+    );
+    let root = dir.root("retry.toml");
+    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(123));
+    assert_eq!(root["AE"]["AE_TAG_ALGO_SUBVER"].as_integer(), Some(7));
+    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(false));
+}
+
+#[test]
+fn metadata_only_is_reused_until_manual_native_merge_adds_real_content() {
+    let dir = TempDir::new("metadata-retry");
+    dir.image("retry.jpg", &ae_jpeg(999, &[]));
+    prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let before = dir.bytes("retry.toml");
+    dir.image("retry.jpg", &native_jpeg(123));
+    assert_eq!(
+        prepare_image_metadata(&dir.0, |_| {})
+            .unwrap()
+            .summary
+            .cached,
+        1
+    );
+    assert_eq!(dir.bytes("retry.toml"), before);
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!((result.summary.replaced, result.summary.failed), (1, 0));
+    assert_eq!(
+        dir.root("retry.toml")["AE"]["AE_TAG_ALGO_VER"].as_integer(),
+        Some(123)
+    );
+}
+
+#[test]
+fn statistics_only_native_payload_is_saved_and_manual_merge_preserves_existing_table_shapes() {
+    let dir = TempDir::new("tables");
+    dir.image("fresh.jpg", &stat_jpeg());
+    let auto = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    assert_eq!(
+        (
+            auto.summary.created,
+            auto.summary.partial,
+            auto.summary.failed
+        ),
         (1, 1, 0)
     );
-    let root = dir.root("superset.toml");
-    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(123));
-    assert_eq!(root["AE"]["AE_TAG_DEBUG_VER"].as_integer(), Some(11));
     assert_eq!(
-        root["Detail"]["unknown"].as_str(),
-        Some("preserve auxiliary")
+        load_image_exif(&dir.0.join("fresh.toml"))
+            .unwrap()
+            .ae_tables
+            .len(),
+        7
     );
+    dir.image("merge.jpg", &stat_jpeg());
+    fs::write(dir.0.join("merge.toml"), "[AE_Table.old_only]\nrows=1\ncolumns=2\nvalues=[7,8]\n[AE_Table.8_6_LE_Y]\nrows=1\ncolumns=1\nvalues=[999]\n").unwrap();
+    let result = merge_image_metadata(
+        &dir.0,
+        vec![dir.0.join("merge.jpg").to_string_lossy().into_owned()],
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!((result.summary.replaced, result.summary.total), (1, 1));
+    let root = dir.root("merge.toml");
     assert_eq!(
-        root[META]["preparation"]["decision"].as_str(),
-        Some("native_replaced")
+        root["AE_Table"]["old_only"]["values"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
+    assert_eq!(root["AE_Table"]["8_6_LE_Y"]["rows"].as_integer(), Some(1));
     assert_eq!(
-        dir.root("equal.toml")["AE"]["AE_TAG_ALGO_VER"].as_integer(),
+        root["AE_Table"]["8_6_LE_Y"]["values"].as_array().unwrap()[0].as_integer(),
         Some(999)
     );
-}
-
-#[test]
-fn old_statistics_must_be_covered_with_identical_complete_shapes() {
-    let dir = TempDir::new("statistics-retained");
-    let values = (0..25)
-        .map(|value| value.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let previous = format!(
-        "[AE]\nAE_TAG_ALGO_VER=999\n[AE_Table.old_only]\nrows=5\ncolumns=5\nvalues=[{values}]\n"
-    );
-    fs::write(dir.0.join("stat.toml"), &previous).unwrap();
-    dir.image("stat.jpg", &native_jpeg(123));
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((result.summary.retained, result.summary.replaced), (1, 0));
     assert_eq!(
-        business(dir.root("stat.toml")),
-        toml::from_str::<toml::Value>(&previous).unwrap()
+        root["AE_Table"]["8_6_LE_R"]["values"]
+            .as_array()
+            .unwrap()
+            .len(),
+        48
     );
 }
 
 #[test]
-fn invalid_utf8_invalid_toml_and_oversized_existing_files_are_failed_not_overwritten() {
-    let dir = TempDir::new("invalid-existing");
+fn unsupported_png_and_bad_jpeg_create_honest_metadata_only_and_are_then_reused() {
+    let dir = TempDir::new("unavailable");
+    dir.image("ordinary.jpg", &[0xff, 0xd8, 0xff, 0xd9]);
+    dir.image("unknown.jpg", &ae_jpeg(999, &[]));
+    dir.image("png.png", b"no pixel decoding");
+    dir.image("broken.jpg", b"not JPEG");
+    let first = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    assert_eq!(
+        (
+            first.summary.unavailable,
+            first.summary.failed,
+            first.summary.partial
+        ),
+        (4, 1, 0)
+    );
+    for name in ["ordinary.toml", "unknown.toml", "png.toml", "broken.toml"] {
+        let root = dir.root(name);
+        assert_eq!(root[META]["needs_fallback"].as_bool(), Some(true));
+        assert_eq!(root[META]["content_mode"].as_str(), Some("metadata_only"));
+        assert!(root[META].get("preparation").is_none());
+    }
+    let second = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    assert_eq!((second.summary.cached, second.summary.failed), (4, 0));
+}
+
+#[test]
+fn invalid_existing_tomls_fail_automatically_and_manually_without_overwrite() {
+    let dir = TempDir::new("invalid");
     for (name, bytes) in [
         ("utf8", vec![0xff, 0xfe]),
         ("syntax", b"[AE]\nA=[".to_vec()),
     ] {
         dir.image(&format!("{name}.jpg"), &native_jpeg(123));
-        fs::write(dir.0.join(format!("{name}.toml")), &bytes).unwrap();
+        fs::write(dir.0.join(format!("{name}.toml")), bytes).unwrap();
     }
     dir.image("large.jpg", &native_jpeg(123));
     let large = dir.0.join("large.toml");
@@ -365,212 +495,29 @@ fn invalid_utf8_invalid_toml_and_oversized_existing_files_are_failed_not_overwri
         .unwrap()
         .set_len(16 * 1024 * 1024 + 1)
         .unwrap();
-    dir.image("broken-existing.jpg", b"not a JPEG");
-    let protected = b"# even provenance must not be rewritten after a read error\n[AE]\nA=7\n";
-    fs::write(dir.0.join("broken-existing.toml"), protected).unwrap();
     dir.image("valid.jpg", &native_jpeg(456));
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let auto = prepare_image_metadata(&dir.0, |_| {}).unwrap();
     assert_eq!(
         (
-            result.summary.total,
-            result.summary.failed,
-            result.summary.created
+            auto.summary.total,
+            auto.summary.failed,
+            auto.summary.created
         ),
-        (5, 4, 1)
+        (4, 3, 1)
     );
-    assert_eq!(
-        fs::read(dir.0.join("broken-existing.toml")).unwrap(),
-        protected
-    );
-    assert_eq!(fs::read(dir.0.join("utf8.toml")).unwrap(), vec![0xff, 0xfe]);
-    assert_eq!(fs::read(dir.0.join("syntax.toml")).unwrap(), b"[AE]\nA=[");
-    assert_eq!(fs::metadata(&large).unwrap().len(), 16 * 1024 * 1024 + 1);
-    assert_eq!(
-        dir.root("valid.toml")["AE"]["AE_TAG_ALGO_VER"].as_integer(),
-        Some(456)
-    );
+    let manual = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!((manual.summary.failed, manual.summary.retained), (3, 1));
+    assert_eq!(dir.bytes("utf8.toml"), vec![0xff, 0xfe]);
+    assert_eq!(dir.bytes("syntax.toml"), b"[AE]\nA=[");
+    assert_eq!(fs::metadata(large).unwrap().len(), 16 * 1024 * 1024 + 1);
 }
 
 #[test]
-fn metadata_only_results_cache_unavailability_without_fabricating_completeness() {
-    let dir = TempDir::new("metadata-only");
-    dir.image("ordinary.jpg", &[0xff, 0xd8, 0xff, 0xd9]);
-    dir.image("unknown.jpg", &ae_jpeg(999, &[]));
-    dir.image(
-        "png.png",
-        b"synthetic PNG: pixels are never decoded on import",
-    );
-    let first = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            first.summary.unavailable,
-            first.summary.failed,
-            first.summary.partial
-        ),
-        (3, 0, 0)
-    );
-    for name in ["ordinary.toml", "unknown.toml", "png.toml"] {
-        let root = dir.root(name);
-        assert_eq!(root[META]["needs_fallback"].as_bool(), Some(true));
-        assert_eq!(
-            root[META]["preparation"]["first_source"].as_str(),
-            Some("none")
-        );
-        assert_eq!(
-            root[META]["preparation"]["selected_source"].as_str(),
-            Some("none")
-        );
-        assert_eq!(
-            root[META]["preparation"]["decision"].as_str(),
-            Some("unavailable")
-        );
-        assert!(business(root).as_table().unwrap().is_empty());
-    }
-    let before = fs::read(dir.0.join("unknown.toml")).unwrap();
-    let time = fixed_mtime(&dir.0.join("unknown.toml"));
-    let second = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            second.summary.cached,
-            second.summary.failed,
-            second.summary.created
-        ),
-        (3, 0, 0)
-    );
-    assert_eq!(fs::read(dir.0.join("unknown.toml")).unwrap(), before);
-    assert_eq!(
-        fs::metadata(dir.0.join("unknown.toml"))
-            .unwrap()
-            .modified()
-            .unwrap(),
-        time
-    );
-}
-
-#[test]
-fn failed_native_reads_can_be_cached_and_png_preserves_existing_business_fields() {
-    let dir = TempDir::new("read-failure");
-    dir.image("broken.jpg", b"truncated JPEG");
-    dir.image("png.png", b"pixels are irrelevant");
-    let legacy = "[AE]\nAE_TAG_CWV=99\n";
-    fs::write(dir.0.join("png.toml"), legacy).unwrap();
-    let first = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            first.summary.failed,
-            first.summary.unavailable,
-            first.summary.retained
-        ),
-        (1, 1, 1)
-    );
-    let png = dir.root("png.toml");
-    assert_eq!(
-        business(png.clone()),
-        toml::from_str::<toml::Value>(legacy).unwrap()
-    );
-    assert_eq!(
-        png[META]["preparation"]["first_source"].as_str(),
-        Some("toml")
-    );
-    assert_eq!(
-        png[META]["preparation"]["decision"].as_str(),
-        Some("native_unavailable")
-    );
-    assert_eq!(
-        dir.root("broken.toml")[META]["needs_fallback"].as_bool(),
-        Some(true)
-    );
-    let second = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((second.summary.cached, second.summary.failed), (2, 0));
-}
-
-#[test]
-fn unchanged_native_import_does_not_reparse_or_rewrite_and_image_edits_reconcile_again() {
-    let dir = TempDir::new("cache-image-change");
-    dir.image("cache.jpg", &partial_jpeg(123));
-    prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    let path = dir.0.join("cache.toml");
-    let text = fs::read(&path).unwrap();
-    let time = fixed_mtime(&path);
-    let cached = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            cached.summary.cached,
-            cached.summary.partial,
-            cached.summary.failed
-        ),
-        (1, 1, 0)
-    );
-    assert_eq!(fs::read(&path).unwrap(), text);
-    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), time);
-    fixed_mtime(&dir.0.join("cache.jpg"));
-    let touched = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            touched.summary.retained,
-            touched.summary.cached,
-            touched.summary.partial
-        ),
-        (1, 0, 1)
-    );
-    dir.image("cache.jpg", &ae_jpeg(11, &[(0, 11), (1, 456), (2, 7)]));
-    let changed = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            changed.summary.replaced,
-            changed.summary.cached,
-            changed.summary.partial
-        ),
-        (1, 0, 0)
-    );
-    let root = dir.root("cache.toml");
-    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(456));
-    assert_eq!(root["AE"]["AE_TAG_ALGO_SUBVER"].as_integer(), Some(7));
-    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(false));
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("jpeg")
-    );
-}
-
-#[test]
-fn user_business_edits_and_parser_revision_changes_invalidate_only_the_disk_signature() {
-    let dir = TempDir::new("user-change");
-    dir.image("user.jpg", &native_jpeg(123));
-    prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    let mut root = dir.root("user.toml");
-    root["AE"]
-        .as_table_mut()
-        .unwrap()
-        .insert("USER_EXTRA".into(), toml::Value::Integer(77));
-    fs::write(dir.0.join("user.toml"), toml::to_string(&root).unwrap()).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            result.summary.retained,
-            result.summary.cached,
-            result.summary.replaced
-        ),
-        (1, 0, 0)
-    );
-    let mut after = dir.root("user.toml");
-    assert_eq!(after["AE"]["USER_EXTRA"].as_integer(), Some(77));
-    assert_eq!(
-        after[META]["preparation"]["first_source"].as_str(),
-        Some("jpeg")
-    );
-    // A revision-only edit must also re-run the native reconciliation, without
-    // relying on the business edit above to invalidate the payload checksum.
-    after[META]["preparation"]["signature"]["parser_revision"] =
-        toml::Value::String("old-parser".into());
-    fs::write(dir.0.join("user.toml"), toml::to_string(&after).unwrap()).unwrap();
-    let revised = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((revised.summary.retained, revised.summary.cached), (1, 0));
-    let after = dir.root("user.toml");
-    assert_ne!(
-        after[META]["preparation"]["signature"]["parser_revision"].as_str(),
-        Some("old-parser")
-    );
+fn manual_native_read_errors_do_not_modify_existing_tomls() {
+    let dir = TempDir::new("read-error");
+    dir.image("bad.jpg", b"broken image");
+    let original = b"# keep exact bytes\n[AE]\nA=7\n";
+    fs::write(dir.0.join("bad.toml"), original).unwrap();
     assert_eq!(
         prepare_image_metadata(&dir.0, |_| {})
             .unwrap()
@@ -578,157 +525,123 @@ fn user_business_edits_and_parser_revision_changes_invalidate_only_the_disk_sign
             .cached,
         1
     );
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!((result.summary.failed, result.summary.replaced), (1, 0));
+    assert_eq!(dir.bytes("bad.toml"), original);
 }
 
 #[test]
-fn first_source_survives_selection_between_debug_parser_and_native_content() {
-    let dir = TempDir::new("source-history");
-    dir.image("history.jpg", &native_jpeg(123));
-    let previous = "[AE]\nAE_TAG_ALGO_VER=999\n[__luxe_exif]\nschema_version=1\nparser='debug_parser'\nmodules=[]\nneeds_fallback=true\n[__luxe_exif.preparation]\nfirst_source='toml'\nselected_source='debug_parser'\ndecision='fallback'\n";
-    fs::write(dir.0.join("history.toml"), previous).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+fn manual_selection_deduplicates_and_only_touches_selected_current_directory_images() {
+    let dir = TempDir::new("selection");
+    for name in ["one", "two", "three"] {
+        dir.image(&format!("{name}.jpg"), &native_jpeg(123));
+        fs::write(
+            dir.0.join(format!("{name}.toml")),
+            "[AE]\nAE_TAG_ALGO_VER=999\n",
+        )
+        .unwrap();
+    }
+    let selected = dir.0.join("two.jpg").to_string_lossy().into_owned();
+    let result = merge_image_metadata(&dir.0, vec![selected.clone(), selected], |_| {}).unwrap();
     assert_eq!(
         (
+            result.summary.total,
             result.summary.replaced,
-            result.summary.partial,
-            result.summary.failed
+            result.entries.len()
         ),
-        (1, 0, 0)
+        (1, 1, 3)
     );
-    let root = dir.root("history.toml");
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("toml")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(root[META]["parser"].as_str(), Some("native"));
-    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(false));
-
-    dir.image("retained.jpg", &native_jpeg(123));
-    let fuller = previous.replace(
-        "AE_TAG_ALGO_VER=999",
-        "AE_TAG_ALGO_VER=999\nAE_TAG_DEBUG_VER=11\nDP_EXTRA=[1,2]",
-    );
-    fs::write(dir.0.join("retained.toml"), fuller).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((result.summary.retained, result.summary.cached), (1, 1));
-    let root = dir.root("retained.toml");
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("toml")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("debug_parser")
-    );
-    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(true));
+    assert!(dir.root("two.toml")["AE"].get("AE_TAG_DEBUG_VER").is_some());
+    assert!(dir.root("one.toml")["AE"].get("AE_TAG_DEBUG_VER").is_none());
+    assert!(dir.root("three.toml")["AE"]
+        .get("AE_TAG_DEBUG_VER")
+        .is_none());
 }
 
 #[test]
-fn first_none_source_survives_a_later_successful_native_parse() {
-    let dir = TempDir::new("first-none");
-    dir.image("retry.jpg", &ae_jpeg(999, &[]));
-    prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    dir.image("retry.jpg", &native_jpeg(123));
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(result.summary.created, 1);
-    let root = dir.root("retry.toml");
-    assert_eq!(
-        root[META]["preparation"]["first_source"].as_str(),
-        Some("none")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(false));
+fn invalid_selection_rejects_the_whole_manual_request_before_any_file_write() {
+    let dir = TempDir::new("invalid-selection");
+    let other = TempDir::new("other-selection");
+    dir.image("good.jpg", &native_jpeg(123));
+    other.image("outside.jpg", &native_jpeg(1));
+    let original = b"[AE]\nAE_TAG_ALGO_VER=999\n";
+    fs::write(dir.0.join("good.toml"), original).unwrap();
+    for bad in [
+        other.0.join("outside.jpg"),
+        dir.0.join("missing.jpg"),
+        dir.0.join("good.toml"),
+        PathBuf::from("relative.jpg"),
+        dir.0.join("nested/../good.jpg"),
+    ] {
+        assert!(merge_image_metadata(
+            &dir.0,
+            vec![
+                dir.0.join("good.jpg").to_string_lossy().into_owned(),
+                bad.to_string_lossy().into_owned()
+            ],
+            |_| {}
+        )
+        .is_err());
+        assert_eq!(dir.bytes("good.toml"), original);
+    }
 }
 
 #[test]
-fn manual_fallback_keeps_native_values_and_adds_dp_modules_without_reading_jpeg_again() {
-    let dir = TempDir::new("manual-fallback");
-    dir.image("mixed.jpg", &partial_jpeg(123));
-    prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    // Existing prepared TOML, not a repeated native read, supplies AE fields.
-    dir.image(
-        "mixed.jpg",
-        b"JPEG is unavailable during this manual fallback",
-    );
-    fs::write(
-        dir.0.join("mixed.jpg.exif"),
-        "[AE]\nAE_TAG_ALGO_VER: 999 |\n[AF]\nAF_NEW_FIELD: 7 |\n",
-    )
+fn progress_callbacks_remain_on_the_calling_thread_and_count_failures_monotonically() {
+    let dir = TempDir::new("progress");
+    for index in 0..12 {
+        dir.image(&format!("{index}.jpg"), &native_jpeg(index));
+    }
+    fs::write(dir.0.join("5.toml"), "broken=[").unwrap();
+    // Rc<RefCell<_>> is intentionally !Send: IPC progress need not cross workers.
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let captured = Rc::clone(&events);
+    let caller = std::thread::current().id();
+    let result = prepare_image_metadata(&dir.0, move |event| {
+        assert_eq!(std::thread::current().id(), caller);
+        captured.borrow_mut().push((event.completed, event.total));
+    })
     .unwrap();
-    let result = parse_exif_directory(None, &dir.0, |_| {}).unwrap();
-    assert_eq!((result.fallback, result.failed), (1, 0));
-    let root = dir.root("mixed.toml");
-    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(123));
-    assert_eq!(root["AE"]["AE_TAG_DEBUG_VER"].as_integer(), Some(11));
-    assert_eq!(root["AF"]["AF_NEW_FIELD"].as_integer(), Some(7));
-    assert_eq!(root[META]["needs_fallback"].as_bool(), Some(false));
+    assert_eq!((result.summary.created, result.summary.failed), (11, 1));
+    let events = events.borrow();
+    assert_eq!(events.len(), 13);
+    assert_eq!(events[0], (0, 12));
+    assert_eq!(events[12], (12, 12));
+    assert!(events.windows(2).all(|pair| pair[1].0 == pair[0].0 + 1));
+}
+
+#[test]
+fn old_preparation_history_is_compatible_but_not_regenerated_as_a_cache() {
+    let dir = TempDir::new("old-history");
+    dir.image("old.jpg", &native_jpeg(123));
+    let original = "[AE]\nAE_TAG_ALGO_VER=999\n[__luxe_exif]\nschema_version=1\nparser='debug_parser'\nneeds_fallback=true\nmodules=[]\n[__luxe_exif.preparation]\nfirst_source='toml'\nselected_source='debug_parser'\ndecision='fallback'\nsignature={parser_revision='obsolete'}\n";
+    fs::write(dir.0.join("old.toml"), original).unwrap();
+    assert_eq!(
+        prepare_image_metadata(&dir.0, |_| {})
+            .unwrap()
+            .summary
+            .cached,
+        1
+    );
+    assert_eq!(dir.bytes("old.toml"), original.as_bytes());
+    assert_eq!(
+        merge_image_metadata(&dir.0, Vec::new(), |_| {})
+            .unwrap()
+            .summary
+            .replaced,
+        1
+    );
+    let root = dir.root("old.toml");
     assert_eq!(
         root[META]["preparation"]["first_source"].as_str(),
-        Some("jpeg")
-    );
-    assert_eq!(
-        root[META]["preparation"]["selected_source"].as_str(),
-        Some("debug_parser")
-    );
-    assert_eq!(
-        root[META]["preparation"]["decision"].as_str(),
-        Some("fallback")
+        Some("toml")
     );
     assert!(root[META]["preparation"].get("signature").is_none());
-    assert!(root[META]["modules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|module| module["module"].as_str() == Some("AE")
-            && module["status"].as_str() == Some("matched")));
-    assert!(root[META]["modules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|module| module["module"].as_str() == Some("AF")
-            && module["parse_status"].as_str() == Some("decoded")));
+    assert_eq!(root["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(999));
 }
 
 #[test]
-fn a_no_gain_manual_fallback_leaves_partial_retryable_until_new_payload_arrives() {
-    let dir = TempDir::new("retryable-fallback");
-    dir.image("partial.jpg", &partial_jpeg(123));
-    prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    let before = fs::read(dir.0.join("partial.toml")).unwrap();
-    fs::write(
-        dir.0.join("partial.jpg.exif"),
-        "[AE]\nAE_TAG_ALGO_VER: 999 |\n",
-    )
-    .unwrap();
-    let first = parse_exif_directory(None, &dir.0, |_| {}).unwrap();
-    assert_eq!((first.fallback, first.partial), (0, 1));
-    assert_eq!(fs::read(dir.0.join("partial.toml")).unwrap(), before);
-    assert_eq!(
-        dir.root("partial.toml")[META]["needs_fallback"].as_bool(),
-        Some(true)
-    );
-    fs::write(
-        dir.0.join("partial.jpg.exif"),
-        "[AE]\nAE_TAG_ALGO_VER: 999 |\n[AF]\nPOS: 7 |\n",
-    )
-    .unwrap();
-    let second = parse_exif_directory(None, &dir.0, |_| {}).unwrap();
-    assert_eq!((second.fallback, second.failed), (1, 0));
-    let after = dir.root("partial.toml");
-    assert_eq!(after["AE"]["AE_TAG_ALGO_VER"].as_integer(), Some(123));
-    assert_eq!(after["AF"]["POS"].as_integer(), Some(7));
-    assert_eq!(after[META]["needs_fallback"].as_bool(), Some(false));
-}
-
-#[test]
-fn same_stem_images_directories_and_state_targets_are_not_written() {
+fn same_stem_directory_and_state_protection_apply_to_automatic_and_manual_paths() {
     let dir = TempDir::new("protected");
     dir.image("same.jpg", &native_jpeg(1));
     dir.image("same.jpeg", &native_jpeg(2));
@@ -737,45 +650,52 @@ fn same_stem_images_directories_and_state_targets_are_not_written() {
     dir.image("state.jpg", &native_jpeg(4));
     let state = b"[settings]\nlanguage=0\n";
     fs::write(dir.0.join("state.toml"), state).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!(
-        (
-            result.summary.total,
-            result.summary.failed,
-            result.summary.created
-        ),
-        (4, 4, 0)
-    );
+    for result in [
+        prepare_image_metadata(&dir.0, |_| {}).unwrap(),
+        merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap(),
+    ] {
+        assert_eq!(
+            (
+                result.summary.total,
+                result.summary.failed,
+                result.summary.created
+            ),
+            (4, 4, 0)
+        );
+    }
     assert!(!dir.0.join("same.toml").exists());
     assert!(!dir.0.join("directory.toml").exists());
-    assert_eq!(fs::read(dir.0.join("state.toml")).unwrap(), state);
+    assert_eq!(dir.bytes("state.toml"), state);
 }
 
 #[test]
-fn read_only_existing_file_stays_byte_identical_and_temporaries_are_cleaned() {
-    let dir = TempDir::new("read-only");
+fn readonly_valid_toml_is_reused_automatically_but_manual_changes_fail_without_temporary_leaks() {
+    let dir = TempDir::new("readonly");
     dir.image("locked.jpg", &native_jpeg(123));
+    let original = b"# byte layout\n[AE]\nAE_TAG_ALGO_VER=999\n";
     let path = dir.0.join("locked.toml");
-    let original = b"# preserve comment and byte layout\n[AE]\nAE_TAG_ALGO_VER=999\n";
     fs::write(&path, original).unwrap();
-    let original_permissions = fs::metadata(&path).unwrap().permissions();
-    let mut permissions = original_permissions.clone();
-    permissions.set_readonly(true);
-    fs::set_permissions(&path, permissions).unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((result.summary.failed, result.summary.replaced), (1, 0));
-    assert_eq!(fs::read(&path).unwrap(), original);
-    assert!(fs::read_dir(&dir.0).unwrap().all(|entry| !entry
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .ends_with(".tmp")));
-    fs::set_permissions(&path, original_permissions).unwrap();
+    let permissions = fs::metadata(&path).unwrap().permissions();
+    let mut locked = permissions.clone();
+    locked.set_readonly(true);
+    fs::set_permissions(&path, locked).unwrap();
+    assert_eq!(
+        prepare_image_metadata(&dir.0, |_| {})
+            .unwrap()
+            .summary
+            .cached,
+        1
+    );
+    let manual = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
+    assert_eq!((manual.summary.failed, manual.summary.replaced), (1, 0));
+    assert_eq!(dir.bytes("locked.toml"), original);
+    no_temporaries(&dir);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 #[cfg(windows)]
 #[test]
-fn a_windows_target_open_without_delete_sharing_cannot_be_replaced() {
+fn windows_target_without_delete_sharing_stays_unmodified_during_manual_merge() {
     use std::os::windows::fs::OpenOptionsExt;
     let dir = TempDir::new("occupied");
     dir.image("occupied.jpg", &native_jpeg(123));
@@ -787,46 +707,84 @@ fn a_windows_target_open_without_delete_sharing_cannot_be_replaced() {
         .share_mode(1)
         .open(&path)
         .unwrap();
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let result = merge_image_metadata(&dir.0, Vec::new(), |_| {}).unwrap();
     assert_eq!((result.summary.failed, result.summary.replaced), (1, 0));
-    assert_eq!(fs::read(&path).unwrap(), original);
-    assert!(fs::read_dir(&dir.0).unwrap().all(|entry| !entry
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .ends_with(".tmp")));
+    assert_eq!(dir.bytes("occupied.toml"), original);
+    no_temporaries(&dir);
 }
 
 #[cfg(any(unix, windows))]
 #[test]
-fn linked_sidecars_and_linked_parent_directories_never_follow_external_targets() {
+fn linked_targets_and_parent_directories_never_follow_external_metadata() {
     let dir = TempDir::new("links");
     let external = TempDir::new("outside");
     let original = b"[AE]\nAE_TAG_ALGO_VER=999\n";
-    let external_file = external.0.join("outside.toml");
-    fs::write(&external_file, original).unwrap();
+    let outside = external.0.join("outside.toml");
+    fs::write(&outside, original).unwrap();
     dir.image("linked.jpg", &native_jpeg(123));
     #[cfg(unix)]
-    let link_result = std::os::unix::fs::symlink(&external_file, dir.0.join("linked.toml"));
+    let result = std::os::unix::fs::symlink(&outside, dir.0.join("linked.toml"));
     #[cfg(windows)]
-    let link_result = std::os::windows::fs::symlink_file(&external_file, dir.0.join("linked.toml"));
-    if let Err(error) = link_result {
-        eprintln!("symlink fixture unavailable on this Windows runner: {error}");
+    let result = std::os::windows::fs::symlink_file(&outside, dir.0.join("linked.toml"));
+    if let Err(error) = result {
+        eprintln!("symlink fixture unavailable: {error}");
         return;
     }
-    let result = prepare_image_metadata(&dir.0, |_| {}).unwrap();
-    assert_eq!((result.summary.failed, result.summary.replaced), (1, 0));
-    assert_eq!(fs::read(&external_file).unwrap(), original);
+    assert_eq!(
+        prepare_image_metadata(&dir.0, |_| {})
+            .unwrap()
+            .summary
+            .failed,
+        1
+    );
+    assert_eq!(
+        merge_image_metadata(&dir.0, Vec::new(), |_| {})
+            .unwrap()
+            .summary
+            .failed,
+        1
+    );
+    assert_eq!(fs::read(&outside).unwrap(), original);
     let linked_dir = dir.0.join("linked-directory");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&external.0, &linked_dir).unwrap();
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&external.0, &linked_dir).unwrap();
     assert!(prepare_image_metadata(&linked_dir, |_| {}).is_err());
-    // Remove only fixtures created above, before TempDir traverses its tree.
+    assert!(merge_image_metadata(&linked_dir, Vec::new(), |_| {}).is_err());
     fs::remove_file(dir.0.join("linked.toml")).unwrap();
     #[cfg(unix)]
-    fs::remove_file(&linked_dir).unwrap();
+    fs::remove_file(linked_dir).unwrap();
     #[cfg(windows)]
-    fs::remove_dir(&linked_dir).unwrap();
+    fs::remove_dir(linked_dir).unwrap();
+}
+
+#[test]
+fn empty_directory_has_a_single_zero_completion_event() {
+    let dir = TempDir::new("empty-directory");
+    let mut events = Vec::new();
+    let result =
+        prepare_image_metadata(&dir.0, |event| events.push((event.completed, event.total)))
+            .unwrap();
+    assert_eq!(result.summary.total, 0);
+    assert_eq!(events, vec![(0, 0)]);
+}
+
+#[test]
+#[ignore = "fixture throughput observation for CI/manual runs; no performance claim until executed"]
+fn benchmark_automatic_reuse_versus_missing_tomls() {
+    let dir = TempDir::new("benchmark");
+    const COUNT: usize = 128;
+    for index in 0..COUNT {
+        dir.image(&format!("frame-{index:04}.jpg"), &native_jpeg(index as u32));
+    }
+    let fresh_started = Instant::now();
+    let fresh = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let fresh_elapsed = fresh_started.elapsed();
+    assert_eq!(fresh.summary.created, COUNT);
+    let reused_started = Instant::now();
+    let reused = prepare_image_metadata(&dir.0, |_| {}).unwrap();
+    let reused_elapsed = reused_started.elapsed();
+    assert_eq!(reused.summary.cached, COUNT);
+    eprintln!("metadata fixture throughput count={COUNT} native_missing_ms={} existing_toml_ms={} native_missing_images_per_second={:.2} existing_toml_images_per_second={:.2}",fresh_elapsed.as_millis(),reused_elapsed.as_millis(),COUNT as f64/fresh_elapsed.as_secs_f64(),COUNT as f64/reused_elapsed.as_secs_f64());
 }

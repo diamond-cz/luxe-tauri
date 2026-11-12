@@ -1,7 +1,7 @@
 import { call } from "./client";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Channel } from "@tauri-apps/api/core";
-import type { ImageExifDocument, ImageMetadataPreparationSummary, ImageSidecarCleanupSummary, ImageTomlSection } from "@/types/ipc";
+import type { ImageExifDocument, ImageMetadataPreparationSummary, ImageTomlSection } from "@/types/ipc";
 export type { ImageExifDocument, ImageExifModule, ImageExifTable, ImageTomlSection } from "@/types/ipc";
 
 export interface ImageEntry {
@@ -62,11 +62,9 @@ export const loadImageToml = (path: string) =>
 export const loadImageExif = (path: string) =>
   call<ImageExifDocument>("load_image_exif", { path });
 
-export const listImageSidecars = (imageDir: string, imagePaths: string[]) =>
-  call<string[]>("list_image_sidecars", { imageDir, imagePaths });
-
-export const clearImageSidecars = (imageDir: string, imagePaths: string[], confirmedFiles: string[]) =>
-  call<ImageSidecarCleanupSummary>("clear_image_sidecars", { imageDir, imagePaths, confirmedFiles });
+/** Explicit right-click action: re-read JPEG and add missing content without deletion. */
+export const mergeImageMetadata = (imageDir: string, imagePaths: string[], onProgress: (progress: ExifParseProgress) => void) =>
+  call<ImageMetadataPreparationResult>("merge_image_metadata", { imageDir, imagePaths, onProgress: metadataProgressChannel(onProgress) });
 
 export const loadImageTomlSections = (path: string) =>
   call<ImageTomlSection[]>("load_image_toml_sections", { path });

@@ -8,8 +8,10 @@
 //! caller so `DebugParser.exe` can be used as the compatibility fallback.
 
 use super::{ImageExifModule, ImageExifTable};
+use memchr::memmem;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::rc::Rc;
 
 #[path = "mtk_ae_tables.rs"]
 mod ae_tables;
@@ -167,7 +169,7 @@ struct HeaderSpec {
     module: Module,
     version: u32,
     path: &'static str,
-    tags: Vec<&'static str>,
+    tags: Rc<Vec<&'static str>>,
 }
 
 #[derive(Debug)]
@@ -413,6 +415,7 @@ fn read_declarations(
     segments: &[Segment],
     ranges: &[(usize, usize)],
     generation: u8,
+    enum_cache: &mut headers::EnumCache,
 ) -> (Vec<Declaration>, bool) {
     let mut declarations: Vec<Declaration> = Vec::new();
     let mut has_unsupported_module = false;
@@ -446,8 +449,11 @@ fn read_declarations(
                     ..*segment
                 });
                 let recognized = module_for_signature(magic, signature, generation);
-                let module = recognized
-                    .or_else(|| infer_module(data, magic, version, signature, payload, generation));
+                let module = recognized.or_else(|| {
+                    infer_module(
+                        data, magic, version, signature, payload, generation, enum_cache,
+                    )
+                });
                 let mut ambiguous = false;
                 if module.is_some() {
                     for existing in declarations
@@ -495,6 +501,7 @@ fn infer_module(
     signature: u32,
     payload: Option<Segment>,
     generation: u8,
+    enum_cache: &mut headers::EnumCache,
 ) -> Option<Module> {
     let payload = payload?;
     if payload.end > data.len() || payload.start.checked_add(16)? > payload.end {
@@ -520,8 +527,14 @@ fn infer_module(
     }
     if magic == APP7_MAGIC && generation == 6 {
         for module in [Module::Awb, Module::Isp] {
-            let Ok(header) = resolve_header(module, generation, version, Some(signature), true)
-            else {
+            let Ok(header) = resolve_header(
+                module,
+                generation,
+                version,
+                Some(signature),
+                true,
+                enum_cache,
+            ) else {
                 continue;
             };
             let label = if module == Module::Awb {
@@ -541,8 +554,14 @@ fn infer_module(
     }
     if magic == APP5_MAGIC && key == 0x0100_0000 {
         for module in [Module::Common, Module::Mfnr] {
-            let Ok(header) = resolve_header(module, generation, version, Some(signature), true)
-            else {
+            let Ok(header) = resolve_header(
+                module,
+                generation,
+                version,
+                Some(signature),
+                true,
+                enum_cache,
+            ) else {
                 continue;
             };
             let expected = if module == Module::Mfnr {
@@ -559,8 +578,8 @@ fn infer_module(
             {
                 continue;
             }
-            let indices: std::collections::BTreeSet<_> = (payload.start
-                ..payload.end.saturating_sub(7))
+            let mut first_index = None;
+            let two_indices = (payload.start..payload.end.saturating_sub(7))
                 .step_by(8)
                 .filter_map(|position| {
                     let key = read_u32(data, position)?;
@@ -568,13 +587,66 @@ fn infer_module(
                     (key >> 24 == 1 && header.tags.get(index).is_some_and(|tag| !tag.is_empty()))
                         .then_some(index)
                 })
-                .collect();
-            if indices.len() >= 2 {
+                .any(|index| match first_index {
+                    Some(first) => first != index,
+                    None => {
+                        first_index = Some(index);
+                        false
+                    }
+                });
+            if two_indices {
                 candidates.push(module);
             }
         }
     }
     (candidates.len() == 1).then(|| candidates[0])
+}
+
+#[cfg(test)]
+thread_local! { static WORD_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+/// Exact little-endian word search within one already validated byte region.
+/// memchr's default runtime dispatch may use SIMD on supported CPUs; this code
+/// has no alignment, AVX2, target-cpu, or unsafe assumptions. Advance one byte
+/// after a hit to preserve overlapping matches (including version word zero).
+struct WordMatches<'a> {
+    remaining: &'a [u8],
+    needle: [u8; 4],
+    offset: usize,
+}
+
+impl Iterator for WordMatches<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        let relative = memmem::find(self.remaining, &self.needle)?;
+        let position = self.offset + relative;
+        self.remaining = &self.remaining[relative + 1..];
+        self.offset = position + 1;
+        #[cfg(test)]
+        WORD_CANDIDATES.with(|count| count.set(count.get() + 1));
+        Some(position)
+    }
+}
+
+fn word_matches(
+    data: &[u8],
+    start: usize,
+    end: usize,
+    word: u32,
+    required_bytes: usize,
+) -> WordMatches<'_> {
+    let slice = data.get(start..end.min(data.len())).unwrap_or(&[]);
+    let required_bytes = required_bytes.max(4);
+    let remaining = if slice.len() < required_bytes {
+        &[]
+    } else {
+        &slice[..slice.len() - (required_bytes - 4)]
+    };
+    WordMatches {
+        remaining,
+        needle: word.to_le_bytes(),
+        offset: start,
+    }
 }
 
 fn find_kv_block(
@@ -588,8 +660,8 @@ fn find_kv_block(
         .end
         .min(data.len())
         .min(segment.start.saturating_add(MAX_MODULE_SCAN));
-    for position in segment.start..end.saturating_sub(15) {
-        if in_ranges(position, ranges) || read_u32(data, position) != Some(key0) {
+    for position in word_matches(data, segment.start, end, key0, 16) {
+        if in_ranges(position, ranges) {
             continue;
         }
         let Some(next_key) = read_u32(data, position + 8) else {
@@ -623,12 +695,9 @@ fn peek_sparse_version(
 ) -> Option<u32> {
     let segment = segment_for(segments, magic)?;
     let key0 = u32::from(marker) << 24;
-    for position in segment.start..segment.end.min(data.len()).saturating_sub(7) {
-        if !in_ranges(position, ranges) && read_u32(data, position) == Some(key0) {
-            return read_u32(data, position + 4);
-        }
-    }
-    None
+    let position = word_matches(data, segment.start, segment.end, key0, 8)
+        .find(|position| !in_ranges(*position, ranges))?;
+    read_u32(data, position + 4)
 }
 
 fn version_for(
@@ -659,6 +728,7 @@ fn resolve_header(
     version: u32,
     signature: Option<u32>,
     inferred: bool,
+    enum_cache: &mut headers::EnumCache,
 ) -> Result<HeaderSpec, headers::SelectionError> {
     if !inferred
         && signature.is_some_and(|signature| {
@@ -667,7 +737,7 @@ fn resolve_header(
     {
         return Err(headers::SelectionError::Missing);
     }
-    let (path, tags) = headers::select(module.subdir(), generation, version, signature)?;
+    let (path, tags) = enum_cache.select(module.subdir(), generation, version, signature)?;
     Ok(HeaderSpec {
         module,
         version,
@@ -683,7 +753,15 @@ fn header_for(
     version: u32,
     signature: Option<u32>,
 ) -> Option<HeaderSpec> {
-    resolve_header(module, generation, version, signature, false).ok()
+    resolve_header(
+        module,
+        generation,
+        version,
+        signature,
+        false,
+        &mut headers::EnumCache::default(),
+    )
+    .ok()
 }
 
 fn enum_name(header: &HeaderSpec, index: usize, prefix: &str) -> String {
@@ -705,8 +783,8 @@ fn read_kv_fragment(
     start: usize,
     marker: u8,
     limit: usize,
-) -> (BTreeMap<u32, u32>, usize) {
-    let mut values = BTreeMap::new();
+    values: &mut BTreeMap<u32, u32>,
+) -> usize {
     let mut position = start;
     let mut previous = None;
     while position + 8 <= limit {
@@ -727,7 +805,7 @@ fn read_kv_fragment(
         previous = Some(index);
         position += 8;
     }
-    (values, position)
+    position
 }
 
 fn find_next_kv_fragment(data: &[u8], after: usize, marker: u8, limit: usize) -> Option<usize> {
@@ -777,11 +855,10 @@ fn decode_kv_block(
     let mut span_end = start;
 
     for _ in 0..2000 {
-        let (fragment, end) = read_kv_fragment(data, position, marker, limit);
-        if fragment.is_empty() {
+        let end = read_kv_fragment(data, position, marker, limit, &mut values);
+        if end == position {
             break;
         }
-        values.extend(fragment);
         span_end = span_end.max(end);
         let Some(next) = find_next_kv_fragment(data, end, marker, limit) else {
             break;
@@ -829,22 +906,10 @@ fn decode_sparse_kv(
 ) -> Vec<(String, i64)> {
     let key0 = u32::from(marker) << 24;
     let limit = segment.end.min(data.len());
-    let mut block = None;
-    for position in segment.start..limit.saturating_sub(7) {
-        let Some(key) = read_u32(data, position) else {
-            break;
-        };
-        let Some(value) = read_u32(data, position + 4) else {
-            break;
-        };
-        if key == key0
-            && !in_ranges(position, ranges)
-            && version.map_or(true, |expected| expected == value)
-        {
-            block = Some(position);
-            break;
-        }
-    }
+    let block = word_matches(data, segment.start, limit, key0, 8).find(|position| {
+        !in_ranges(*position, ranges)
+            && version.is_none_or(|expected| read_u32(data, *position + 4) == Some(expected))
+    });
     let Some(block) = block else {
         return Vec::new();
     };
@@ -943,18 +1008,11 @@ fn decode_af_block(
     version: u32,
 ) -> Vec<(String, i64)> {
     let limit = segment.end.min(data.len());
-    let mut base = None;
-    // The version and first key alone are not an AF record: the value must
-    // also be present before the module can count as successfully decoded.
-    for position in segment.start..limit.saturating_sub(11) {
-        if !in_ranges(position, ranges)
-            && read_u32(data, position) == Some(version)
-            && read_u32(data, position + 4) == Some(0x0280_0001)
-        {
-            base = Some(position);
-            break;
-        }
-    }
+    // The version and first key alone are not an AF record: require the
+    // complete first value within this payload, including unaligned anchors.
+    let base = word_matches(data, segment.start, limit, version, 12).find(|position| {
+        !in_ranges(*position, ranges) && read_u32(data, *position + 4) == Some(0x0280_0001)
+    });
     let Some(base) = base else {
         return Vec::new();
     };
@@ -988,27 +1046,54 @@ fn add_section(
     }
 }
 
+fn write_integer_array(output: &mut String, values: &[i64]) {
+    output.push('[');
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            output.push_str(", ");
+        }
+        let _ = write!(output, "{value}");
+    }
+    output.push(']');
+}
+
 fn render_toml(sections: &[(String, Vec<(String, i64)>)]) -> String {
-    let mut output = String::new();
+    enum Values {
+        Scalar(i64),
+        Repeated(Vec<i64>),
+    }
+    let capacity = sections
+        .iter()
+        .map(|(name, fields)| {
+            name.len() + 4 + fields.iter().map(|(key, _)| key.len() + 16).sum::<usize>()
+        })
+        .sum();
+    let mut output = String::with_capacity(capacity);
     for (section, values) in sections {
-        let mut grouped: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
+        let mut grouped: BTreeMap<&str, Values> = BTreeMap::new();
         for (key, value) in values {
-            grouped.entry(key.as_str()).or_default().push(*value);
+            grouped
+                .entry(key.as_str())
+                .and_modify(|entry| match entry {
+                    Values::Scalar(first) => *entry = Values::Repeated(vec![*first, *value]),
+                    Values::Repeated(values) => values.push(*value),
+                })
+                .or_insert(Values::Scalar(*value));
         }
         if grouped.is_empty() {
             continue;
         }
         let _ = writeln!(output, "[{section}]");
         for (key, values) in grouped {
-            if values.len() == 1 {
-                let _ = writeln!(output, "{key} = {}", values[0]);
-            } else {
-                let joined = values
-                    .iter()
-                    .map(i64::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let _ = writeln!(output, "{key} = [{joined}]");
+            match values {
+                Values::Scalar(value) => {
+                    let _ = writeln!(output, "{key} = {value}");
+                }
+                Values::Repeated(values) => {
+                    let _ = write!(output, "{key} = ");
+                    write_integer_array(&mut output, &values);
+                    output.push('\n');
+                }
             }
         }
         output.push('\n');
@@ -1089,24 +1174,33 @@ pub(crate) fn inspect_exif_with_progress(
     }
     let generation = format_generation(&segments);
     let ranges = directory_ranges(data, &segments);
+    let mut enum_cache = headers::EnumCache::default();
     let (declarations, has_unsupported_module) =
-        read_declarations(data, &segments, &ranges, generation);
+        read_declarations(data, &segments, &ranges, generation, &mut enum_cache);
     let mut sections = Vec::new();
     let mut modules = Vec::with_capacity(Module::ALL.len() + declarations.len());
     let mut needs_fallback = has_unsupported_module;
-    let mut ae_enum = Vec::new();
+    let mut ae_enum = Rc::new(Vec::new());
 
     for (completed, module) in Module::ALL.into_iter().enumerate() {
         on_progress(completed, INSPECTION_STEPS);
         let declaration = declaration_for(&declarations, module);
-        let mut version_ranges = ranges.clone();
-        version_ranges.extend(
-            declarations
-                .iter()
-                .filter(|entry| entry.module != Some(module))
-                .filter_map(|entry| entry.payload.map(|payload| (payload.start, payload.end))),
-        );
-        let version = version_for(module, declaration, data, &segments, &version_ranges);
+        let version = if declaration.is_some() {
+            declaration.map(|entry| entry.version)
+        } else if matches!(
+            module,
+            Module::Ae | Module::Strobe | Module::Shading | Module::Common
+        ) {
+            let mut version_ranges = ranges.clone();
+            version_ranges.extend(
+                declarations
+                    .iter()
+                    .filter_map(|entry| entry.payload.map(|payload| (payload.start, payload.end))),
+            );
+            version_for(module, None, data, &segments, &version_ranges)
+        } else {
+            None
+        };
         let mut diagnostic = declaration_diagnostic(Some(module), declaration, version);
         if declaration.is_some_and(|entry| entry.ambiguous) {
             needs_fallback = true;
@@ -1118,18 +1212,13 @@ pub(crate) fn inspect_exif_with_progress(
             modules.push(diagnostic);
             continue;
         };
-        let expected = format!(
-            "{0}/{0}_{generation}_{1}_{2}.h",
-            module.subdir(),
-            version & 0xffff,
-            version >> 16
-        );
         let header = match resolve_header(
             module,
             generation,
             version,
             declaration.map(|entry| entry.signature),
             declaration.is_some_and(|entry| entry.inferred),
+            &mut enum_cache,
         ) {
             Ok(header) => header,
             Err(error) => {
@@ -1139,8 +1228,14 @@ pub(crate) fn inspect_exif_with_progress(
                     headers::SelectionError::Invalid => "invalid_header",
                 }
                 .into();
-                diagnostic.header =
-                    (error != headers::SelectionError::Ambiguous).then_some(expected);
+                diagnostic.header = (error != headers::SelectionError::Ambiguous).then(|| {
+                    format!(
+                        "{0}/{0}_{generation}_{1}_{2}.h",
+                        module.subdir(),
+                        version & 0xffff,
+                        version >> 16
+                    )
+                });
                 diagnostic.parse_status = "unsupported".into();
                 needs_fallback = true;
                 modules.push(diagnostic);
@@ -1284,10 +1379,6 @@ pub(crate) fn inspect_exif_with_progress(
     // Keep the compact gain/ISO summary available to the existing EXIF card,
     // without copying the AE tag array into a second large object.
     if let Some((_, ae_values)) = sections.iter().find(|(name, _)| name == "AE") {
-        let values: BTreeMap<&str, i64> = ae_values
-            .iter()
-            .map(|(key, value)| (key.as_str(), *value))
-            .collect();
         let fields = [
             ("shutter_us", "AE_TAG_PRV_SHUTTER_TIME"),
             ("sensor_gain", "AE_TAG_PRV_SENSOR_GAIN"),
@@ -1297,7 +1388,13 @@ pub(crate) fn inspect_exif_with_progress(
         ];
         let display: Vec<_> = fields
             .into_iter()
-            .filter_map(|(name, key)| values.get(key).map(|value| (name.to_string(), *value)))
+            .filter_map(|(name, key)| {
+                ae_values
+                    .iter()
+                    .rev()
+                    .find(|(tag, _)| tag == key)
+                    .map(|(_, value)| (name.to_string(), *value))
+            })
             .collect();
         if !display.is_empty() {
             sections.push(("AE_DISPLAY".into(), display));
@@ -1308,13 +1405,9 @@ pub(crate) fn inspect_exif_with_progress(
     for table in &ae_tables {
         let _ = writeln!(toml, "[AE_Table.{:?}]", table.name);
         let _ = writeln!(toml, "rows = {}\ncolumns = {}", table.rows, table.columns);
-        let joined = table
-            .values
-            .iter()
-            .map(i64::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let _ = writeln!(toml, "values = [{joined}]\n");
+        toml.push_str("values = ");
+        write_integer_array(&mut toml, &table.values);
+        toml.push_str("\n\n");
     }
     needs_fallback |= !modules
         .iter()
@@ -1363,6 +1456,121 @@ mod tests {
         jpeg.extend_from_slice(&payload);
         jpeg.extend_from_slice(&[0xff, 0xd9]);
         jpeg
+    }
+
+    #[test]
+    fn bounded_word_search_matches_a_scalar_oracle_for_alignment_overlap_and_short_tails() {
+        for word in [0u32, 0x0100_0000, 0x4433_2211] {
+            let mut data = vec![0x55; 80];
+            for position in [1, 9, 25, 69, 76] {
+                data[position..position + 4].copy_from_slice(&word.to_le_bytes());
+            }
+            for (start, end) in [
+                (0, 0),
+                (0, 3),
+                (0, 80),
+                (1, 17),
+                (7, 73),
+                (77, 80),
+                (81, 90),
+            ] {
+                for required in [4, 8, 12, 16] {
+                    let expected: Vec<_> = (start..end.min(data.len()))
+                        .filter(|position| {
+                            *position + required <= end.min(data.len())
+                                && super::read_u32(&data, *position) == Some(word)
+                        })
+                        .collect();
+                    let actual: Vec<_> =
+                        super::word_matches(&data, start, end, word, required).collect();
+                    assert_eq!(
+                        actual, expected,
+                        "word={word:#x}, {start}..{end}, required={required}"
+                    );
+                }
+            }
+        }
+        let zeros = [0u8; 9];
+        assert_eq!(
+            super::word_matches(&zeros, 0, 9, 0, 4).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn word_search_checks_only_matches_and_retains_unaligned_directory_and_segment_bounds() {
+        let mut data = vec![0x55; 65_531];
+        let anchor = data.len() - 16;
+        let block = words_bytes(&[0x0100_0000, 11, 0x0100_0001, 77]);
+        data[anchor..].copy_from_slice(&block);
+        let segment = super::Segment {
+            magic: APP6_MAGIC,
+            start: 0,
+            end: data.len(),
+        };
+        super::WORD_CANDIDATES.with(|count| count.set(0));
+        assert_eq!(super::find_kv_block(&data, &segment, 1, &[]), Some(anchor));
+        assert_eq!(
+            super::WORD_CANDIDATES.with(|count| count.get()),
+            1,
+            "nonmatching bytes are not decoded as u32 candidates"
+        );
+        assert_eq!(
+            super::find_kv_block(&data, &segment, 1, &[(anchor, segment.end)]),
+            None
+        );
+        assert_eq!(
+            super::find_kv_block(
+                &data,
+                &super::Segment {
+                    end: segment.end - 1,
+                    ..segment
+                },
+                1,
+                &[]
+            ),
+            None
+        );
+        data.extend_from_slice(&block);
+        let header = super::header_for(super::Module::Ae, 6, 11, Some(AE_SIGNATURE)).unwrap();
+        assert!(
+            super::decode_kv_block(&data, &segment, &[], &header, 1).is_some(),
+            "the following segment is not a duplicate owned block"
+        );
+        assert!(
+            super::decode_kv_block(
+                &data,
+                &super::Segment {
+                    end: data.len(),
+                    ..segment
+                },
+                &[],
+                &header,
+                1
+            )
+            .is_none(),
+            "a second owned index-zero block still rejects flattening"
+        );
+    }
+
+    #[test]
+    fn streaming_toml_arrays_preserve_scalar_order_and_repeated_af_values() {
+        let sections = vec![(
+            "AF".into(),
+            vec![
+                ("Z".into(), 0),
+                ("LOG".into(), -1),
+                ("LOG".into(), i64::MAX),
+                ("LOG".into(), i64::MIN),
+            ],
+        )];
+        assert_eq!(
+            super::render_toml(&sections),
+            format!("[AF]\nLOG = [-1, {}, {}]\nZ = 0\n\n", i64::MAX, i64::MIN)
+        );
+        let mut output = String::new();
+        super::write_integer_array(&mut output, &[]);
+        assert_eq!(output, "[]");
     }
 
     #[test]
@@ -2279,6 +2487,25 @@ mod tests {
     }
 
     #[test]
+    fn type8_alternative_size_reuses_one_marker_scan_and_keeps_candidate_priority() {
+        let mut alternative = type8_statistics();
+        alternative[4..8].copy_from_slice(&11578u32.to_le_bytes());
+        alternative.extend_from_slice(&[0; 2]);
+        let jpeg = with_layout(APP6_MAGIC, &[], &[alternative]);
+        let segments = super::mtk_segments(&jpeg);
+        let ranges = super::directory_ranges(&jpeg, &segments);
+        super::WORD_CANDIDATES.with(|count| count.set(0));
+        let (tables, incomplete) = super::ae_tables::decode(&jpeg, &segments, &ranges, 6, &[], &[]);
+        assert_eq!(tables.len(), 10);
+        assert!(!incomplete);
+        assert_eq!(
+            super::WORD_CANDIDATES.with(|count| count.get()),
+            1,
+            "alternative-size lookup must not scan marker candidates twice"
+        );
+    }
+
+    #[test]
     fn type8_prefers_the_measured_record_size_over_other_valid_candidates() {
         let mut alternative = type8_statistics();
         alternative[4..8].copy_from_slice(&11578u32.to_le_bytes());
@@ -2344,6 +2571,27 @@ mod tests {
                 "valid AE must not hide a truncated or unknown statistics layout"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "manual CI/release benchmark; not a desktop interaction or baseline speedup claim"]
+    fn benchmark_large_metadata_native_inspection() {
+        let padding = with_layout(APP6_MAGIC, &[], &[vec![0x55; 65_000]]);
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xd9];
+        for _ in 0..180 {
+            jpeg = append_segment(jpeg, &padding);
+        }
+        jpeg = append_segment(jpeg, &synthetic_ae_jpeg(123));
+        let started = std::time::Instant::now();
+        for _ in 0..8 {
+            let output = decode_to_toml(std::hint::black_box(&jpeg)).unwrap();
+            assert!(output.toml.contains("AE_TAG_ALGO_VER = 123"));
+        }
+        eprintln!(
+            "native EXIF: metadata_bytes={}, iterations=8, total_ms={:.3}",
+            jpeg.len(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     fn legacy_statistics(missing: Option<&str>) -> Vec<u8> {

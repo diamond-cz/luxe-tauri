@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    module_payload_ranges, normalized_magic, read_u16, read_u32, ImageExifTable, Segment,
-    APP6_MAGIC,
+    module_payload_ranges, normalized_magic, read_u16, read_u32, word_matches, ImageExifTable,
+    Segment, APP6_MAGIC,
 };
 
 const GRID_SHAPES: [(&str, usize, usize); 7] = [
@@ -36,11 +36,21 @@ fn u24(data: &[u8], offset: usize) -> Option<u32> {
 }
 
 fn varied(data: &[u8], offset: usize, count: usize) -> bool {
-    (0..count)
-        .filter_map(|index| read_u16(data, offset + index * 2))
-        .collect::<BTreeSet<_>>()
-        .len()
-        >= 8
+    let mut distinct = [0u16; 8];
+    let mut used = 0;
+    for index in 0..count {
+        let Some(value) = read_u16(data, offset + index * 2) else {
+            return false;
+        };
+        if !distinct[..used].contains(&value) {
+            distinct[used] = value;
+            used += 1;
+            if used == distinct.len() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn valid_type8(data: &[u8], start: usize, limit: usize) -> bool {
@@ -61,64 +71,72 @@ fn valid_type8(data: &[u8], start: usize, limit: usize) -> bool {
     y > 0 && rgb == 3 * y
 }
 
+fn type8_tables(data: &[u8], start: usize) -> Vec<ImageExifTable> {
+    let mut cursor = start;
+    let mut tables = Vec::with_capacity(10);
+    for (name, rows, columns) in GRID_SHAPES {
+        let values = (0..rows * columns)
+            .map(|index| i64::from(read_u16(data, cursor + index * 2).unwrap()))
+            .collect();
+        tables.push(table(name, rows, columns, values));
+        cursor += rows * columns * 2;
+    }
+    for name in ["Central_Y", "Full_Y", "Full_RGB"] {
+        let values = (0..1024)
+            .map(|index| i64::from(u24(data, cursor + index * 3).unwrap()))
+            .collect();
+        tables.push(table(name, 64, 16, values));
+        cursor += 1024 * 3;
+    }
+    tables
+}
+
 fn decode_type8(data: &[u8], segments: &[Segment]) -> (Vec<ImageExifTable>, bool) {
     let mut incomplete = false;
     let mut candidates = 0;
-    for exact_size in [true, false] {
-        for segment in segments
-            .iter()
-            .filter(|segment| normalized_magic(segment.magic) == APP6_MAGIC)
-        {
-            let limit = segment.end.min(data.len());
-            for position in segment.start..limit.saturating_sub(7) {
-                if read_u32(data, position) != Some(8) {
-                    continue;
+    // Remember at most the first 129 alternative-size candidates. A second
+    // full byte scan is unnecessary; candidate 129 already exhausts the old
+    // shared 128-candidate budget if none of the earlier ones is valid.
+    let mut alternatives = Vec::new();
+    for segment in segments
+        .iter()
+        .filter(|segment| normalized_magic(segment.magic) == APP6_MAGIC)
+    {
+        let limit = segment.end.min(data.len());
+        for position in word_matches(data, segment.start, limit, 8, 8) {
+            let size = read_u32(data, position + 4).unwrap_or(0) as usize;
+            let start = position + 8;
+            if size != TYPE8_BYTES + 10 {
+                if (TYPE8_BYTES..=segment.end - segment.start).contains(&size)
+                    && alternatives.len() <= MAX_CANDIDATES
+                {
+                    alternatives.push((start, limit));
                 }
-                let size = read_u32(data, position + 4).unwrap_or(0) as usize;
-                let size_ok = if exact_size {
-                    size == TYPE8_BYTES + 10
-                } else {
-                    (TYPE8_BYTES..=segment.end - segment.start).contains(&size)
-                        && size != TYPE8_BYTES + 10
-                };
-                if !size_ok {
-                    continue;
-                }
-                candidates += 1;
-                if candidates > MAX_CANDIDATES {
-                    return (Vec::new(), true);
-                }
-                let start = position + 8;
-                // The measured size includes ten bytes of record overhead,
-                // while statistics start after eight. Validate the actual
-                // 11566-byte read span, not two optional trailing bytes.
-                if start + TYPE8_BYTES > limit {
-                    incomplete = true;
-                    continue;
-                }
-                if !valid_type8(data, start, limit) {
-                    incomplete = true;
-                    continue;
-                }
-                let mut cursor = start;
-                let mut tables = Vec::with_capacity(10);
-                for (name, rows, columns) in GRID_SHAPES {
-                    let values = (0..rows * columns)
-                        .map(|index| i64::from(read_u16(data, cursor + index * 2).unwrap()))
-                        .collect();
-                    tables.push(table(name, rows, columns, values));
-                    cursor += rows * columns * 2;
-                }
-                for name in ["Central_Y", "Full_Y", "Full_RGB"] {
-                    let values = (0..1024)
-                        .map(|index| i64::from(u24(data, cursor + index * 3).unwrap()))
-                        .collect();
-                    tables.push(table(name, 64, 16, values));
-                    cursor += 1024 * 3;
-                }
-                return (tables, incomplete);
+                continue;
             }
+            candidates += 1;
+            if candidates > MAX_CANDIDATES {
+                return (Vec::new(), true);
+            }
+            // Validate the actual 11566-byte table; two record trailer bytes
+            // are optional, and slot boundaries intentionally do not apply.
+            if !valid_type8(data, start, limit) {
+                incomplete = true;
+                continue;
+            }
+            return (type8_tables(data, start), incomplete);
         }
+    }
+    for (start, limit) in alternatives {
+        candidates += 1;
+        if candidates > MAX_CANDIDATES {
+            return (Vec::new(), true);
+        }
+        if !valid_type8(data, start, limit) {
+            incomplete = true;
+            continue;
+        }
+        return (type8_tables(data, start), incomplete);
     }
     (Vec::new(), incomplete)
 }

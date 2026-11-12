@@ -2179,6 +2179,7 @@ dependencies = [
  "indexmap 2.14.0",
  "libmimalloc-sys",
  "log",
+ "memchr",
  "mimalloc",
  "once_cell",
  "parking_lot",

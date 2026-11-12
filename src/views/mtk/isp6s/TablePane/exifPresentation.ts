@@ -51,8 +51,10 @@ export function buildExifTabs(document: ImageExifDocument): ExifTab[] {
 
 export function exifSourceKey(source: ImageExifDocument["source"]): string {
   if (source.kind === "jpeg") return "image_exif.source.jpeg";
+  if (source.content_mode === "metadata_only") return "image_exif.source.metadata_only";
   if (source.parser === "debug_parser") return "image_exif.source.debug_parser";
-  if (source.parser === "native") return "image_exif.source.native_toml";
+  if (source.parser === "native") return source.content_mode === "native_merge"
+    ? "image_exif.source.native_merged" : "image_exif.source.native_toml";
   return "image_exif.source.unknown_toml";
 }
 

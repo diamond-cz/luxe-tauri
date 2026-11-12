@@ -25,11 +25,6 @@ export interface ImageExifModule {
   parse_status: "decoded" | "empty" | "version_only" | "unsupported" | "unavailable";
 }
 
-export interface ImageSidecarCleanupSummary {
-  deleted: string[];
-  failed: string[];
-}
-
 export interface ImageMetadataImportInfo {
   first_source: "jpeg" | "toml" | "debug_parser" | "none";
   selected_source: "jpeg" | "toml" | "debug_parser" | "none";
@@ -55,6 +50,7 @@ export interface ImageExifDocument {
     kind: "jpeg" | "toml";
     parser: "native" | "debug_parser" | "unknown";
     path: string;
+    content_mode: "native" | "native_merge" | "metadata_only" | "replace" | null;
   };
   needs_fallback: boolean;
   preparation: ImageMetadataImportInfo | null;

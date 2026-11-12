@@ -112,7 +112,7 @@ interface Props {
   onImageSearchQueryChange: (value: string) => void;
   onImageSearch: () => void;
   onParseExif: () => void;
-  onClearSidecars: (imagePaths: string[]) => void;
+  onMergeExif: (imagePaths: string[]) => void;
   onNotice: (toast: { kind: "success" | "error"; title: string; detail?: string }) => void;
   exifParsing: boolean;
   imageDataRevision: number;
@@ -325,7 +325,7 @@ export function TablePane({
   onImageSearchQueryChange,
   onImageSearch,
   onParseExif,
-  onClearSidecars,
+  onMergeExif,
   onNotice,
   exifParsing,
   imageDataRevision,
@@ -514,12 +514,15 @@ export function TablePane({
             <MenuPopover>
               <MenuList>
                 <MenuItem disabled={!entries[current] || exifParsing}
-                  onClick={() => { const entry = entries[current]; if (entry) onClearSidecars([entry.jpg_path]); }}>
-                  {t("image_exif.cleanup.current")}
+                  onClick={() => { const entry = entries[current]; if (entry) onMergeExif([entry.jpg_path]); }}>
+                  {t("image_exif.merge.current")}
+                </MenuItem>
+                <MenuItem disabled={entries.length === 0 || exifParsing} onClick={() => onMergeExif([])}>
+                  {t("image_exif.merge.all")}
                 </MenuItem>
                 <MenuItem disabled={!selectedImageIndexes.length || exifParsing}
-                  onClick={() => onClearSidecars(selectedImageIndexes.map((index) => entries[index].jpg_path))}>
-                  {t("image_exif.cleanup.selected", { count: selectedImageIndexes.length })}
+                  onClick={() => onMergeExif(selectedImageIndexes.map((index) => entries[index].jpg_path))}>
+                  {t("image_exif.merge.selected", { count: selectedImageIndexes.length })}
                 </MenuItem>
               </MenuList>
             </MenuPopover>

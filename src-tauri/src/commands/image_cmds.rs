@@ -28,7 +28,7 @@ pub async fn parse_image_exif(
         .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
     tauri::async_runtime::spawn_blocking(move || {
         let parser: Option<PathBuf> = parser_path.map(PathBuf::from);
-        image_scan::parse_exif_directory(
+        image_scan::parse_debug_parser_directory(
             parser.as_deref(),
             &PathBuf::from(image_dir),
             |progress| { let _ = on_progress.send(progress); },
@@ -45,32 +45,19 @@ pub async fn prepare_image_metadata(
     let _permit = EXIF_TASKS.acquire().await
         .map_err(|error| AppError::Other(format!("metadata preparation queue closed: {error}")))?;
     tauri::async_runtime::spawn_blocking(move || {
-        let result = image_scan::prepare_image_metadata(&PathBuf::from(image_dir), |progress| { let _ = on_progress.send(progress); });
-        image_scan::clear_memory_caches();
-        result
+        image_scan::prepare_image_metadata(&PathBuf::from(image_dir), |progress| { let _ = on_progress.send(progress); })
     }).await.map_err(|error| AppError::Other(format!("metadata preparation task failed: {error}")))?
 }
 
 #[tauri::command]
-pub async fn list_image_sidecars(image_dir: String, image_paths: Vec<String>) -> AppResult<Vec<String>> {
+pub async fn merge_image_metadata(
+    image_dir: String, image_paths: Vec<String>, on_progress: Channel<image_scan::ExifParseProgress>,
+) -> AppResult<image_scan::ImageMetadataPreparationResult> {
     let _permit = EXIF_TASKS.acquire().await
-        .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
-    tauri::async_runtime::spawn_blocking(move || image_scan::list_image_sidecars(&PathBuf::from(image_dir), image_paths))
-        .await.map_err(|error| AppError::Other(format!("sidecar preview task failed: {error}")))?
-}
-
-#[tauri::command]
-pub async fn clear_image_sidecars(
-    image_dir: String, image_paths: Vec<String>, confirmed_files: Vec<String>,
-) -> AppResult<image_scan::ImageSidecarCleanupSummary> {
-    let _permit = EXIF_TASKS.acquire().await
-        .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = image_scan::clear_image_sidecars(&PathBuf::from(image_dir), image_paths, confirmed_files);
-        // Also invalidate reads that started before a partially failed cleanup.
-        image_scan::clear_memory_caches();
-        result
-    }).await.map_err(|error| AppError::Other(format!("sidecar cleanup task failed: {error}")))?
+        .map_err(|error| AppError::Other(format!("metadata merge queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::merge_image_metadata(&PathBuf::from(image_dir), image_paths,
+        |progress| { let _ = on_progress.send(progress); }))
+        .await.map_err(|error| AppError::Other(format!("metadata merge task failed: {error}")))?
 }
 
 #[tauri::command]

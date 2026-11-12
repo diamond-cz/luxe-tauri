@@ -44,6 +44,7 @@ React 组件使用 PascalCase，函数与变量使用 camelCase；Rust 模块使
 | Fluent UI React Components / Zustand | 9.72.9 / 5.0.9 |
 | Tauri Rust / Tauri JS API | 2.12.4 / 2.12.4 |
 | i18next / react-i18next | 23.16.8 / 15.7.4 |
+| Rust toml / Rayon / memchr | 0.8.2 / 1.10.0 / 2.8.0 |
 
 安装依赖使用 npm ci。依赖升级时同步核对本表与 02-技术栈与核心库.md。正式版本从 src-tauri/tauri.conf.json 修改，再运行 npm run version:sync 和 npm run version:check。
 

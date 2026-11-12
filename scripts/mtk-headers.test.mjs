@@ -128,11 +128,10 @@ test("bundling is self-contained and source enumeration does not hardcode eighte
   const decoder = readFileSync(join(project, "src-tauri/src/image_scan/mtk_headers.rs"), "utf8");
   assert.match(build, /collect_headers\(&root, &root, &mut files\)/);
   assert.match(build, /MAX_MTK_HEADERS_BYTES/);
-  assert.match(build, /cargo:rustc-env=LUXE_MTK_METADATA_REVISION=/);
-  for (const file of ['mtk_exif.rs', 'mtk_headers.rs', 'mtk_ae_tables.rs', 'metadata_import.rs', 'exif_document.rs', 'metadata_source.rs']) {
-    assert.ok(build.includes(`src/image_scan/${file}`), `preparation cache revision must include ${file}`);
-  }
-  assert.match(build, /update_revision\(&fs::read/);
+  const preparation = readFileSync(join(project, 'src-tauri/src/image_scan/metadata_import.rs'), 'utf8');
+  assert.doesNotMatch(preparation, /LUXE_MTK_METADATA_REVISION|payload_fingerprint|PARSER_REVISION/,
+    'automatic TOML reuse must not recalculate the old whole-document comparison fingerprint');
+  assert.doesNotMatch(build, /LUXE_MTK_METADATA_REVISION|update_revision/);
   assert.match(decoder, /include!\(concat!\(env!\("OUT_DIR"\)/);
   for (const source of [build, decoder]) assert.doesNotMatch(source, /A_Private_Box|IPEParser|Command::new|std::process/);
   const config = JSON.parse(readFileSync(join(project, "src-tauri/tauri.conf.json"), "utf8"));

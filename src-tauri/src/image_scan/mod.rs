@@ -6,16 +6,15 @@
 
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod metadata_pipeline_tests;
 mod exif_document;
 mod metadata_import;
 mod metadata_source;
 
-pub use self::metadata_import::{prepare_image_metadata, ImageMetadataPreparationResult, ImageMetadataPreparationSummary};
+pub use self::metadata_import::{prepare_image_metadata, merge_image_metadata, ImageMetadataPreparationResult, ImageMetadataPreparationSummary};
 mod mtk_exif;
 mod natural_order;
-mod sidecar_cleanup;
-
-pub use self::sidecar_cleanup::{clear_image_sidecars, list_image_sidecars, ImageSidecarCleanupSummary};
 pub use self::exif_document::{
     load_image_exif, load_image_exif_with_progress, load_prepared_image_exif, ImageExifDocument, ImageExifModule, ImageExifSource, ImageExifTable,
 };
@@ -155,8 +154,7 @@ fn read_jpeg_metadata(path: &Path) -> std::io::Result<Vec<u8>> {
         if marker == 0x01 || (0xd0..=0xd8).contains(&marker) {
             continue;
         }
-        data.extend_from_slice(&[0xff, marker]);
-        if matches!(marker, 0xda | 0xd9) { break; }
+        if matches!(marker, 0xda | 0xd9) { data.extend_from_slice(&[0xff, marker]); break; }
 
         let mut length_bytes = [0u8; 2];
         file.read_exact(&mut length_bytes)?;
@@ -167,6 +165,15 @@ fn read_jpeg_metadata(path: &Path) -> std::io::Result<Vec<u8>> {
             return Err(invalid("JPEG metadata exceeds the 16 MiB parser limit"));
         }
         let payload_length = segment_length - 2;
+        // Native 3A decoding needs only APP5/6/7. Skip standard EXIF/XMP,
+        // embedded thumbnails and quantization/Huffman tables without copying
+        // them into the private-metadata buffer. The scanned-byte limit still
+        // applies, and a truncated skip fails on the next marker read.
+        if !matches!(marker, 0xe5..=0xe7) {
+            file.seek_relative(payload_length as i64)?;
+            continue;
+        }
+        data.extend_from_slice(&[0xff, marker]);
         data.extend_from_slice(&length_bytes);
         let payload_start = data.len();
         data.resize(payload_start + payload_length, 0);
@@ -348,7 +355,7 @@ pub fn parse_exif_directory(
                 None => None,
             };
             if let Some(contents) = contents {
-                match metadata_import::apply_debug_parser_fallback(Path::new(&item.entry.jpg_path), Path::new(&item.entry.toml_path), &contents) {
+                match metadata_import::replace_debug_parser_metadata(Path::new(&item.entry.jpg_path), Path::new(&item.entry.toml_path), &contents) {
                     Ok(true) => {
                         summary.processed += 1;
                         summary.fallback += 1;
@@ -374,6 +381,92 @@ pub fn parse_exif_directory(
         }
         on_progress(ExifParseProgress { stage: "TOML", completed: index + 1, total });
     }
+    Ok(summary)
+}
+
+/// Explicit left-click action: run the configured tool on fresh temporary
+/// copies and replace TOML with that run's payload. No native decode or reuse
+/// of a stale `.jpg.exif` from the user's directory is permitted here.
+pub fn parse_debug_parser_directory(
+    parser_path: Option<&Path>, image_dir: &Path, on_progress: impl FnMut(ExifParseProgress),
+) -> AppResult<ExifParseSummary> {
+    parse_debug_parser_directory_with(parser_path, image_dir, on_progress, |parser, root| {
+        let mut child = spawn_debug_parser(parser, root)?;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) => return Err(AppError::Other(format!("DebugParser exited with {status}"))),
+                Ok(None) => thread::sleep(Duration::from_millis(100)),
+                Err(error) => { let _ = child.wait(); return Err(error.into()); }
+            }
+        }
+    })
+}
+
+fn parse_debug_parser_directory_with(
+    parser_path: Option<&Path>, image_dir: &Path, mut on_progress: impl FnMut(ExifParseProgress),
+    mut run_parser: impl FnMut(&Path, &Path) -> AppResult<()>,
+) -> AppResult<ExifParseSummary> {
+    let started = std::time::Instant::now();
+    let parser = parser_path.filter(|path| path.is_file())
+        .ok_or_else(|| AppError::Invalid("DebugParser executable is required for explicit overwrite".into()))?;
+    let writer = metadata_import::DebugParserMetadataWriter::new(image_dir)?;
+    let entries = scan_directory(image_dir)?;
+    if entries.is_empty() { return Err(AppError::Invalid("no images to parse".into())); }
+    let total = entries.len();
+    let root = std::env::temp_dir().join(format!("luxe-exif-{}-{}", std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()));
+    fs::create_dir(&root)?;
+    let _guard = ParseTempDir(root.clone());
+    let mut summary = ExifParseSummary { processed: 0, skipped: 0, failed: 0, total, direct: 0, fallback: 0, partial: 0 };
+    let mut work = Vec::with_capacity(total);
+    on_progress(ExifParseProgress { stage: "DP", completed: 0, total });
+    for entry in entries {
+        let image = Path::new(&entry.jpg_path);
+        let target = Path::new(&entry.toml_path);
+        let Some(filename) = image.file_name() else { summary.failed += 1; continue; };
+        let copied = root.join(filename);
+        match writer.copy_for_parser(image, target, &copied) {
+            Ok(snapshot) => work.push((entry, copied, snapshot)),
+            Err(error) => { tracing::warn!(path = %entry.jpg_path, %error, "DP overwrite copy/preflight rejected"); summary.failed += 1; }
+        }
+        // Copy/preflight belongs to DP stage; do not claim parsing completed.
+    }
+    if !work.is_empty() {
+        if let Err(error) = run_parser(parser, &root) {
+            tracing::warn!(%error, "DP overwrite process failed");
+            summary.failed += work.len();
+            on_progress(ExifParseProgress { stage: "DP", completed: total, total });
+            return Ok(summary);
+        }
+    }
+    on_progress(ExifParseProgress { stage: "DP", completed: total, total });
+    on_progress(ExifParseProgress { stage: "TOML", completed: summary.failed, total });
+    for (entry, copied, snapshot) in work {
+        let sidecar = PathBuf::from(format!("{}.exif", copied.display()));
+        // Sidecars live only in the newly created directory. Refuse links or
+        // nested output paths rather than treating tool output as trusted IO.
+        let result = fs::symlink_metadata(&sidecar).map_err(AppError::from).and_then(|metadata| {
+            let mut unsafe_output = !metadata.is_file() || metadata.file_type().is_symlink();
+            #[cfg(windows)] {
+                use std::os::windows::fs::MetadataExt;
+                unsafe_output |= metadata.file_attributes() & 0x400 != 0;
+            }
+            #[cfg(not(windows))] { let _ = &mut unsafe_output; }
+            if unsafe_output { return Err(AppError::Invalid("unsafe DebugParser output".into())); }
+            snapshot.recheck(Path::new(&entry.jpg_path))?;
+            let text = exif_to_toml(&sidecar)?.ok_or_else(|| AppError::Invalid("DebugParser produced no usable fields".into()))?;
+            writer.replace(Path::new(&entry.jpg_path), Path::new(&entry.toml_path), &text)
+        });
+        match result {
+            Ok(true) => { summary.processed += 1; summary.fallback += 1; }
+            Ok(false) => summary.failed += 1,
+            Err(error) => { tracing::warn!(path = %entry.toml_path, %error, "DP overwrite failed; original retained"); summary.failed += 1; }
+        }
+        on_progress(ExifParseProgress { stage: "TOML", completed: summary.processed + summary.failed, total });
+    }
+    if summary.processed > 0 { clear_memory_caches(); }
+    tracing::info!(total, written = summary.processed, failed = summary.failed, elapsed_ms = started.elapsed().as_millis() as u64, "explicit DP overwrite complete");
     Ok(summary)
 }
 

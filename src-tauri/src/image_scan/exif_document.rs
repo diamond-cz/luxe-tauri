@@ -1,6 +1,7 @@
 //! On-demand EXIF presentation, statistics and explicit export provenance.
 //! No document cache: only the currently mounted EXIF view owns this payload.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,7 @@ pub struct ImageExifSource {
     pub kind: &'static str,
     pub parser: String,
     pub path: String,
+    pub content_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +65,8 @@ struct ExportProvenance {
     parser: String,
     needs_fallback: bool,
     modules: Vec<ImageExifModule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_mode: Option<String>,
 }
 
 pub fn load_image_exif(path: &Path) -> AppResult<ImageExifDocument> {
@@ -104,6 +108,7 @@ fn project_image_exif(
                 kind: "jpeg",
                 parser: "native".into(),
                 path: source_path,
+                content_mode: Some("native".into()),
             },
             needs_fallback: output.needs_fallback,
             preparation: None,
@@ -117,7 +122,7 @@ fn project_image_exif(
             selected_source: info.selected_source,
             decision: info.decision,
         });
-    let provenance = root
+    let mut provenance = root
         .as_table_mut()
         .and_then(|table| table.remove(PROVENANCE_KEY))
         .and_then(|value| value.try_into::<ExportProvenance>().ok())
@@ -127,12 +132,27 @@ fn project_image_exif(
         });
     let ae_tables = take_ae_tables(&mut root);
     let sections = presentation_sections(&mut root);
-    let modules = provenance
+    let stored_modules = provenance
+        .as_mut()
+        .map(|value| std::mem::take(&mut value.modules))
+        .filter(|modules| valid_modules(modules));
+    let modules = if provenance
         .as_ref()
-        .map(|value| value.modules.clone())
-        .filter(|modules| valid_modules(modules))
-        .filter(|modules| !modules.is_empty())
-        .unwrap_or_else(|| unrecorded_modules(&sections));
+        .and_then(|value| value.content_mode.as_deref())
+        == Some("native_merge")
+    {
+        // Older merged TOMLs may already contain accumulated parse history.
+        // Normalize the view too, without rewriting the automatically reused file.
+        merged_content_modules(&root, stored_modules.unwrap_or_default())?
+    } else {
+        stored_modules
+            .filter(|modules| !modules.is_empty())
+            .unwrap_or_else(|| unrecorded_modules(&sections))
+    };
+    let needs_fallback = provenance
+        .as_ref()
+        .is_some_and(|value| value.needs_fallback)
+        || (sections.iter().all(|section| section.fields.is_empty()) && ae_tables.is_empty());
     on_progress(source.progress(source.progress_total()));
     Ok(ImageExifDocument {
         sections,
@@ -145,8 +165,17 @@ fn project_image_exif(
                 .map(|value| value.parser.clone())
                 .unwrap_or_else(|| "unknown".into()),
             path: source_path,
+            content_mode: provenance
+                .as_ref()
+                .and_then(|value| value.content_mode.clone())
+                .filter(|mode| {
+                    matches!(
+                        mode.as_str(),
+                        "native" | "native_merge" | "metadata_only" | "replace"
+                    )
+                }),
         },
-        needs_fallback: provenance.is_some_and(|value| value.needs_fallback),
+        needs_fallback,
         preparation,
     })
 }
@@ -237,6 +266,146 @@ fn unrecorded_modules(sections: &[ImageTomlSection]) -> Vec<ImageExifModule> {
     result
 }
 
+/// A merged module's content no longer belongs to one binary enum alone.
+/// Count its actual saved observations, do not accumulate historical parse rows
+/// or claim a native header describes the retained legacy/DP-only fields.
+pub(super) fn merged_content_modules(
+    root: &toml::Value,
+    diagnostics: Vec<ImageExifModule>,
+) -> AppResult<Vec<ImageExifModule>> {
+    fn count(value: &toml::Value) -> usize {
+        match value {
+            toml::Value::Table(table) => table
+                .values()
+                .fold(0usize, |total, value| total.saturating_add(count(value))),
+            toml::Value::Array(values) => values
+                .iter()
+                .fold(0usize, |total, value| total.saturating_add(count(value))),
+            _ => 1,
+        }
+    }
+    fn module_name(name: &str, is_table: bool) -> String {
+        if !is_table {
+            for (prefix, module) in [
+                ("AE_TAG_", "AE"),
+                ("AF_TAG_", "AF"),
+                ("AWB_TAG_", "AWB"),
+                ("MF_TAG_", "MFNR"),
+                ("CMN_TAG_", "Common"),
+                ("SHAD_", "Shading"),
+                ("FL_T_", "Strobe"),
+            ] {
+                if name.starts_with(prefix) {
+                    return module.into();
+                }
+            }
+            return "Root".into();
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "AE" => "AE".into(),
+            "AF" => "AF".into(),
+            "AWB" => "AWB".into(),
+            "ISP" => "ISP".into(),
+            "N3D" => "N3D".into(),
+            "SWNR" => "SWNR".into(),
+            "BMDN" => "BMDN".into(),
+            "SENSOR" => "Sensor".into(),
+            "SHADING" => "Shading".into(),
+            "STROBE" => "Strobe".into(),
+            "MF" | "MFNR" => "MFNR".into(),
+            "CMN" | "COMMON" => "Common".into(),
+            "RESVA" => "SWNR".into(),
+            "RESVB" => "BMDN".into(),
+            "STRING" => "String".into(),
+            value if value.starts_with("ISP_") => "ISP".into(),
+            _ => name.into(),
+        }
+    }
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    if let Some(table) = root.as_table() {
+        for (name, value) in table {
+            if matches!(
+                name.as_str(),
+                PROVENANCE_KEY | "AE_DISPLAY" | "Detail" | "AE_Table"
+            ) {
+                continue;
+            }
+            let observations = count(value);
+            if observations == 0 {
+                continue;
+            }
+            let module = module_name(name, value.is_table());
+            let total = counts.entry(module.clone()).or_default();
+            *total = total.saturating_add(observations);
+            if module.len() > 128 || *total > 100_000 || counts.len() > 256 {
+                return Err(AppError::Invalid(
+                    "merged EXIF module/count exceeds the diagnostic budget".into(),
+                ));
+            }
+        }
+    }
+    let mut result: Vec<_> = counts
+        .iter()
+        .map(|(module, count)| ImageExifModule {
+            module: module.clone(),
+            header: None,
+            status: "unrecorded".into(),
+            version: None,
+            signature: None,
+            identity_source: "toml".into(),
+            decoded_fields: *count,
+            parse_status: "decoded".into(),
+        })
+        .collect();
+    // Only the latest native inspection supplies diagnostic-only modules. Old
+    // mixed files are also normalized on read; newer rows win for named modules.
+    let mut seen_names = BTreeSet::new();
+    let mut seen_raw = BTreeSet::new();
+    let mut additional = Vec::new();
+    for mut diagnostic in diagnostics.into_iter().rev() {
+        diagnostic.module = module_name(&diagnostic.module, true);
+        if counts.contains_key(&diagnostic.module) {
+            if diagnostic.status == "ambiguous" {
+                if let Some(content) = result
+                    .iter_mut()
+                    .find(|row| row.module == diagnostic.module)
+                {
+                    content.status = "ambiguous".into();
+                }
+            }
+            continue;
+        }
+        diagnostic.decoded_fields = 0;
+        if diagnostic.parse_status == "decoded" {
+            diagnostic.parse_status = "empty".into();
+        }
+        let raw = diagnostic.module == "Unknown"
+            || diagnostic.module.starts_with("Unknown ")
+            || diagnostic.status == "ambiguous";
+        if raw {
+            if !seen_raw.insert((
+                diagnostic.module.clone(),
+                diagnostic.version.clone(),
+                diagnostic.signature.clone(),
+                diagnostic.status.clone(),
+            )) {
+                continue;
+            }
+        } else if !seen_names.insert(diagnostic.module.clone()) {
+            continue;
+        }
+        additional.push(diagnostic);
+    }
+    additional.reverse();
+    if result.len() + additional.len() > 256 {
+        return Err(AppError::Invalid(
+            "merged EXIF module diagnostics exceed their budget".into(),
+        ));
+    }
+    result.extend(additional);
+    Ok(result)
+}
+
 pub(super) fn stamp_export(
     text: &str,
     parser: &str,
@@ -244,6 +413,16 @@ pub(super) fn stamp_export(
     needs_fallback: bool,
 ) -> AppResult<String> {
     let mut root: toml::Value = toml::from_str(text)?;
+    stamp_export_root(&mut root, parser, modules, needs_fallback)?;
+    Ok(toml::to_string(&root)?)
+}
+
+fn stamp_export_root(
+    root: &mut toml::Value,
+    parser: &str,
+    modules: Vec<ImageExifModule>,
+    needs_fallback: bool,
+) -> AppResult<()> {
     let table = root
         .as_table_mut()
         .ok_or_else(|| AppError::Invalid("EXIF export is not a table".into()))?;
@@ -252,9 +431,17 @@ pub(super) fn stamp_export(
         parser: parser.into(),
         needs_fallback,
         modules,
+        content_mode: Some(
+            if parser == "debug_parser" {
+                "replace"
+            } else {
+                "native"
+            }
+            .into(),
+        ),
     };
     table.insert(PROVENANCE_KEY.into(), toml::Value::try_from(provenance)?);
-    Ok(toml::to_string(&root)?)
+    Ok(())
 }
 
 fn valid_table(table: &ImageExifTable) -> bool {
@@ -456,9 +643,6 @@ pub(super) fn debug_parser_to_toml(text: &str) -> AppResult<Option<String>> {
             }
         }
     }
-    let mut sections = Vec::new();
-    collect_toml_sections("", &root, &mut sections);
-    let modules = unrecorded_modules(&sections);
     let tables = parse_statistics_text(&statistics);
     if !tables.is_empty() {
         let mut fields = toml::map::Map::new();
@@ -470,18 +654,106 @@ pub(super) fn debug_parser_to_toml(text: &str) -> AppResult<Option<String>> {
     if root.is_empty() {
         return Ok(None);
     }
-    // DebugParser does not report a verified .h match. Never fabricate one.
-    Ok(Some(stamp_export(
-        &toml::to_string(&toml::Value::Table(root))?,
-        "debug_parser",
-        modules,
-        false,
-    )?))
+    // Keep the parsed value until the final serialization. Avoid constructing
+    // section strings or serializing and parsing this same DP document twice.
+    let mut root = toml::Value::Table(root);
+    let modules = merged_content_modules(&root, Vec::new())?;
+    stamp_export_root(&mut root, "debug_parser", modules, false)?;
+    Ok(Some(toml::to_string(&root)?))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diagnostic(module: &str, count: usize) -> ImageExifModule {
+        ImageExifModule {
+            module: module.into(),
+            header: Some(format!("{module}/native.h")),
+            status: "matched".into(),
+            version: Some("0x0000000B".into()),
+            signature: Some("0xE28FA520".into()),
+            identity_source: "directory".into(),
+            decoded_fields: count,
+            parse_status: "decoded".into(),
+        }
+    }
+
+    #[test]
+    fn merged_diagnostics_count_saved_content_once_and_do_not_claim_binary_header_ownership() {
+        let root: toml::Value = toml::from_str("AE_TAG_EXTRA=9\n[AE]\nA=7\n[AF]\nPOS=[1,2,3]\n[ISP_HW_P1]\nX=1\n[ISP_HW_P2]\nY=2\n[Vendor_Raw]\nKEEP='v'\n[AE_DISPLAY]\niso=50\n[Detail]\nextra='auxiliary'\n[AE_Table.grid]\nrows=1\ncolumns=1\nvalues=[99]\n").unwrap();
+        let mut sensor = diagnostic("Sensor", 0);
+        sensor.parse_status = "version_only".into();
+        let modules = merged_content_modules(
+            &root,
+            vec![
+                diagnostic("AE", 99),
+                diagnostic("AE", 400),
+                diagnostic("AF", 999),
+                sensor.clone(),
+                sensor,
+            ],
+        )
+        .unwrap();
+        for (name, count) in [("AE", 2), ("AF", 3), ("ISP", 2), ("Vendor_Raw", 1)] {
+            let rows: Vec<_> = modules.iter().filter(|row| row.module == name).collect();
+            assert_eq!(rows.len(), 1, "one current-content row for {name}");
+            assert_eq!(rows[0].decoded_fields, count);
+            assert_eq!(rows[0].status, "unrecorded");
+            assert_eq!(rows[0].identity_source, "toml");
+            assert!(
+                rows[0].header.is_none()
+                    && rows[0].version.is_none()
+                    && rows[0].signature.is_none()
+            );
+        }
+        let sensor: Vec<_> = modules
+            .iter()
+            .filter(|row| row.module == "Sensor")
+            .collect();
+        assert_eq!(sensor.len(), 1);
+        assert_eq!(sensor[0].parse_status, "version_only");
+        assert_eq!(sensor[0].decoded_fields, 0);
+        assert_eq!(
+            modules.len(),
+            5,
+            "statistics/summary/auxiliary metadata are not tag counts"
+        );
+    }
+
+    #[test]
+    fn merged_diagnostics_preserve_current_ambiguity_and_unique_unknown_directory_records() {
+        let root: toml::Value = toml::from_str("[AE]\nKEEP=1\n").unwrap();
+        let mut ambiguous = diagnostic("AE", 0);
+        ambiguous.status = "ambiguous".into();
+        ambiguous.parse_status = "unavailable".into();
+        let mut unknown = diagnostic("Unknown", 0);
+        unknown.status = "unknown".into();
+        unknown.parse_status = "unsupported".into();
+        let mut another = unknown.clone();
+        another.signature = Some("0x00000001".into());
+        let modules = merged_content_modules(
+            &root,
+            vec![
+                ambiguous.clone(),
+                ambiguous,
+                unknown.clone(),
+                unknown,
+                another,
+            ],
+        )
+        .unwrap();
+        assert_eq!(modules.iter().filter(|row| row.module == "AE").count(), 1);
+        assert_eq!(modules[0].status, "ambiguous");
+        assert_eq!(modules[0].decoded_fields, 1);
+        assert_eq!(
+            modules.iter().filter(|row| row.module == "Unknown").count(),
+            2
+        );
+        let oversized: toml::Value =
+            toml::from_str(&format!("[AF]\nPOS=[{}]\n", vec!["1"; 100_001].join(","))).unwrap();
+        assert!(merged_content_modules(&oversized, Vec::new()).is_err());
+    }
 
     #[test]
     fn dp_statistics_survive_export_with_explicit_origin_and_repeated_af_values() {
@@ -499,6 +771,20 @@ mod tests {
             Some("debug_parser")
         );
         assert_eq!(root["AF"]["POS"].as_array().unwrap().len(), 2);
+        let modules = root[PROVENANCE_KEY]["modules"].as_array().unwrap();
+        let af = modules
+            .iter()
+            .find(|row| row["module"].as_str() == Some("AF"))
+            .unwrap();
+        assert_eq!(
+            af["decoded_fields"].as_integer(),
+            Some(2),
+            "DP diagnostics count repeated observations, not just one array key"
+        );
+        assert!(af.get("header").is_none());
+        assert!(!modules
+            .iter()
+            .any(|row| row["module"].as_str() == Some("AE_Table")));
         let tables = take_ae_tables(&mut root);
         assert_eq!(tables.len(), 1);
         assert_eq!(
