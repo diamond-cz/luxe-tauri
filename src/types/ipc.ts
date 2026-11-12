@@ -1,6 +1,65 @@
 /* TypeScript mirror of the Rust types. Keep field names in sync with
  * `src-tauri/src/config/state_schema.rs` and `src-tauri/src/window_geom.rs`. */
 
+/** On-demand EXIF detail contract; never persisted in the workspace state. */
+export interface ImageTomlSection {
+  name: string;
+  fields: { key: string; value: string }[];
+}
+
+export interface ImageExifTable {
+  name: string;
+  rows: number;
+  columns: number;
+  values: number[];
+}
+
+export interface ImageExifModule {
+  module: string;
+  header: string | null;
+  status: "matched" | "missing_header" | "invalid_header" | "ambiguous" | "unknown" | "unrecorded";
+  version: string | null;
+  signature: string | null;
+  identity_source: "directory" | "directory_layout" | "payload" | "toml" | "unrecorded";
+  decoded_fields: number;
+  parse_status: "decoded" | "empty" | "version_only" | "unsupported" | "unavailable";
+}
+
+export interface ImageSidecarCleanupSummary {
+  deleted: string[];
+  failed: string[];
+}
+
+export interface ImageMetadataImportInfo {
+  first_source: "jpeg" | "toml" | "debug_parser" | "none";
+  selected_source: "jpeg" | "toml" | "debug_parser" | "none";
+  decision: "native_created" | "native_replaced" | "existing_retained" | "native_unavailable" | "fallback" | "unavailable";
+}
+
+export interface ImageMetadataPreparationSummary {
+  total: number;
+  created: number;
+  replaced: number;
+  retained: number;
+  cached: number;
+  unavailable: number;
+  failed: number;
+  partial: number;
+}
+
+export interface ImageExifDocument {
+  sections: ImageTomlSection[];
+  ae_tables: ImageExifTable[];
+  modules: ImageExifModule[];
+  source: {
+    kind: "jpeg" | "toml";
+    parser: "native" | "debug_parser" | "unknown";
+    path: string;
+  };
+  needs_fallback: boolean;
+  preparation: ImageMetadataImportInfo | null;
+}
+
 export interface MainWindow {
   width:    number;
   height:   number;

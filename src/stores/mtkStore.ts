@@ -3,7 +3,8 @@ import { immer } from "zustand/middleware/immer";
 import type { Mtk } from "@/types/ipc";
 import type { ParseResult } from "@/types/cpp_parser";
 import type { IspId } from "@/views/mtk/ispTabs";
-import type { ImageEntry } from "@/ipc/imageScan";
+import type { ExifParseProgress, ImageEntry } from "@/ipc/imageScan";
+import type { ImageMetadataPreparationSummary } from "@/types/ipc";
 
 type ImportState = {
   filePath: string | null;
@@ -18,8 +19,16 @@ type ImageDirState = {
   entries:   ImageEntry[];
   /** Index into `entries` of the currently-selected image. */
   current:   number;
-  /** Flat AE_TAG_* → string value map of the current image's TOML. */
+  /** Flat map from the TOML selected by import-time JPEG reconciliation. */
   tomlData:  Record<string, string>;
+  /** Dataset content revision; shared by AE/Tone and never persisted. */
+  metadataRevision: number;
+  /** Import preparation belongs to the shared dataset, not a mounted page. */
+  metadataPreparing: boolean;
+  preparationProgress: ExifParseProgress | null;
+  preparationSummary: ImageMetadataPreparationSummary | null;
+  /** Real directory/current-image load generation, not paired selection intent. */
+  loadRevision: number;
   status:    "idle" | "scanning" | "loading" | "done" | "error";
   message:   string | null;
 };
@@ -28,7 +37,8 @@ const DEFAULT_IMPORT: ImportState = {
   filePath: null, parsed: null, revision: 0, status: "idle", message: null,
 };
 const DEFAULT_IMAGE_DIR: ImageDirState = {
-  dir: null, entries: [], current: 0, tomlData: {}, status: "idle", message: null,
+  dir: null, entries: [], current: 0, tomlData: {}, metadataRevision: 0, loadRevision: 0, status: "idle", message: null,
+  metadataPreparing: false, preparationProgress: null, preparationSummary: null,
 };
 
 interface MtkState {
@@ -73,6 +83,12 @@ export const useMtkStore = create<MtkState>()(
       ]));
       s.imageSelection = {};
       for (const key of Object.keys(s.imageRevisions)) s.imageRevisions[key] += 1;
+      for (const image of Object.values(s.imageDir)) {
+        image.loadRevision = (image.loadRevision ?? 0) + 1;
+        image.metadataRevision = (image.metadataRevision ?? 0) + 1;
+        image.metadataPreparing = false;
+        image.preparationProgress = null;
+      }
       if (value.cpp_path && !s.imports["ISP6S|0"]) {
         s.imports["ISP6S|0"] = { ...DEFAULT_IMPORT, filePath: value.cpp_path };
       }
@@ -96,10 +112,22 @@ export const useMtkStore = create<MtkState>()(
     }),
     setImageDir: (isp, tabIdx, patch) => set((s) => {
       const key = `${isp}|${tabIdx}`;
-      if (patch.dir !== undefined || patch.entries !== undefined || patch.current !== undefined || patch.status === "scanning") {
+      const previous = s.imageDir[key] ?? DEFAULT_IMAGE_DIR;
+      const reload = patch.dir !== undefined || patch.entries !== undefined || patch.current !== undefined || patch.status === "scanning";
+      if (reload) {
         s.imageRevisions[key] = (s.imageRevisions[key] ?? 0) + 1;
       }
-      s.imageDir[key] = { ...(s.imageDir[key] ?? DEFAULT_IMAGE_DIR), ...patch };
+      const metadataRevision = patch.metadataRevision ?? (
+        patch.entries !== undefined || (patch.dir !== undefined && patch.dir !== previous.dir)
+          ? (previous.metadataRevision ?? 0) + 1
+          : (previous.metadataRevision ?? 0)
+      );
+      s.imageDir[key] = {
+        ...previous,
+        ...patch,
+        metadataRevision,
+        loadRevision: (previous.loadRevision ?? 0) + (reload ? 1 : 0),
+      };
       const image = s.imageDir[key];
       if (image.dir && image.status === "scanning") {
         s.mtk.image_workspaces ??= {};
@@ -126,6 +154,7 @@ export const useMtkStore = create<MtkState>()(
       if (!image || index < 0 || index >= image.entries.length || image.entries[index].jpg_path !== path) return;
       s.imageRevisions[imageDirKey] = (s.imageRevisions[imageDirKey] ?? 0) + 1;
       image.current = index;
+      image.loadRevision = (image.loadRevision ?? 0) + 1;
       image.tomlData = {};
       image.status = "loading";
       image.message = null;

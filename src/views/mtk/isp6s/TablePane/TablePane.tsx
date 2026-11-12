@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Button } from "@fluentui/react-components";
+import { Button, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from "@fluentui/react-components";
+import { useTranslation } from "react-i18next";
 import {
   ChevronDown24Regular,
   ChevronUp24Regular,
@@ -111,6 +112,7 @@ interface Props {
   onImageSearchQueryChange: (value: string) => void;
   onImageSearch: () => void;
   onParseExif: () => void;
+  onClearSidecars: (imagePaths: string[]) => void;
   onNotice: (toast: { kind: "success" | "error"; title: string; detail?: string }) => void;
   exifParsing: boolean;
   imageDataRevision: number;
@@ -323,6 +325,7 @@ export function TablePane({
   onImageSearchQueryChange,
   onImageSearch,
   onParseExif,
+  onClearSidecars,
   onNotice,
   exifParsing,
   imageDataRevision,
@@ -330,6 +333,7 @@ export function TablePane({
   onScrollPositionChange,
   onHide,
 }: Props) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastDropStateRef = useRef<"ok" | "bad" | null>(null);
   const [dropState, setDropState] = useState<"ok" | "bad" | null>(null);
@@ -500,10 +504,26 @@ export function TablePane({
             aria-label={selectionSyncEnabled ? "关闭 AE Basic 与 ToneMap 图片选择同步" : "开启 AE Basic 与 ToneMap 图片选择同步"}
             aria-pressed={selectionSyncEnabled}
             onClick={() => onSelectionSyncChange(!selectionSyncEnabled)} />
-          <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
-            title={exifParsing ? "正在解析图片 EXIF" : "解析图片 EXIF"}
-            disabled={entries.length === 0 || exifParsing}
-            onClick={onParseExif} aria-label="解析图片 EXIF" />
+          <Menu openOnContext>
+            <MenuTrigger disableButtonEnhancement>
+              <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
+                title={t("image_exif.action_title")}
+                disabled={entries.length === 0 || exifParsing}
+                onClick={onParseExif} aria-label={t("image_exif.action_label")} />
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem disabled={!entries[current] || exifParsing}
+                  onClick={() => { const entry = entries[current]; if (entry) onClearSidecars([entry.jpg_path]); }}>
+                  {t("image_exif.cleanup.current")}
+                </MenuItem>
+                <MenuItem disabled={!selectedImageIndexes.length || exifParsing}
+                  onClick={() => onClearSidecars(selectedImageIndexes.map((index) => entries[index].jpg_path))}>
+                  {t("image_exif.cleanup.selected", { count: selectedImageIndexes.length })}
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
           {!toneMode && <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<CalculatorArrowClockwise24Regular className="h-4 w-4" />}
             title="左键：Apply all image；右键：Apply single image（当前图片）"
             disabled={entries.length === 0 || !calculatorSourcePath || applyPending || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
@@ -1139,6 +1159,8 @@ export function ImageTab({
   const tableTomlPathSetRef = useRef<Set<string>>(new Set());
   const loadingTableFieldPathsRef = useRef<Set<string>>(new Set());
   const tableFieldKeySignatureRef = useRef("");
+  const tableFieldGenerationRef = useRef(0);
+  const imageMetadataContext = useMemo(() => ({ entries, revision: imageDataRevision }), [entries, imageDataRevision]);
   const scrollTopRef = useRef(scrollPosition?.top ?? 0);
   const scrollDirectionRef = useRef<1 | -1>(1);
   const lastViewportHeightRef = useRef(0);
@@ -1270,6 +1292,7 @@ export function ImageTab({
   const [tomls, setTomls] = useState<Record<string, Record<string, string>>>({});
   const [parsedTomls, setParsedTomls] = useState<{
     entries: ImageEntry[];
+    revision: number;
     keySignature: string;
     version: number;
     rows: Record<string, Record<string, string>>;
@@ -1304,7 +1327,7 @@ export function ImageTab({
     ? baselineCalculatorRef.current ?? faceLinkTargetCalculator
     : faceLinkTargetCalculator;
   const allParsedRows = parsedTomls?.entries === entries && parsedTomls.keySignature === imageTomlKeySignature
-    && parsedTomls.version === parseAllVersion
+    && parsedTomls.revision === imageDataRevision && parsedTomls.version === parseAllVersion
     ? parsedTomls.rows : null;
   const allTargets = useMemo(() => {
     if (!allParsedRows || !activeFaceLinkTargetCalculator) return null;
@@ -1500,7 +1523,7 @@ export function ImageTab({
           return;
         }
         for (let start = 0; start < paths.length; start += 128) {
-          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys, imageMetadataContext);
           if (cancelled) return;
           rememberGlobalImageTableFields(entries, imageDataRevision, batch, imageTomlKeySignature);
           classifyBatch(batch, byPath);
@@ -1511,7 +1534,7 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [allParsedRows, applyMode, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageClassificationCalculator, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
+  }, [allParsedRows, applyMode, entries, extraCols, faceBvKey, faceFdyKey, faceLinkTargetCalculator, imageClassificationCalculator, imageDataRevision, imageMetadataContext, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
 
   useEffect(() => {
     if (!toneMode || entries.length === 0) return;
@@ -1527,7 +1550,7 @@ export function ImageTab({
       try {
         const paths = entries.map((entry) => entry.toml_path);
         for (let start = 0; start < paths.length; start += 128) {
-          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys, imageMetadataContext);
           if (cancelled) return;
           rememberGlobalImageTableFields(entries, imageDataRevision, batch, imageTomlKeySignature);
           for (const data of Object.values(batch)) {
@@ -1549,7 +1572,7 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [entries, imageDataRevision, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
+  }, [entries, imageDataRevision, imageMetadataContext, imageTomlKeySignature, imageTomlKeys, tableColumns, toneMode]);
 
   const classifiedKinds = imageKinds?.entries === entries
     && imageKinds.keySignature === imageTomlKeySignature
@@ -1664,12 +1687,12 @@ export function ImageTab({
       const rows: Record<string, Record<string, string>> = {};
       try {
         for (let start = 0; start < paths.length; start += 128) {
-          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys);
+          const batch = await loadImageTomlFieldsBatchShared(paths.slice(start, start + 128), imageTomlKeys, imageMetadataContext);
           if (cancelled) return;
           Object.assign(rows, batch);
           onParseProgress?.({ done: Math.min(start + 128, paths.length), total: paths.length });
         }
-        if (!cancelled) setParsedTomls({ entries, keySignature, version: parseAllVersion, rows });
+        if (!cancelled) setParsedTomls({ entries, revision: imageDataRevision, keySignature, version: parseAllVersion, rows });
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1679,7 +1702,7 @@ export function ImageTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [applyMode, applySingleIndex, entries, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
+  }, [applyMode, applySingleIndex, entries, imageDataRevision, imageMetadataContext, imageTomlKeySignature, imageTomlKeys, onParseProgress, parseAllVersion]);
 
   const sortedRows = useMemo(() => {
     const rows = entries.map((entry, index) => ({ e: entry, i: index }))
@@ -1913,12 +1936,19 @@ export function ImageTab({
     tableWindowPathsRef.current = tableWindowPaths;
   }, [tableWindowPaths, tableWindowSignature]);
 
+  useLayoutEffect(() => {
+    tableFieldGenerationRef.current += 1;
+    return () => { tableFieldGenerationRef.current += 1; };
+  }, [entries, imageTomlKeySignature, imageDataRevision]);
+
   useEffect(() => {
     tableFieldKeySignatureRef.current = imageTomlKeySignature;
     tableTomlPathSetRef.current = new Set(entries.map((entry) => entry.toml_path));
     tableFieldCacheRef.current = {};
     tableFieldAccessOrderRef.current = [];
-    loadingTableFieldPathsRef.current.clear();
+    // Old requests own their original loading set; their finally handlers must
+    // not clear a new generation's in-flight paths after a metadata refresh.
+    loadingTableFieldPathsRef.current = new Set();
     const cachedRows: Record<string, Record<string, string>> = {};
     for (const entry of entries) {
       const cached = readGlobalImageTableFields(entries, imageDataRevision, entry.toml_path, imageTomlKeySignature);
@@ -1959,7 +1989,7 @@ export function ImageTab({
       setSortLoading(false);
       return;
     }
-    loadImageTomlFieldsBatchShared(paths, sortKeys)
+    loadImageTomlFieldsBatchShared(paths, sortKeys, imageMetadataContext)
       .then((batch) => {
         if (sortRequestRef.current !== requestId) return;
         const nextValues: Record<string, string> = {};
@@ -1980,7 +2010,8 @@ export function ImageTab({
           setSortLoading(false);
         }
       });
-  }, [entries, sortState]);
+    return () => { sortRequestRef.current += 1; };
+  }, [entries, imageMetadataContext, sortState]);
 
   function rememberTableFieldRows(batch: Record<string, Record<string, string>>) {
     const cache = tableFieldCacheRef.current;
@@ -2270,12 +2301,15 @@ export function ImageTab({
     const missing = pendingTableFieldPaths(tableWindowPaths);
     if (missing.length === 0) return;
 
-    const requestKeySignature = imageTomlKeySignature;
+    const generation = tableFieldGenerationRef.current;
+    const loading = loadingTableFieldPathsRef.current;
+    const isCurrent = () => tableFieldGenerationRef.current === generation;
     const timer = window.setTimeout(() => {
-      missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
-      loadImageTomlFieldsBatchShared(missing, imageTomlKeys)
+      if (!isCurrent()) return;
+      missing.forEach((path) => loading.add(path));
+      loadImageTomlFieldsBatchShared(missing, imageTomlKeys, imageMetadataContext)
         .then((batch) => {
-          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          if (!isCurrent()) return;
           rememberTableFieldRows(batch);
           const currentPaths = tableWindowPathsRef.current;
           if (currentPaths.some((path) => path in batch)) {
@@ -2283,7 +2317,7 @@ export function ImageTab({
           }
         })
         .catch(() => {
-          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          if (!isCurrent()) return;
           const emptyRows: Record<string, Record<string, string>> = {};
           for (const path of missing) {
             emptyRows[path] = {};
@@ -2295,14 +2329,14 @@ export function ImageTab({
           }
         })
         .finally(() => {
-          missing.forEach((path) => loadingTableFieldPathsRef.current.delete(path));
+          missing.forEach((path) => loading.delete(path));
         });
     }, IMAGE_TABLE_LOAD_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [imageTomlKeySignature, imageTomlKeys, tableReloadVersion, tableWindowPaths, tableWindowSignature]);
+  }, [imageMetadataContext, imageTomlKeySignature, imageTomlKeys, tableReloadVersion, tableWindowPaths, tableWindowSignature]);
 
   useEffect(() => {
     if (imageTomlKeys.length === 0 || tablePrefetchPaths.length === 0) return;
@@ -2310,12 +2344,15 @@ export function ImageTab({
     const missing = pendingTableFieldPaths(tablePrefetchPaths);
     if (missing.length === 0) return;
 
-    const requestKeySignature = imageTomlKeySignature;
+    const generation = tableFieldGenerationRef.current;
+    const loading = loadingTableFieldPathsRef.current;
+    const isCurrent = () => tableFieldGenerationRef.current === generation;
     const timer = window.setTimeout(() => {
-      missing.forEach((path) => loadingTableFieldPathsRef.current.add(path));
-      loadImageTomlFieldsBatchShared(missing, imageTomlKeys)
+      if (!isCurrent()) return;
+      missing.forEach((path) => loading.add(path));
+      loadImageTomlFieldsBatchShared(missing, imageTomlKeys, imageMetadataContext)
         .then((batch) => {
-          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          if (!isCurrent()) return;
           rememberTableFieldRows(batch);
           const currentPaths = tableWindowPathsRef.current;
           if (currentPaths.some((path) => path in batch)) {
@@ -2323,7 +2360,7 @@ export function ImageTab({
           }
         })
         .catch(() => {
-          if (tableFieldKeySignatureRef.current !== requestKeySignature) return;
+          if (!isCurrent()) return;
           const emptyRows: Record<string, Record<string, string>> = {};
           for (const path of missing) {
             emptyRows[path] = {};
@@ -2331,14 +2368,14 @@ export function ImageTab({
           rememberTableFieldRows(emptyRows);
         })
         .finally(() => {
-          missing.forEach((path) => loadingTableFieldPathsRef.current.delete(path));
+          missing.forEach((path) => loading.delete(path));
         });
     }, IMAGE_TABLE_PREFETCH_DELAY_MS);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [imageTomlKeySignature, imageTomlKeys, tablePrefetchPaths, tablePrefetchSignature]);
+  }, [imageMetadataContext, imageTomlKeySignature, imageTomlKeys, tablePrefetchPaths, tablePrefetchSignature]);
 
 
   const colSpan = displayedColumns.length;

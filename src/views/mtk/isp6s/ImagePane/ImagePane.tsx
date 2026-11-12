@@ -54,6 +54,7 @@ interface Props {
   schema:      Isp6sSchemaRoot;
   entry:       ImageEntry | undefined;
   entries:     ImageEntry[];
+  imageDataRevision?: number;
   visibleHeatmapPaths?: string[] | null;
   selectedHeatmapPaths?: string[];
   tomlData:    Record<string, string>;
@@ -228,7 +229,7 @@ function useSourceDraft(filePath: string, importRevision: number) {
 }
 
 export function ImagePane({
-  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, visibleHeatmapPaths, selectedHeatmapPaths = [], tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession, onHide,
+  mode, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision = 0, caLtmStatus, caLtmMessage, onMode, filePath, importRevision, onCppPathChange, schema, entry, entries, imageDataRevision = 0, visibleHeatmapPaths, selectedHeatmapPaths = [], tomlData, onSelectHeatmapImages, onCalculatorSourcePathChange, onSourceEditorBindingChange, scrollSession, onHide,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartWrapRef = useRef<HTMLDivElement | null>(null);
@@ -448,6 +449,7 @@ export function ImagePane({
               caLtmMessage={caLtmMessage ?? null}
               tomlData={tomlData}
               entries={entries}
+              imageDataRevision={imageDataRevision}
               visibleHeatmapPaths={visibleHeatmapPaths}
               sourceDraftText={toneSource.draft?.text ?? null}
               sourceInitialText={toneSource.draft?.initialText ?? null}
@@ -461,6 +463,7 @@ export function ImagePane({
               sourceBasePath={filePath}
               schema={schema}
               entries={entries}
+              imageDataRevision={imageDataRevision}
               currentImagePath={entry?.toml_path}
               visibleHeatmapPaths={visibleHeatmapPaths}
               selectedHeatmapPaths={selectedHeatmapPaths}

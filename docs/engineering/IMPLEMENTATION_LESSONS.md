@@ -2644,3 +2644,246 @@
 **验证**
 
 - `npm run release:test` 24 项通过，`npm run typecheck`、`npm run version:check`、`git diff --check` 通过；`.github/workflows/` 仅剩 `ci.yml`、`plugin.yml` 和 `release.yml`，README、package scripts 与 scripts 中无 Star workflow/版本脚本引用。本次未触发远端 GitHub Actions。
+
+### 2026-11-11：MTK JPEG 私有 EXIF 内置解析与 DP 兜底
+
+**亮点**
+
+- `src-tauri/src/image_scan/mtk_exif.rs` 依据 `MTK_3A_EXIF_Extraction_Guide.md` 接入 APP5/APP6/APP7、模块目录、版本/签名、分片 KV/顺序数组和 AF 重复值；以 `include_str!` 从 `src-tauri/resources/mtk_exif/headers/` 内嵌 18 份指南使用的 M149、Samsung A06、Redmi 14C 精确枚举资源，不复制完整约 25 MiB 的资源目录，也不增加 Python/DLL 运行时依赖。
+- `metadata_source.rs` 让既有全字段、分组和按键 IPC 在缺少同名 TOML 时按需直接读取 JPEG，无需先点解析；已有 TOML 继续作为兼容覆盖。数据源路径/类型与文件签名隔离缓存，DP 生成 TOML 后可切换来源而不命中旧 JPEG 缓存。
+- `image_scan/mod.rs` 在 SOS/EOI 停止、限制元数据/文本读取为 16 MiB，不解码像素；复用缓存并增加全字段 16 MiB、按键 8 MiB 的估算载荷预算，LRU 与 `trimMemory(true)` 代次清理保持一致，当前图片全字段缓存可直接提供批量所需键。
+- 手动按钮只复制需要 DP 的图片；部分直接结果不落盘，避免下一次导入 DP 后被已有部分 TOML 挡住重试。`commands/image_cmds.rs` 限制元数据 2 个任务、手动解析 1 个任务；五种语言显示直接/兜底/未补全统计，目录刷新保留完成时的当前选择并隔离过期结果。
+
+**痛点**
+
+- 仓库没有真实 MTK JPEG 与 DebugParser 对照样本，无法在本地确认各固件字段逐项一致；未覆盖的签名/头文件仍需 DP 兜底。曾在实现阶段考虑落盘部分 TOML，但它会阻断以后配置 DP 的重试，最终改为只通过按需读取提供部分字段、不生成部分 sidecar。
+- 解析任务不能由发起它的 React 组件负责共享收尾：切换 AE/Tone 会卸载旧组件；共用的图片选择代次还会被“配对选中同一路径”递增，导致正常元数据加载无法退出 loading。最终将刷新移入 `imageExifService.ts`，分离实际加载 `loadRevision`、共享内容 `metadataRevision` 与原有远端选择代次；EXIF 详情和会话缓存也必须带内容代次，否则同路径 DP 补全后仍显示旧字段。
+- 项目规定本地不得运行 Cargo/Tauri 编译或测试；Rust 行为测试、真实 DP、桌面按钮与内存/CPU 降幅尚未实测。此次只执行了前端/Node 可观察回归与 Rust 静态检查，不把参考项目的历史样本结果当成本次验证。
+
+**闭坑**
+
+- 增加新 MTK 固件时，必须同时更新 `mtk_exif.rs` 的段签名/版本映射、对应 `headers/` 变体和真实 JPEG 对照；同名 ISP 头文件不能按文件名替代签名变体。
+- 修改解析流程时检查已存在 TOML 保留、直接解析优先/EXIF 文本兜底、部分结果不落盘、同 stem 多图片拒绝猜测、DP 路径可选、临时目录清理及原子落盘。
+- 共享 EXIF 任务跨切页仍须更新既有图片索引；新目录和真实 A→B→A 加载应隔离旧结果，但配对选中意图不应阻断加载收尾。运行 `scripts/image-exif.test.mjs`，检查同路径详情重读、内容代次和配对会话缓存。
+
+**验证**
+
+- `npm run typecheck`：通过。
+- 隔离 Node 22.23.4 执行 `node --test scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/image-table-mapping.test.mjs src/views/mtk/isp6s/TablePane/*.test.mjs`：最终 57 项通过，含新增 8 项 EXIF 回归；新脚本已加入 `npm run sync:test` 的 CI 入口。
+- 五份 EXIF 翻译键与统计插值：通过。18 份内嵌资源首次标签/索引对照通过；最终 Node 22 复核 18 份 UTF-8/路径/空白与 ISP 1649/1647 项变体通过，17 份仍可读取的参考头文件再次比对通过。最终复核时参考目录的 `ISP/variants/a56121c4/ISP_6_10_2.h` 已不可读取（ENOENT）；保留之前已复制并比对过的内嵌变体，未修改参考目录。
+- `rustfmt --check --edition 2021`：新增 `mtk_exif.rs`、`metadata_source.rs`、`image_direct_exif.rs` 通过；旧 `mod.rs`、`image_cmds.rs`、`image_exif_parse.rs` 的 HEAD 与当前版本均报告全文件格式差异、无语法解析错误，未为本次功能重排无关代码。
+- `git diff --check`：通过（仅报告工作树现有 LF/CRLF 转换提示）。
+- 未运行 `cargo build/check/test`、`npm run rust:test`、`tauri:dev` 或桌面交互；真实 MTK 样本逐字段比对、DebugParser 兜底实机和内存/CPU 采样交由 GitHub Actions/Windows 桌面验收。
+
+### 2026-11-11：原生 EXIF 目录与模块完整性边界补强
+
+**亮点**
+
+- `image_scan/mtk_exif.rs` 优先使用有界、对齐的有效目录长度，不再将首个模块的零值推测为额外目录记录；备用模块数和保留字扫描均有界。数组读取在有效模块偏移表下限制到所属容器，不借用后续容器填充枚举。
+- AWB/ISP 顺序数组要求精确枚举的全部数值；未找到完整数组时将不完整状态传到 `needs_fallback`，即使 AE 能解析也不将结果落盘为完整 TOML。
+- 重复同模块目录声明不再以首条胜出，重复 index-0 KV 数据块不再跨块覆盖；受影响模块停止命名解码，块版本与所选头文件版本保持一致。未知非零 APP5/6/7 声明已在此前修订中保留兜底资格，本轮增加回归保护。
+
+**痛点**
+
+- 旧 `max(目录头长度, 保留字扫描长度)` 会在合法 8 容器 APP7 中吞掉全零 ISP 数组的版本锚点；只用 2 容器或首批字段非零的 fixture 看不到该边界。
+- 旧数组读取的 `min(剩余字数, 枚举字数)` 加最小标签数阈值会将截短块当成完整结果；只返回空字段也不够，若 AE 正常仍会写出不完整 sidecar，因此必须传播模块失败状态。
+- 重复声明的首个枚举与分片合并后保留的后块数值可能来自不同版本；对于当前按模块展平的 IPC，拒绝猜测比输出看似合理的错误字段更安全。
+
+**闭坑**
+
+- 修改目录识别时同时检查目录头长度、模块数、首个模块零值和容器偏移，不把首个偏移值当成目录扫描长度。修改顺序数组时覆盖“短块 + 足量后续填充”，并检查 AE 成功时仍保持 partial。
+- 修改 KV 链接或目录去重时同时覆盖同版本/不同版本的多个 index-0 块及重复声明。`image_direct_exif.rs` 应确认部分结果不生成 TOML，后来添加 `.jpg.exif` 后仍能完成兜底并切换缓存源。
+
+**验证**
+
+- `rustfmt --check --edition 2021 src-tauri/src/image_scan/mtk_exif.rs src-tauri/src/image_scan/metadata_source.rs src-tauri/tests/image_direct_exif.rs`：通过。
+- `npm run typecheck`：通过；隔离 Node 22.23.4 重跑图片联动、工作区、EXIF、列映射与表格用例：57 项通过。
+- 新增 7 个 Rust 单元测试和 1 个 Rust 集成测试，等待 `.github/workflows/ci.yml` 执行；未在本地运行 Cargo/Tauri 编译或测试，未使用真实 JPEG 或 DP 实机验收。
+- `git diff --check` 和未跟踪文件空白检查：通过，仅有仓库既有 CRLF 转换提示；未新增密钥、构建产物或本地状态文件。
+
+### 2026-11-11：共享 EXIF 任务的工作区选择与内容代次收敛
+
+**亮点**
+
+- `src/services/imageExifService.ts` 将进度订阅改为每个调用方独立的监听集合，并支持视图通过 `AbortSignal` 主动解绑；AE Basic 或 ToneMap 卸载不会覆盖另一页的进度回调，也不会让已卸载组件闭包一直挂在长任务上。任务仍只保留进行中的 Promise，完成后清空监听并释放工作区槽位，不缓存图片或完成结果。
+- EXIF 刷新携带发起任务的 workspace key，完成时优先保留该视图的最新图片选择；`src/stores/mtkStore.ts` 的 `metadataRevision` 在目录/条目刷新时递增，单纯切换当前图片不递增，避免同路径会话和 EXIF 详情缓存显示旧数据。
+- EXIF 搜索、历史、空状态和进度的用户可见文本统一进入五份翻译资源，并保持 Rust 内嵌头文件与 Tauri resource 清单的既有发布配置一致。
+
+**痛点**
+
+- AE Basic 和 ToneMap 共用一个 `imageDir`，但 `imageSelection` 允许两页在关闭同步时各自选图；仅使用全局 `image.current` 会让后台刷新完成后错误地偏向另一页。原先同目录重新扫描也没有内容代次，旧的同路径会话缓存可以继续命中。
+- 共享任务只有一个 `onProgress` 回调时，后挂载的页面会抢走前一个页面的回调；页面切换期间若不隔离回调，过期组件仍可能收到任务进度。
+
+**闭坑**
+
+- 新增共享异步任务时，任务状态、监听器和视图选择意图分开管理：监听器使用集合，视图卸载通过 `AbortSignal` 解绑，任务结束再清理剩余订阅；完成选择使用稳定 workspace key，并验证路径仍在刷新前后的条目中；数据集刷新才递增 `metadataRevision`，普通 selection load 不触发内容失效。
+- 修改 `setImageDir` 时不要把 selection patch 同时当作条目刷新；调用方若替换 `entries` 或目录必须允许内容代次变化。新增或迁移 EXIF 头文件时同时核对 `include_str!` 路径与 Tauri resource 清单。
+
+**验证**
+
+- `npm run typecheck`：通过。
+- `npm run sync:test`：28 项通过，覆盖共享任务双回调、卸载订阅解绑、发起视图选择保留、数据集代次与既有联动/工作区回归。
+- Node JSON 校验：五份翻译资源与 `src-tauri/tauri.conf.json` 解析通过。
+- `rustfmt --check --edition 2021`：新增 `mtk_exif.rs`、`metadata_source.rs`、`image_direct_exif.rs` 的既有检查通过；`mod.rs`、`image_cmds.rs`、`image_exif_parse.rs` 仍报告仓库既有全文件格式差异，未为本轮重排无关代码。
+- `git diff --check`：通过，仅报告工作区既有 LF/CRLF 转换提示。未运行 Cargo 编译/测试、Tauri 构建或桌面交互验收；真实 JPEG、DebugParser 和性能采样仍需 CI/Windows x64 产物验证。
+
+### 2026-11-11：JPEG→TOML 刷新时的字段请求与列表代次隔离
+
+**亮点**
+
+- `src/ipc/imageScan.ts` 的 `loadImageTomlFieldsBatchShared` 强制接收 `{ entries, revision }`；以索引弱引用分组，并将内容代次、键和路径组成合并身份。进行中请求成功或失败后释放槽位，不保留完成结果，不向 Rust IPC 添加参数，也不改变现有缓存预算。
+- `TablePane.tsx` 的可见行与预取请求在布局提交/卸载时同步失效，每代持有独立 loading 集合；旧成功、旧失败和旧 `finally` 均不能回填新缓存或清除新请求标记。缓存恢复仍放在普通 effect 中，避免把全目录遍历放入阻塞绘制的 layout effect。
+- 分类、排序、Apply、`ImagePane.tsx`、`ChartMapMode.tsx` 和 `ToneChartMapMode.tsx` 传递同一内容代次；即使索引数组未替换，热力图和已解析 Apply 数据也不会被当成新内容。排序的异步完成随卸载失效。
+
+**痛点**
+
+- 后端以 JPEG/TOML 来源区分缓存并不足以保证前端刷新：原合并键只有路径和字段，新的 effect 会复用仍在进行的旧 JPEG 请求。列表原来只检查 keySignature，原地刷新时甚至不会重新运行字段 effect，旧请求也能写入已经重置的局部缓存。
+- 仅忽略旧 `then` 不够：旧 `catch` 可写空行，旧 `finally` 可删除新代次正在使用的路径标记；仅在每个滚动 effect cleanup 中取消请求也会丢弃仍可复用的同代结果。因此分别隔离数据集代次与可见窗口变化。
+
+**闭坑**
+
+- 字段合并必须同时校验索引身份和内容代次；所有调用方必须提供上下文，不能只给路径和键。缓存写入、失败回退、loading 清理与组件卸载都要检查对应生命周期，普通同代滚动仍允许回填有预算的缓存。
+- `scripts/image-exif.test.mjs` 通过 TypeScript AST 提取实际列表和热力图加载 effect 执行回归，不用另一份状态机模拟实现；保留“同路径/同键/只变 revision”“换 entries”“旧失败后返回”“卸载后返回”及旧请求不得移除新请求槽位的用例。
+
+**验证**
+
+- 修复前隔离 Node 22.23.4 运行新增回归：11 项既有用例通过、5 项新增用例失败，复现了跨代合并和刷新后未重新发起字段读取；修复并扩展后 EXIF 脚本 20 项通过（新增 9 项）。
+- `npm run typecheck`、`npm run sync:test`（37 项）、`npm run version:check`：通过。
+- 隔离 Node 22.23.4 执行 `node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/image-table-mapping.test.mjs src/views/mtk/isp6s/TablePane/*.test.mjs`：69 项通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。本条只覆盖前端字段链路；未执行 Rust 编译/测试或 Tauri/Windows 桌面交互验收，不将回归测试通过表述为性能降幅或真实 DP/JPEG 字段已验收。
+
+### 2026-11-12：EXIF 声明容器归属与空模块兜底修复
+
+**亮点**
+
+- `src-tauri/src/image_scan/mtk_exif.rs` 的 `Declaration` 保留自身 APP 段和目录序号对应的 payload，AWB/ISP 顺序数组只在该模块所属容器内搜索。空 payload 不再从范围列表过滤，避免后续模块序号前移；非法多容器偏移不再退化为整段数组搜索，单声明单容器旧布局继续兼容。
+- 模块解码结果为空时显式传播 `needs_fallback`；AF 查找首条锚点前确认其数值完整，避免只含版本和 key 的截断块被输出成成功模块。其他支持字段可继续按需读取，手动导出不会落成不完整 TOML 阻断 DP 重试。
+- 新增 7 个 Rust 单元测试和 2 个集成测试：包含 ISP/AWB 内部伪版本交叉命中、空范围槽位、非法偏移、多个 APP 段归属，以及 AE 正常但 AF/Common/MFNR 缺失/截断时不落盘并可后续文本兜底（含第 5 代场景）。
+
+**痛点**
+
+- 原数组读取仅要求候选落在任意合法 payload，无法证明字段属于当前模块：短 ISP 后的完整 AWB 普通字段恰好含 ISP 版本和零值时，可能被重新命名为完整 `SW_LCE_*` 字段；两个模块都是支持版本，不能依赖未知模块自动触发兜底。
+- AF/Common/MFNR 的失败分支返回空向量并被包装成 `Some`，通用调用方却把它当成功。只要 AE 正常即可生成只有 AE 的 TOML，之后有完整 `.jpg.exif` 也会因已有 TOML 被跳过；必须在解码结果层修复完整性，而不只是隐藏空标签。
+
+**闭坑**
+
+- 修改容器解析必须保留目录记录原始序号、空容器槽位与所属 APP 段。验证“某个容器剩余空间够长”不能代替验证“该声明拥有该容器”；不要在非法 offset 表下偷偷退回整段搜索。
+- 修改模块返回值时同时检查空字段、截断首条记录与 `needs_fallback`，并让 `image_direct_exif.rs` 证明不生成部分 sidecar、后续 `.jpg.exif` 可补全且缓存正确切换源。
+
+**验证**
+
+- `rustfmt --check --edition 2021 src-tauri/src/image_scan/mtk_exif.rs src-tauri/src/image_scan/metadata_source.rs src-tauri/tests/image_direct_exif.rs`：通过。
+- 已核对上述新增测试与实际公开加载/导出入口的断言；Rust 测试未在本地执行，等待 `.github/workflows/ci.yml`。审计阶段的 Python `-I` 逻辑镜像只用于展示旧算法的候选误选，不当作修复后的 Rust 行为实测。
+- 前端 `npm run typecheck`、`npm run sync:test`（37 项）、`npm run version:check` 通过；隔离 Node 22.23.4 扩展回归 69 项通过。`git diff --check` 与未跟踪文本行尾空白检查通过，只有既有 LF/CRLF 提示。
+- 未运行 Cargo/Tauri 编译、构建或开发服务器；真实 JPEG 逐字段对照、真实 DebugParser 调用、桌面交互和性能采样仍未验收。
+
+### 2026-11-12：EXIF 模块导航、AE_Table 与 Detail 来源契约
+
+**亮点**
+
+- `src/types/ipc.ts`、`src/ipc/imageScan.ts` 与 `src-tauri/src/image_scan/exif_document.rs` 增加结构化的 `load_image_exif` 契约，复用原 2 任务元数据队列，不增加详情缓存、工作区持久状态或 capability 权限。旧的字段、批量和分组 API 保持兼容。
+- `ExifTable.tsx`、`ExifMetadataViews.tsx`、`ExifRows.tsx`、`exifPresentation.ts` 将模块导航、普通虚拟字段表、单块/全部统计矩阵及七列诊断分开；只挂载当前子页。搜索不移除导航，DP 的 ISP_HW_*/MF/CMN/RESVA 等节按模块合并但保留原始字段前缀；矩阵通过等宽文本保留形状和全部数值，TOML 排序不会把 15×15 放到 5×5 之前。
+- EXIF 来源区分实际 JPEG 直读、DP 生成的 TOML、内置解析导出的 TOML 与来源未知的旧 TOML。新导出写入 `[__luxe_exif]` schema 1；没有记录时不根据文件扩展名猜生成工具，也不拿图片的诊断/统计混充 TOML 内容。
+- `debug_parser_to_toml` 单独处理 `[AE_Table]` 下的 `<<块名>>` 纯数字行，保留第 5 代含空格的块名和重复 AF 值。来源节、统计形状和数值不进入扁平关键字命名空间，避免 `parser`、`rows`、`values` 等通用叶名遮住真实图片字段。
+- `src-tauri/build.rs` 自动收集 13 模块的 353 份第 5/6 代头文件（22,037,931 字节），以固定预算嵌入；`mtk_headers.rs` 按版本、签名、受限条件枚举选择真实索引，不再手写 18 份匹配表。头文件向量随单次读取释放，没有全目录枚举缓存；保留 Samsung 精确变体，显式拒绝 13 份已知无效定义，资源审计进入 CI 既有 `sync:test` 入口。
+
+**痛点**
+
+- 普通 `TAG:value` 转换器无法提取没有冒号的统计网格；已有 TOML 如果此前已经丢弃这些行，不能靠界面修改恢复数据。旧 TOML 也没有足以证明生成工具的来源标记，因此必须如实显示“生成来源未记录”。
+- 头文件“已匹配”、模块“已解码”、版本识别来源与标签读取来源是不同维度。参考 IPEParser 的旧指南已删除，当前 ISP 同名版本采用签名条件枚举；不能继续把旧指南中的 variants 路径和历史测试数量当作当前实现或本次实测。
+- 合并 DP 子节后，显示键带上原始节前缀会改变 `^SW_LCE_` 等已收藏正则的匹配位置；字段搜索同时匹配完整路径与裸标签，保留来源可读性而不破坏原有锚定搜索。
+- 统计内容及来源数组会触发原快读器的完整 TOML 回退，也可能让全字段叶名别名污染列表。快读入口须识别保留节/数组表与根级 dotted key；新增测试必须先请求按键字段，再读取全字段，避免已有全字段缓存遮住快读回归。
+- 收尾发现 type10 统计头不足 16 字节、尺寸未知或 revision 未支持时，若只是跳过统计而不标记未补全，同图正常 AE 会让导出被误判完整。`mtk_ae_tables.rs` 对已识别统计族的这些失败显式传播 `incomplete`；新增单元与公开导出集成断言，保证有正常 AE 的图片也不会落下遮住 DP 重试的部分 TOML（Rust 行为待 CI）。
+
+**闭坑**
+
+- 修改详情契约同时检查 Rust 导出类型、`src/types/ipc.ts`、IPC 封装、命令注册和 capability；检查切图/同路径 revision/卸载后的迟到结果、搜索不隐藏 Detail、未知版本仍可诊断、已有 TOML 的显式覆盖与原字段缓存切源。
+- 修改统计必须校验真实形状、值数量和边界；type8 的 u24 直方图、type10 的通道容量与实际 6×8，以及第 5 代枚举声明但缺失的数据不能混用。缺失块不伪造零矩阵，来源未知不伪造 DP 归属。
+- 新增 `.h` 只意味着增加候选枚举，不能代表所有新布局或所有资源版本已支持。头文件匹配与解码状态分开；Rust 合成行为测试仍由 CI 执行，真实私有 EXIF 需同一 JPEG 的原生输出对照。
+
+**验证**
+
+- `npm run typecheck`：通过。隔离 Node 22.23.5 执行 `npx --yes --package=node@22 -c "npm run sync:test"`：48 项通过；EXIF 脚本为 27 项，包含来源、固定导航、诊断过滤、DP 节别名/锚定搜索、矩阵完整性/顺序与统计块选择的实际组件/逻辑回归；新增 4 项头文件资源审计一并通过。
+- 隔离 Node 22.23.5 执行 `node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/image-table-mapping.test.mjs src/views/mtk/isp6s/TablePane/*.test.mjs`：80 项通过。`npm run version:check`：通过。
+- `rustfmt --check --edition 2021 --config skip_children=true` 检查 `build.rs`、`mtk_exif.rs`、`mtk_headers.rs`、`mtk_ae_tables.rs`、`exif_document.rs`、`metadata_source.rs`、`image_exif_details.rs`、`image_direct_exif.rs`：通过；修改过的 `mod.rs`、`image_cmds.rs`、`lib.rs` 用 `rustfmt --emit stdout --edition 2021 --config skip_children=true` 非编译静态解析通过。新增 Rust 集成测试覆盖来源切换、未知旧 TOML、DP 统计/重复值、未知版本诊断、保留节不能污染字段命名空间，以及正常 AE 不得遮住 type10 未补全统计，尚未执行。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示；367 个未跟踪文件的文本行尾空白检查通过，未发现新增禁止产物、updater 私钥/密码或本地 `state.toml` 文件名。
+- 未运行 Cargo/Tauri 编译、Rust 测试、前端打包或桌面交互验收；未生成实际窗口截图。真实 JPEG、DebugParser.exe、安装包、深浅主题/滚动交互和分进程性能采样仍需 GitHub Actions 产物或用户桌面验收。
+
+### 2026-11-12：移除嵌入枚举的安装资源重复副本
+
+**亮点**
+
+- `src-tauri/tauri.conf.json` 的 `bundle.resources` 移除 `resources/mtk_exif/headers/**/*`，保留翻译和三个运行期 TOML；353 份头文件继续由 `build.rs` 的 `include_str!` 嵌入，不额外部署一份 22,037,931 字节原始头文件库。`scripts/mtk-headers.test.mjs` 的打包断言同时检查头文件及其目录祖先，防止以后用宽泛资源 glob 或父目录递归复制重新引入副本。
+
+**痛点**
+
+- 枚举从磁盘资源改成编译嵌入后，旧 Tauri resources glob 仍保留，造成同一数据既进入二进制又作为安装资源复制。仅检查 glob 字符串是否含 `mtk_exif` 不足以拦截 `resources/**/*` 之类的间接重复；安装包压缩后的体积变化不能用原始文件字节数冒充实测。
+
+**闭坑**
+
+- 改动资源清单前确认运行期仅引用内嵌 `HEADER_SOURCES`、没有磁盘头文件读入入口；运行资源打包审计，确保翻译与配置仍保留、宽泛目录/文件匹配均会被拦截。updater 的代理、公钥和版本不在本次调整范围。
+
+**验证**
+
+- Node 22.23.5 执行 `node --test --test-reporter=spec scripts/mtk-headers.test.mjs`：4 项通过，含递归父目录/宽泛 glob 检测；`npm run version:check`、`npm run typecheck`：通过。
+- Node 22.23.5 重跑原 80 项扩展回归（`--test-reporter=dot`）：80 项通过；`git diff --check`：通过，仅有既有 LF/CRLF 提示。
+- 未进行 Rust/Tauri 构建或安装包大小实测；实际产物及桌面验收仍等待 GitHub Actions/用户环境。
+
+### 2026-11-12：EXIF 左置、空模块导航收敛与安全清理/真实进度
+
+**亮点**
+
+- `Isp6sAeVisual.tsx` 把 AE Basic 与 ToneMap 的 EXIF 标签排到最左侧，保留原标签 ID、默认选择和滚动会话；`exifPresentation.ts` 仅为实际字段与有效统计生成导航，未解码/仅识别版本的模块保留在 Detail。`ExifMetadataViews.tsx` 移除识别来源列，六列共用布局；来源路径不占用行内空间，改为来源徽标的悬浮提示。
+- `TablePane.tsx` 的 EXIF 图标通过 Fluent `Menu openOnContext` 保留左键补全/导出，并提供右键当前图片/多选图片清理。`ImageSidecarCleanupDialog.tsx` 展示确切文件清单与不可撤销警告，取消无删除调用。`imageExifService.ts` 复用既有共享刷新，确认后重验目录/索引身份，清理与解析互斥，任务结束释放标记；刷新保留用户完成时的当前图片且递增 `metadataRevision`。
+- `sidecar_cleanup.rs` 按目录与选中图片限定 `<stem>.toml`、`<stem>.exif`、`<image-name>.exif`，全量预检输入，拒绝跨目录、非图片、同 stem / 点号文件名共享归属、符号链接/reparse 和不安全路径，保护 `state.toml`。确认后的新文件不在名单内不删，失踪容忍，锁定/只读/替换成目录等失败单独返回；Windows 固定父目录句柄并通过目标句柄删除，不跟随替换链接，也不提权、强制解锁或改权限。
+- `mtk_exif.rs`、`metadata_source.rs`、`exif_document.rs` 与 `load_image_toml_with_progress` 在真实读取/模块/统计/结果投影步骤上发出 Channel 进度；`MetadataProgress.tsx` 统一当前图片、EXIF 详情和既有目录解析的 Fluent 进度条。排队不确定、缓存直接完成，不引入计时器、模拟百分比、额外图片缓存或强制全目录预解析。
+
+**痛点**
+
+- 匹配头文件/识别版本并不意味着有字段；用诊断行建立导航会产生 Sensor/MFNR/N3D 等空页面。现在以实际 payload 字段和通过形状验证的统计建立标签，仍保留失败诊断方便排查。
+- 删除文件不是简单按扩展名泛扫：同 stem 的 JPG/PNG 会共用 TOML，`image.jpg.exif` 还可能与另一张点号文件名图片的 `<stem>.exif` 共享。必须先解决归属和精确确认范围，不能右键即删、顺带删除新出现的未确认文件或跳过用户对手改 TOML 的确认。
+- `Option<Channel<T>>` 不能按普通 serde 参数推导，编辑器给出 `CommandArg`/`Deserialize` 错误；最终 Rust 命令接收具体 Channel，TypeScript 包装始终提供通道，无订阅方时使用空回调，原有 TS 调用方式保持兼容。旧请求的 Channel 回调与 Promise 结果须一起失效，否则只隔离结果仍可能让旧 JPEG 进度回写新图片。
+
+**闭坑**
+
+- 清理只能经“只读预览→明确确认→执行前重验→受限删除→清缓存与共享刷新”；确认后换目录拒绝执行，已发出请求允许完成但不得刷新新工作区。不得在本次开发或验收中真实删除用户目录内容。
+- 后端清理与 EXIF 写出复用 `EXIF_TASKS`，命令结束调用 `clear_memory_caches()` 防止旧读取回填；前端仅刷新同一索引快照。检查清理失败/部分失败后任务标记释放、选择保留、同路径详情与列表/热力图重新读取。
+- 读取进度是工作单位而非字节或耗时百分比；每条成功/失败回调、缓存命中、切图、同路径 revision、完成后迟到消息和卸载都要有回归。新增权限不需要扩大 capability，五语言文案与参数插值保持一致。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22.23.5 执行同步入口同四脚本 `node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs`：61 项通过（EXIF 为 40 项）；加上列映射与 `TablePane/*.test.mjs` 的扩展回归：93 项通过。新增 Node 回归执行实际组件/共享服务/工作区读取 effect，覆盖标签顺序、空模块、六列对齐、路径只进 tooltip、右键范围、确认取消、失败刷新与过期进度。
+- `npm run version:check`：通过。`rustfmt --check --edition 2021 --config skip_children=true` 检查 `sidecar_cleanup.rs`、`image_sidecar_cleanup.rs`、`mtk_exif.rs`、`metadata_source.rs`、`exif_document.rs`、`image_exif_details.rs`：通过；`mod.rs`、`image_cmds.rs`、`lib.rs` 经 `rustfmt --emit stdout --edition 2021 --config skip_children=true` 非编译静态解析通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 提示；371 个未跟踪文件文本行尾空白检查通过，没有新增禁止的生成产物、updater 私钥/密码或本地 state.toml 文件名。
+- 新增 Rust 清理测试覆盖预览无副作用、精确确认名单、新文件不删、幂等、大小写、共享归属、跨目录/伪造输入、目录/只读/锁定/符号链接等；进度集成用例覆盖真实步骤、无 sidecar 写入、TOML 切源与失败不得报告成功，均未本地执行，等待 CI。
+- 未运行 Cargo/Tauri 编译、Rust 行为测试、前端打包或实际窗口验收；未生成本轮桌面截图，也未对用户真实图片执行删除。右键菜单、确认对话框、悬浮提示、真实 JPEG/DP 进度和 Windows 删除句柄行为仍需 GitHub Actions 产物/用户桌面验收。
+
+### 2026-11-12：导入期 JPEG 优先对账与统一 TOML 磁盘缓存
+
+**亮点**
+
+- `src-tauri/src/image_scan/metadata_import.rs` 新增 `prepare_image_metadata`，逐图处理、只保留单图结果；有旧 TOML 也先核验 JPEG，实际字段身份、值类型/重复数组基数和完整统计块形状构成严格超集时才升级，不能只比总条数。等量/缺字段/未知节保留旧数据，已读 partial 以真实 `needs_fallback` 落盘，普通 JPEG/PNG 可保存 metadata-only 失败状态，后续点击不重复解码。
+- `build.rs` 对 353 份头文件及解码/覆盖策略/来源投影源码生成 `LUXE_MTK_METADATA_REVISION`，和图片路径、大小、mtime、TOML 内容/诊断指纹组成准备签名。重复导入命中则不重读 JPEG、不改写文件；用户编辑 TOML、图片变化或添加头文件会使其失效，不新增长期全目录内存缓存。
+- `MtkView.tsx` 的导入与启动恢复统一调用 `imageExifService.ts::prepareWorkspaceImageDirectory`，目录全部准备后才发布 entries。进度/摘要/任务状态属于共享 `imageDir`，同任务去重、切 AE/Tone/卸载后仍完成收尾；旧目录/旧加载代次回调不能写回新数据集，普通点击不再创建 JPEG 进度通道。`src-tauri/src/commands/image_cmds.rs` 的字段/批量字段/分组/详情全部调用严格 prepared TOML 投影，即使文件缺失也不退回隐式 JPEG。
+- `exif_document.rs` 与 `src/types/ipc.ts` 导出首次来源、最新内容来源及六种选择原因；`ExifMetadataViews.tsx` 在 Detail 展示，区分当前读 TOML 与内容曾由 JPEG 生成，不为了诊断重新读取原图。`ExifTable.tsx` 将白底内置搜索栏放回模块标签上方，轻品牌色标签/交替行通过语义令牌跟随主题，来源说明只在 Detail 出现，普通字段列标题保留无障碍文本但不占一行。
+- 手动 `parse_exif_directory` 纳入已存在且未补全的准备 TOML，直接复用其 native 数据，不重新解析 JPEG；`apply_debug_parser_fallback` 用已有值优先的增量合并补缺失模块/字段/重复项/完整表块，只有有效内容增加才原子更新。旧 partial 文件不再阻断 DP；空输出、仅改状态或无增量仍可重试。右键清理后走同一准备入口重建 TOML，其他未变文件命中签名。
+
+**痛点**
+
+- 原先详情每次挂载都会重新解码同一 JPEG，工作区字段和详情各自展示进度；仅去掉进度条不能减少解析。必须在导入期统一保存并把全部 UI 投影约束为 TOML-only，写失败或外部删除时也不能偷偷回读 JPEG。
+- 把 partial 直接保存为已有 TOML 会被原“文件存在即跳过”逻辑锁死。需要持久化未补全状态、手动任务显式纳入、DP 仅补缺且保留 JPEG 权威值；失败/未知结果也要有签名，避免同一不支持图片每次点击重复尝试，而头文件/策略升级又必须自动失效旧签名。
+- 根级 `AE_TAG_*` 与 `[AE]` 字段若按原始路径比较会永远互不覆盖，兜底合并还可能生成裸键/嵌套键重复并让大小写别名结果不一致。仅对明确标签前缀进行模块归一化，保留未知原节；DP合并把同一身份放回唯一旧位置，不用新值改写既有裸键/嵌套值。
+- 自动覆盖前需保护旧文件并发编辑、只读/占用、损坏/非UTF8/超限、同stem多图片和link/reparse。实现保持明确失败，使用有界已检查句柄读取、`create_new` 临时文件+sync、已有文件原子rename/新文件no-clobber发布，不remove后重建，不把写入失败表述为缓存已建立。
+
+**闭坑**
+
+- 任何新的页面/字段读取都走 `src/ipc/imageScan.ts` 严格 TOML 命令；不要把底层为兼容测试保留的显式lazy JPEG helper重新接回普通点击。准备完成前不发布旧entries供列表/热力图抢读。
+- 覆盖比较须忽略 AE_DISPLAY/Detail/来源元信息的“数量优势”，但不能丢失未知旧业务字段、缩短AF重复项或用部分统计覆盖完整块。已有真实读取失败/损坏文件不得当空文件覆写，具体边界以Rust临时fixture测试为准。
+- 修改解码器/头库/对账策略时核对 build.rs 的签名输入；缓存签名包括业务与诊断，避免用户改动后仍cached。首次来源一旦记录不随后续原生升级/DP补全改变，selected_source/decision才反映最新选择；磁盘准备缓存不是性能测量结果。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过。Node 22.23.5 执行同步入口同四脚本：66 项通过（EXIF 45 项），加列映射与 `TablePane/*.test.mjs` 的扩展回归：98 项通过。实际组件/入口/服务回归覆盖搜索置顶、普通点击无进度通道、首次/最新来源、准备去重与切页收尾、迟到进度、失败重试、目录替换、清理后重建及原字段/联动隔离。
+- `rustfmt --check --edition 2021 --config skip_children=true` 对 `build.rs`、`metadata_import.rs`、`metadata_source.rs`、`exif_document.rs`、`image_metadata_import.rs`、`image_prepared_reads.rs`：通过；`mod.rs`、`image_cmds.rs`、`lib.rs` 以 `rustfmt --emit stdout` 非编译静态解析通过。新Rust测试包含对账/原子写/来源/DP增量/失败缓存/严格TOML投影及裸键身份边界，尚未执行，交CI。
+- `git diff --check`：通过，仅有既有 LF/CRLF 提示；374 个未跟踪文件的文本行尾空白检查通过，没有新增禁止生成产物、updater 私钥/密码或本地 state.toml 文件名。
+- 未运行 Cargo/Tauri 编译、Rust 行为测试、前端打包或桌面交互；没有在用户真实目录运行准备/覆盖/删除，也未生成实际窗口截图。真实 JPEG/DebugParser逐字段对照、安装包与深浅主题/进度体验、Windows原子写行为和内存/响应耗时仍需GitHub Actions产物或用户桌面验收。

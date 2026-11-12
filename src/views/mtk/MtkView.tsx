@@ -2,7 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 
 import { parseCppFile } from "@/ipc/cppParser";
 import { isFile } from "@/ipc/shell";
-import { scanImageDir, loadImageToml } from "@/ipc/imageScan";
+import { prepareWorkspaceImageDirectory, ImageExifTaskError } from "@/services/imageExifService";
+import { useTranslation } from "react-i18next";
 import { flushStateNow, saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore } from "@/stores/mtkStore";
 import { Toast, type ToastKind } from "@/components/common/Toast";
@@ -22,6 +23,7 @@ const Isp6sAeVisual = lazy(() => import("./isp6s/Isp6sAeVisual").then(({ Isp6sAe
  *   └─ Body: TablePane on top (image loaded) | Cards + ImagePane LR (parsed)
  */
 export function MtkView() {
+  const { t } = useTranslation();
   const mtk            = useMtkStore((s) => s.mtk);
   const setCurrentIsp  = useMtkStore((s) => s.setCurrentIsp);
   const setCurrentTab  = useMtkStore((s) => s.setCurrentTab);
@@ -34,7 +36,6 @@ export function MtkView() {
   const cppRequestIds = useRef<Record<string, number>>({});
   const parserRequestId = useRef(0);
   const imageRequestId = useRef(0);
-  const imageLoadKey = useRef<string | null>(null);
 
   const ispIdx = Math.max(0, Math.min(mtk.current_isp, ISP_LIST.length - 1));
   const ispId: IspId = ISP_LIST[ispIdx].id;
@@ -50,24 +51,14 @@ export function MtkView() {
     restoredCppPaths.current = {};
   }, []);
   useEffect(() => () => { parserRequestId.current += 1; }, []);
-  useEffect(() => () => {
-    imageRequestId.current += 1;
-    const pendingKey = imageLoadKey.current;
-    const pending = pendingKey ? useMtkStore.getState().imageDir[pendingKey] : null;
-    if (pendingKey && (pending?.status === "scanning" || pending?.status === "loading")) {
-      const [isp, tab] = pendingKey.split("|");
-      useMtkStore.getState().setImageDir(isp as IspId, Number(tab), {
-        dir: null, entries: [], current: 0, tomlData: {}, status: "idle",
-      });
-    }
-  }, [imageKey]);
+  // Import preparation is shared service work. Only view-local notices are
+  // invalidated by navigation; switching AE/Tone must not cancel its refresh.
+  useEffect(() => () => { imageRequestId.current += 1; }, [imageKey]);
 
   const importsEntry = useMtkStore((s) => s.imports[key]);
   const caLtmImport = useMtkStore((s) => s.imports["ISP6S|CA-LTM"]);
   const imports = importsEntry ?? { filePath: null, parsed: null, revision: 0, status: "idle" as const, message: null };
   const setImport = useMtkStore((s) => s.setImport);
-
-  const setImageDir = useMtkStore((s) => s.setImageDir);
 
   const [toast, setToast] = useState<{
     kind: ToastKind;
@@ -223,60 +214,27 @@ export function MtkView() {
 
   const onImageDirChange = useCallback(async (dir: string, selectedImage?: string | null) => {
     const requestId = ++imageRequestId.current;
-    imageLoadKey.current = `${ispId}|${imageTabIdx}`;
-    const previousDir = useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`]?.dir;
-    setImageDir(ispId, imageTabIdx, {
-      dir,
-      ...(previousDir !== dir ? { entries: [], current: 0 } : {}),
-      tomlData: {}, status: "scanning", message: null,
-    });
     try {
-      const entries = await scanImageDir(dir);
-      if (requestId !== imageRequestId.current) return;
-      if (entries.length === 0) {
-        setImageDir(ispId, imageTabIdx, {
-          entries: [], current: 0, tomlData: {},
-          status: "error",
-          message: "目录下没有找到 JPG、JPEG 或 PNG 图片",
-        });
-        return;
+      const { summary } = await prepareWorkspaceImageDirectory(ispId, imageTabIdx, dir, selectedImage);
+      if (requestId !== imageRequestId.current || useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`]?.dir !== dir) return;
+      if (summary.total === 0) { setToast({ kind: "info", title: t("image_exif.error.empty") }); return; }
+      if (summary.failed || summary.unavailable || summary.created || summary.replaced) {
+        setToast({ kind: summary.failed ? "error" : summary.unavailable ? "info" : "success",
+          title: t("image_exif.import.completed"), detail: t("image_exif.import.summary", { ...summary }) });
       }
-      const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedImage));
-      setImageDir(ispId, imageTabIdx, { entries, current, tomlData: {}, status: "loading", message: null });
-      const tomlData = await loadImageToml(entries[current].toml_path).catch((): Record<string, string> => ({}));
+    } catch (error) {
       if (requestId !== imageRequestId.current) return;
-      const latest = useMtkStore.getState().imageDir[`${ispId}|${imageTabIdx}`];
-      if (latest?.dir !== dir || latest.entries[latest.current]?.jpg_path !== entries[current].jpg_path) return;
-      setImageDir(ispId, imageTabIdx, {
-        tomlData, status: "done",
-        message: `已加载 ${entries.length} 张图片 · 当前 ${entries[current].name}`,
-      });
-    } catch (e) {
-      if (requestId !== imageRequestId.current) return;
-      setImageDir(ispId, imageTabIdx, {
-        status:  "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
+      setToast({ kind: "error", title: t("image_exif.import.failed"),
+        detail: error instanceof ImageExifTaskError ? t(`image_exif.error.${error.code}`) : String(error) });
     }
-  }, [ispId, imageTabIdx, setImageDir]);
+  }, [ispId, imageTabIdx, t]);
 
   const savedImageDir = mtk.image_workspaces?.[imageKey]?.dir;
   useEffect(() => {
     if (!savedImageDir || useMtkStore.getState().imageDir[imageKey]?.dir === savedImageDir) return;
     const selected = useMtkStore.getState().mtk.image_workspaces?.[imageKey]?.selected_image;
     void onImageDirChange(savedImageDir, selected);
-    const request = imageRequestId.current;
-    return () => {
-      if (imageRequestId.current === request) {
-        imageRequestId.current += 1;
-        // A cancelled restore must remain eligible when the effect remounts.
-        const current = useMtkStore.getState().imageDir[imageKey];
-        if (current?.status === "scanning" || current?.status === "loading") {
-          setImageDir(ispId, imageTabIdx, { dir: null, entries: [], current: 0, tomlData: {}, status: "idle" });
-        }
-      }
-    };
-  }, [savedImageDir, imageKey, imageTabIdx, ispId, onImageDirChange, setImageDir]);
+  }, [savedImageDir, imageKey, onImageDirChange]);
 
   const isIsp6sWorkspace = ispId === "ISP6S" && (tab.label === "AE Basic" || tab.label === "ToneMap");
   const parsedReady = Boolean(imports.parsed && imports.filePath);
@@ -329,7 +287,6 @@ export function MtkView() {
                   onImageDirChange={onImageDirChange}
                   onCppPathChange={onCppPathChange}
                   debugParserPath={debugParserPath}
-                  onDebugParserPathChange={onDebugParserPathChange}
                   onNotice={setToast}
                   onWorkspaceDividerChange={reportWorkspaceDivider}
                 />

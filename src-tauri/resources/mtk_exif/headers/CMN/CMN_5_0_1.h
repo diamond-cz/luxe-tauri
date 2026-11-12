@@ -1,0 +1,8 @@
+typedef enum
+{
+    //BEGIN_OF_EXIF_TAG
+    CMN_TAG_VERSION = 0,
+    CMN_TAG_SHOT_MODE,
+    CMN_TAG_CAM_MODE
+    //END_OF_EXIF_TAG
+}DEBUG_CMN_TAG_T;

@@ -2,10 +2,13 @@ import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo,
 import { Button } from "@fluentui/react-components";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { PanelBottomExpand20Regular } from "@fluentui/react-icons";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
-import { loadImageToml, parseImageExif, scanImageDir, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageToml, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
+import { clearWorkspaceImageSidecars, prepareWorkspaceImageSidecars, ImageExifTaskError, parseWorkspaceImageExif, type ImageSidecarCleanupPlan } from "@/services/imageExifService";
+import { ImageSidecarCleanupDialog } from "./TablePane/ImageSidecarCleanupDialog";
+import { MetadataProgress } from "./TablePane/MetadataProgress";
 import type { ToastKind } from "@/components/common/Toast";
 import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
@@ -19,7 +22,6 @@ import { ParaCheckMode } from "./ImagePane/ParaCheckMode";
 import type { PreviewMode, SourceEditorBinding } from "./ImagePane/ImagePane";
 import type { ParseResult } from "@/types/cpp_parser";
 import { workspaceSession, type DetailsTab, type ScrollPosition, type WorkspaceSession } from "./workspaceSession";
-import { isDebugParserExecutable } from "../debugParserPath";
 import { WorkspaceColumns, WorkspaceHideButton } from "./WorkspaceColumns";
 import { panelMotionStyle, usePanelCollapseTransition } from "./usePanelCollapseTransition";
 import { publishImageSelection } from "@/services/imageSyncService";
@@ -44,7 +46,6 @@ interface Props {
   onImageDirChange: (dir: string) => void;
   onCppPathChange: (path: string) => void;
   debugParserPath: string | null;
-  onDebugParserPathChange: (path: string) => void;
   onNotice: (toast: { kind: ToastKind; title: string; detail?: string }) => void;
   onWorkspaceDividerChange: (x: number) => void;
 }
@@ -54,22 +55,23 @@ const WORKSPACE_DIVIDER_ID = "isp6s-workspace-source-divider";
 const DETAILS_DEFAULT_SIZE = 42;
 const DETAILS_MIN_SIZE = 25;
 const AE_DETAILS_TABS = [
+  { id: "exif", label: "EXIF" },
   { id: "normal", label: "Normal" },
   { id: "face", label: "Face" },
   { id: "lce", label: "LCE" },
-  { id: "exif", label: "EXIF" },
   { id: "bcompare", label: "bcompare" },
 ] as const;
 const TONE_DETAILS_TABS = [
-  { id: "lce", label: "LCE" },
   { id: "exif", label: "EXIF" },
+  { id: "lce", label: "LCE" },
   { id: "tone_cpp", label: "Tone.cpp" },
 ] as const;
 let isp6sSchemaPromise: Promise<Isp6sSchemaRoot> | null = null;
 
 export function Isp6sAeVisual({
-  isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision, caLtmStatus, caLtmMessage, onImageDirChange, onCppPathChange, debugParserPath, onDebugParserPathChange, onNotice, onWorkspaceDividerChange,
+  isp, tabIdx, filePath, cppImportRevision, toneMode = false, toneParsed, caLtmParsed, caLtmPath, caLtmRevision, caLtmStatus, caLtmMessage, onImageDirChange, onCppPathChange, debugParserPath, onNotice, onWorkspaceDividerChange,
 }: Props) {
+  const { t } = useTranslation();
   const workspaceKey = `${isp}|${tabIdx}`;
   const session = workspaceSession(workspaceKey);
   const [schema, setSchema] = useState<Isp6sSchemaRoot | null>(null);
@@ -91,9 +93,18 @@ export function Isp6sAeVisual({
   const [imageSearchError, setImageSearchError] = useState<string | null>(null);
   const [calculatorSourcePath, setCalculatorSourcePath] = useState<string | null>(filePath);
   const [exifProgress, setExifProgress] = useState<ExifParseProgress | null>(null);
+  const [cleanupPlan, setCleanupPlan] = useState<ImageSidecarCleanupPlan | null>(null);
+  const [deletingSidecars, setDeletingSidecars] = useState(false);
   const [exifParsing, setExifParsing] = useState(false);
-  const [imageDataRevision, setImageDataRevision] = useState(0);
   const exifParsingRef = useRef(false);
+  const exifRequestRef = useRef(0);
+  const exifProgressControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    exifRequestRef.current += 1;
+    exifProgressControllerRef.current?.abort();
+    exifProgressControllerRef.current = null;
+    exifParsingRef.current = false;
+  }, []);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceLeftRef = useRef<HTMLDivElement | null>(null);
   const reportWorkspaceDivider = useCallback(() => {
@@ -116,6 +127,7 @@ export function Isp6sAeVisual({
   const workspaceSelection = useMtkStore((s) => s.imageSelection[workspaceKey]);
   const setImageSelection = useMtkStore((s) => s.setImageSelection);
   const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
+  const imageDataRevision = imageDir.metadataRevision ?? 0;
   const selectionSyncEnabled = useIsp6sVisualStore((s) => s.selectionSyncEnabled);
   const setSelectionSyncEnabled = useIsp6sVisualStore((s) => s.setSelectionSyncEnabled);
   const pairedWorkspaceKey = isp === "ISP6S" && (tabIdx === 0 || tabIdx === 1)
@@ -145,17 +157,20 @@ export function Isp6sAeVisual({
       return;
     }
     const cached = session.selectedToml;
-    if (cached?.dir === imageDir.dir && cached.path === currentEntry.toml_path) {
+    if (cached?.dir === imageDir.dir && cached.path === currentEntry.toml_path && cached.revision === imageDataRevision) {
       setSelectedTomlData(cached.data);
       return;
     }
     let active = true;
+    setSelectedTomlData({});
     void loadImageToml(currentEntry.toml_path).then((data) => {
       if (!active || requestId !== selectedTomlLoadRef.current) return;
-      session.selectedToml = { dir: imageDir.dir ?? "", path: currentEntry.toml_path, data };
+      session.selectedToml = { dir: imageDir.dir ?? "", path: currentEntry.toml_path, revision: imageDataRevision, data };
       setSelectedTomlData(data);
     }).catch(() => {
       if (active && requestId === selectedTomlLoadRef.current) setSelectedTomlData({});
+    }).finally(() => {
+      active = false;
     });
     return () => { active = false; };
   }, [currentEntry?.jpg_path, currentEntry?.toml_path, imageDir.dir, imageDir.entries, imageDataRevision, session]);
@@ -191,65 +206,101 @@ export function Isp6sAeVisual({
     if (exifParsingRef.current) return;
     const dir = imageDir.dir;
     if (!dir || imageDir.entries.length === 0) {
-      onNotice({ kind: "info", title: "请先导入图片文件夹" });
+      onNotice({ kind: "info", title: t("image_exif.error.empty") });
       return;
     }
-    let parserPath = debugParserPath;
-    if (!parserPath) {
-      onNotice({ kind: "info", title: "请先导入 DP 解析工具 DebugParser.exe" });
-      const picked = await openDialog({ multiple: false, filters: [{ name: "DebugParser.exe", extensions: ["exe"] }] });
-      if (typeof picked !== "string") return;
-      if (!isDebugParserExecutable(picked)) {
-        onNotice({ kind: "error", title: "请选择 DebugParser.exe" });
-        return;
-      }
-      parserPath = picked;
-      onDebugParserPathChange(picked);
-    }
-
+    const request = ++exifRequestRef.current;
+    const active = () => request === exifRequestRef.current;
+    const sameWorkspace = () => active()
+      && useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir === dir;
+    const progressController = new AbortController();
+    exifProgressControllerRef.current = progressController;
     exifParsingRef.current = true;
     setExifParsing(true);
     setExifProgress({ stage: "EXIF", completed: 0, total: imageDir.entries.length });
-    const selectedPath = currentEntry?.jpg_path;
     try {
-      const result = await parseImageExif(parserPath, dir, (progress) => {
-        if (exifParsingRef.current) setExifProgress(progress);
-      });
-      if (useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir !== dir) return;
-      const entries = await scanImageDir(dir);
-      const current = Math.max(0, entries.findIndex((entry) => entry.jpg_path === selectedPath));
-      const selectedEntry = entries[current];
-      let tomlData: Record<string, string> = {};
-      let tomlLoaded = false;
-      if (selectedEntry) {
-        try {
-          tomlData = await loadImageToml(selectedEntry.toml_path);
-          tomlLoaded = true;
-        } catch (error) {
-          console.warn("reload parsed image TOML", error);
-        }
-      }
-      if (useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir !== dir) return;
-      selectedTomlLoadRef.current += 1;
-      session.selectedToml = tomlLoaded && selectedEntry
-        ? { dir, path: selectedEntry.toml_path, data: tomlData } : null;
-      if (pairedWorkspaceKey) workspaceSession(pairedWorkspaceKey).selectedToml = null;
-      setSelectedTomlData(tomlData);
-      setImageDir(isp, imageTabIdx, { entries, current, tomlData, status: "done", message: null });
-      setImageDataRevision((revision) => revision + 1);
+      const result = await parseWorkspaceImageExif(isp, imageTabIdx, debugParserPath, (progress) => {
+        if (sameWorkspace()) setExifProgress(progress);
+      }, workspaceKey, progressController.signal);
+      if (!sameWorkspace()) return;
+      const incomplete = result.failed > 0 || result.partial > 0;
       onNotice({
-        kind: result.failed > 0 ? "error" : "success",
-        title: result.failed > 0 ? "部分图片解析失败" : "图片解析完成",
-        detail: `生成 ${result.processed} 张，跳过 ${result.skipped} 张，失败 ${result.failed} 张`,
+        kind: result.failed > 0 ? "error" : result.partial > 0 ? "info" : "success",
+        title: t(incomplete ? "image_exif.partial" : "image_exif.completed"),
+        detail: [t("image_exif.summary", { ...result }),
+          result.partial > 0 ? t("image_exif.fallback_hint") : ""].filter(Boolean).join(" "),
       });
     } catch (error) {
-      onNotice({ kind: "error", title: "图片 EXIF 解析失败", detail: error instanceof Error ? error.message : String(error) });
+      if (sameWorkspace()) onNotice({ kind: "error", title: t("image_exif.failed"),
+        detail: error instanceof ImageExifTaskError ? t(`image_exif.error.${error.code}`)
+          : error instanceof Error ? error.message : String(error) });
     } finally {
-      exifParsingRef.current = false;
-      setExifParsing(false);
-      setExifProgress(null);
+      progressController.abort();
+      if (exifProgressControllerRef.current === progressController) {
+        exifProgressControllerRef.current = null;
+      }
+      if (active()) {
+        exifParsingRef.current = false;
+        setExifParsing(false);
+        setExifProgress(null);
+      }
     }
   };
+
+  const handlePreviewSidecars = async (imagePaths: string[]) => {
+    if (exifParsingRef.current) return;
+    const request = ++exifRequestRef.current;
+    const dir = imageDir.dir;
+    const active = () => request === exifRequestRef.current;
+    const sameWorkspace = () => active() && useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir === dir;
+    exifParsingRef.current = true;
+    setExifParsing(true);
+    try {
+      const plan = await prepareWorkspaceImageSidecars(isp, imageTabIdx, imagePaths, workspaceKey);
+      if (!sameWorkspace()) {
+        if (active()) { exifParsingRef.current = false; setExifParsing(false); }
+        return;
+      }
+      if (!plan.files.length) onNotice({ kind: "info", title: t("image_exif.cleanup.none") });
+      else { setCleanupPlan(plan); return; }
+    } catch (error) {
+      if (sameWorkspace()) onNotice({ kind: "error", title: t("image_exif.cleanup.failed"),
+        detail: error instanceof ImageExifTaskError ? t(`image_exif.error.${error.code}`) : t("image_exif.cleanup.check_failed") });
+    }
+    if (active()) { exifParsingRef.current = false; setExifParsing(false); }
+  };
+  const cancelCleanup = () => {
+    if (deletingSidecars) return;
+    setCleanupPlan(null);
+    exifParsingRef.current = false;
+    setExifParsing(false);
+  };
+  const handleConfirmCleanup = async () => {
+    if (!cleanupPlan || deletingSidecars) return;
+    const plan = cleanupPlan;
+    const request = ++exifRequestRef.current;
+    const active = () => request === exifRequestRef.current;
+    setDeletingSidecars(true);
+    try {
+      const result = await clearWorkspaceImageSidecars(isp, imageTabIdx, plan);
+      if (active() && useMtkStore.getState().imageDir[`${isp}|${imageTabIdx}`]?.dir === plan.dir) {
+        onNotice({ kind: result.failed.length ? "error" : "success", title: t("image_exif.cleanup.completed"),
+          detail: t("image_exif.cleanup.summary", { deleted: result.deleted.length, failed: result.failed.length }) });
+      }
+    } catch (error) {
+      if (active()) onNotice({ kind: "error", title: t("image_exif.cleanup.failed"),
+        detail: error instanceof ImageExifTaskError ? t(`image_exif.error.${error.code}`) : t("image_exif.cleanup.check_failed") });
+    } finally {
+      if (active()) {
+        setCleanupPlan(null); setDeletingSidecars(false); setExifParsing(false); exifParsingRef.current = false;
+      }
+    }
+  };
+  const cleanupDialog = <ImageSidecarCleanupDialog files={cleanupPlan?.files ?? null}
+    imageCount={cleanupPlan?.imagePaths.length ?? 0} deleting={deletingSidecars}
+    onCancel={cancelCleanup} onConfirm={() => void handleConfirmCleanup()} />;
+  const metadataProgress = imageDir.metadataPreparing ? <MetadataProgress progress={imageDir.preparationProgress} />
+    : exifProgress ? <MetadataProgress progress={exifProgress} /> : null;
 
   const visual   = useIsp6sVisualStore((s) => s.visual);
   const patchVis = useIsp6sVisualStore((s) => s.patch);
@@ -292,7 +343,7 @@ export function Isp6sAeVisual({
     const selectionIsCurrent = () => {
       const latest = useMtkStore.getState();
       const current = latest.imageDir[imageDirKey];
-      return latest.imageRevisions[imageDirKey] === selectionRevision && current?.dir === imageDir.dir && current.current === idx
+      return current?.loadRevision === selectionRevision && current.dir === imageDir.dir && current.current === idx
         && current.entries[idx]?.jpg_path === selectedEntry.jpg_path;
     };
     // 普通点击图片时清除热力图筛选；标题栏的上一张/下一张导航会显式保留
@@ -300,17 +351,17 @@ export function Isp6sAeVisual({
     if (!options?.preserveHeatmapSelection) setHeatmapSelection(null);
     const cachedToml = session.selectedToml?.dir === imageDir.dir
       && session.selectedToml.path === selectedEntry.toml_path
+      && session.selectedToml.revision === imageDataRevision
       ? session.selectedToml.data : null;
     setImageDir(isp, imageTabIdx, {
-      dir: imageDir.dir, entries: imageDir.entries,
       current: idx, tomlData: cachedToml ?? {}, status: cachedToml ? "done" : "loading", message: null,
     });
-    const selectionRevision = useMtkStore.getState().imageRevisions[imageDirKey];
+    const selectionRevision = useMtkStore.getState().imageDir[imageDirKey].loadRevision;
     if (cachedToml) return;
     try {
       const tomlData = await loadImageToml(selectedEntry.toml_path);
       if (!selectionIsCurrent()) return;
-      session.selectedToml = { dir: imageDir.dir ?? "", path: selectedEntry.toml_path, data: tomlData };
+      session.selectedToml = { dir: imageDir.dir ?? "", path: selectedEntry.toml_path, revision: imageDataRevision, data: tomlData };
       setImageDir(isp, imageTabIdx, {
         tomlData, status: "done",
         message: `当前 ${imageDir.entries[idx].name}`,
@@ -320,7 +371,7 @@ export function Isp6sAeVisual({
       setImageDir(isp, imageTabIdx, {
         tomlData: {},
         status: "done",
-        message: `当前 ${imageDir.entries[idx].name}（未找到同名 TOML，暂显示 -）`,
+        message: t("image_sync.current_without_toml", { name: imageDir.entries[idx].name }),
       });
     }
   };
@@ -477,8 +528,9 @@ export function Isp6sAeVisual({
               syncPairedScroll(currentEntry.jpg_path, position);
             }
           }}
-          exifParsing={exifParsing}
+          exifParsing={exifParsing || imageDir.metadataPreparing}
           onParseExif={() => void handleParseExif()}
+          onClearSidecars={(paths) => void handlePreviewSidecars(paths)}
           onNotice={onNotice}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
@@ -525,6 +577,7 @@ export function Isp6sAeVisual({
           schema={schema}
           entry={currentEntry}
           entries={imageDir.entries}
+          imageDataRevision={imageDataRevision}
           visibleHeatmapPaths={filteredHeatmapPaths}
           selectedHeatmapPaths={selectedHeatmapPaths}
           tomlData={selectedTomlData}
@@ -546,14 +599,8 @@ export function Isp6sAeVisual({
   if (toneMode) {
     return (
       <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
-        {exifProgress && (
-          <div className="mb-2 flex h-7 shrink-0 items-center gap-3 px-2 text-xs"
-               style={{ color: "var(--colorNeutralForeground2)", background: "var(--colorNeutralBackground2)" }}>
-            <span className="shrink-0">{exifProgress.stage} {exifProgress.completed}/{exifProgress.total}</span>
-            <progress className="h-2 min-w-0 flex-1" value={exifProgress.completed} max={Math.max(1, exifProgress.total)}
-                      style={{ accentColor: "var(--colorBrandBackground)" }} aria-label="图片解析进度" />
-          </div>
-        )}
+        {cleanupDialog}
+        {metadataProgress}
         <WorkspaceColumns session={session} sourceSize={session.toneSourceSize}
           onSourceSizeChange={(size) => { session.toneSourceSize = size; }}
           dividerId={WORKSPACE_DIVIDER_ID}
@@ -576,6 +623,7 @@ export function Isp6sAeVisual({
                     schema={schema}
                     tomlData={selectedTomlData}
                     tomlPath={currentEntry?.toml_path ?? null}
+                    imageDataRevision={imageDataRevision}
                     filePath={filePath}
                     cppImportRevision={cppImportRevision}
                     sourceEditorBinding={detailsTab === "tone_cpp" ? sourceEditorBinding : null}
@@ -590,15 +638,8 @@ export function Isp6sAeVisual({
 
   return (
     <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
-    {exifProgress && (
-      <div className="mb-2 flex h-7 shrink-0 items-center gap-3 px-2 text-xs"
-           style={{ color: "var(--colorNeutralForeground2)", background: "var(--colorNeutralBackground2)" }}>
-        <span className="shrink-0">{exifProgress.stage} {exifProgress.completed}/{exifProgress.total}</span>
-        <progress className="h-2 min-w-0 flex-1" value={exifProgress.completed} max={Math.max(1, exifProgress.total)}
-                  style={{ accentColor: "var(--colorBrandBackground)" }}
-                  aria-label={`图片解析 ${exifProgress.stage}`} />
-      </div>
-    )}
+    {cleanupDialog}
+    {metadataProgress}
     <WorkspaceColumns session={session} sourceSize={sourceColumnSize}
       onSourceSizeChange={updateSourceColumnSize}
       dividerId={WORKSPACE_DIVIDER_ID}
@@ -628,6 +669,7 @@ export function Isp6sAeVisual({
                 schema={schema}
                 tomlData={selectedTomlData}
                 tomlPath={currentEntry?.toml_path ?? null}
+                imageDataRevision={imageDataRevision}
                 filePath={filePath}
                 cppImportRevision={cppImportRevision}
                 sourceEditorBinding={detailsTab === "bcompare" ? sourceEditorBinding : null}
@@ -658,6 +700,7 @@ interface DetailsPanelProps {
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
   tomlPath: string | null;
+  imageDataRevision: number;
   filePath: string | null;
   cppImportRevision: number;
   sourceEditorBinding: SourceEditorBinding | null;
@@ -677,6 +720,7 @@ const DetailsPanel = memo(function DetailsPanel({
   schema,
   tomlData,
   tomlPath,
+  imageDataRevision,
   filePath,
   cppImportRevision,
   sourceEditorBinding,
@@ -749,7 +793,7 @@ const DetailsPanel = memo(function DetailsPanel({
         {detailsTab === "normal" && <NormalTable tomlData={tomlData} />}
         {detailsTab === "face" && <FaceTable tomlData={tomlData} />}
         {detailsTab === "lce" && <LceTab schema={schema} tomlData={tomlData} />}
-        {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} />}
+        {detailsTab === "exif" && <ExifTable tomlPath={tomlPath} revision={imageDataRevision} />}
         {(toneMode ? detailsTab === "tone_cpp" : detailsTab === "bcompare") && <ParaCheckMode filePath={filePath ?? ""} schema={schema} tomlData={tomlData}
           toneMode={toneMode}
           sourceEditor={sourceEditorBinding?.filePath === filePath && sourceEditorBinding.importRevision === cppImportRevision ? sourceEditorBinding : null} />}

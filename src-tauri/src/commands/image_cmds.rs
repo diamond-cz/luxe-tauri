@@ -13,25 +13,64 @@ static HOVER_PREVIEW_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::s
 // bounded because the table can issue several overlapping requests while it
 // virtualizes rows or changes the selected image.
 static TOML_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
+static EXIF_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(1));
 static THUMBNAIL_TASKS: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(2));
 static PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
 static HOVER_PREVIEW_SELECTION: Lazy<Mutex<(String, u64)>> = Lazy::new(|| Mutex::new((String::new(), 0)));
 
 #[tauri::command]
 pub async fn parse_image_exif(
-    parser_path: String,
+    parser_path: Option<String>,
     image_dir: String,
     on_progress: Channel<image_scan::ExifParseProgress>,
 ) -> AppResult<image_scan::ExifParseSummary> {
+    let _permit = EXIF_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
     tauri::async_runtime::spawn_blocking(move || {
+        let parser: Option<PathBuf> = parser_path.map(PathBuf::from);
         image_scan::parse_exif_directory(
-            &PathBuf::from(parser_path),
+            parser.as_deref(),
             &PathBuf::from(image_dir),
             |progress| { let _ = on_progress.send(progress); },
         )
     })
     .await
     .map_err(|error| AppError::Other(format!("EXIF task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn prepare_image_metadata(
+    image_dir: String, on_progress: Channel<image_scan::ExifParseProgress>,
+) -> AppResult<image_scan::ImageMetadataPreparationResult> {
+    let _permit = EXIF_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("metadata preparation queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = image_scan::prepare_image_metadata(&PathBuf::from(image_dir), |progress| { let _ = on_progress.send(progress); });
+        image_scan::clear_memory_caches();
+        result
+    }).await.map_err(|error| AppError::Other(format!("metadata preparation task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn list_image_sidecars(image_dir: String, image_paths: Vec<String>) -> AppResult<Vec<String>> {
+    let _permit = EXIF_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::list_image_sidecars(&PathBuf::from(image_dir), image_paths))
+        .await.map_err(|error| AppError::Other(format!("sidecar preview task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn clear_image_sidecars(
+    image_dir: String, image_paths: Vec<String>, confirmed_files: Vec<String>,
+) -> AppResult<image_scan::ImageSidecarCleanupSummary> {
+    let _permit = EXIF_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = image_scan::clear_image_sidecars(&PathBuf::from(image_dir), image_paths, confirmed_files);
+        // Also invalidate reads that started before a partially failed cleanup.
+        image_scan::clear_memory_caches();
+        result
+    }).await.map_err(|error| AppError::Other(format!("sidecar cleanup task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -43,7 +82,9 @@ pub async fn scan_image_dir(dir: String) -> AppResult<Vec<image_scan::ImageEntry
 
 #[tauri::command]
 pub async fn load_image_toml(path: String) -> AppResult<HashMap<String, String>> {
-    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_toml(&PathBuf::from(path)))
+    let _permit = TOML_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("metadata queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_prepared_image_toml(&PathBuf::from(path)))
         .await
         .map_err(|err| AppError::Other(format!("TOML task failed: {err}")))?
 }
@@ -52,16 +93,27 @@ pub async fn load_image_toml(path: String) -> AppResult<HashMap<String, String>>
 pub async fn load_image_toml_sections(path: String) -> AppResult<Vec<image_scan::ImageTomlSection>> {
     let _permit = TOML_TASKS.acquire().await
         .map_err(|err| AppError::Other(format!("TOML queue closed: {err}")))?;
-    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_toml_sections(&PathBuf::from(path)))
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_prepared_image_toml_sections(&PathBuf::from(path)))
         .await
         .map_err(|err| AppError::Other(format!("TOML sections task failed: {err}")))?
+}
+
+#[tauri::command]
+pub async fn load_image_exif(path: String) -> AppResult<image_scan::ImageExifDocument> {
+    let _permit = TOML_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("metadata queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_prepared_image_exif(&PathBuf::from(path)))
+        .await
+        .map_err(|error| AppError::Other(format!("EXIF detail task failed: {error}")))?
 }
 
 #[tauri::command]
 pub async fn load_image_toml_batch(
     paths: Vec<String>,
 ) -> AppResult<HashMap<String, HashMap<String, String>>> {
-    tauri::async_runtime::spawn_blocking(move || image_scan::load_image_toml_batch(paths))
+    let _permit = TOML_TASKS.acquire().await
+        .map_err(|error| AppError::Other(format!("metadata queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::load_prepared_image_toml_batch(paths))
         .await
         .map_err(|err| AppError::Other(format!("TOML batch task failed: {err}")))?
 }
@@ -74,7 +126,7 @@ pub async fn load_image_toml_fields_batch(
     let _permit = TOML_TASKS.acquire().await
         .map_err(|err| AppError::Other(format!("TOML queue closed: {err}")))?;
     tauri::async_runtime::spawn_blocking(move || {
-        image_scan::load_image_toml_fields_batch(paths, keys)
+        image_scan::load_prepared_image_toml_fields_batch(paths, keys)
     })
     .await
     .map_err(|err| AppError::Other(format!("TOML field batch task failed: {err}")))?

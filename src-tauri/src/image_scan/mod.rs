@@ -1,13 +1,24 @@
 //! Image directory scanning + per-image TOML loading.
 //!
-//! Captured frames may have a sidecar `.toml` file sharing the same stem
-//! (e.g. `IMG_20260318_171433.jpg` + `IMG_20260318_171433.toml`).
-//! When present, it carries flat or shallowly-nested `AE_TAG_*` keys that feed
-//! per-image badge and table values in `Isp6sAeVisual`.
+//! Import prepares same-stem TOML once from JPEG/existing data. IPC projections
+//! use the strict prepared readers; only explicit compatibility helpers may
+//! lazily decode a missing sidecar. Both preserve the existing `AE_TAG_*` map.
 
 #[cfg(test)]
 mod bench;
+mod exif_document;
+mod metadata_import;
+mod metadata_source;
+
+pub use self::metadata_import::{prepare_image_metadata, ImageMetadataPreparationResult, ImageMetadataPreparationSummary};
+mod mtk_exif;
 mod natural_order;
+mod sidecar_cleanup;
+
+pub use self::sidecar_cleanup::{clear_image_sidecars, list_image_sidecars, ImageSidecarCleanupSummary};
+pub use self::exif_document::{
+    load_image_exif, load_image_exif_with_progress, load_prepared_image_exif, ImageExifDocument, ImageExifModule, ImageExifSource, ImageExifTable,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -30,9 +41,12 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
+use self::metadata_source::MetadataSource;
 
 const TOML_CACHE_LIMIT: usize = 96;
+const TOML_CACHE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const TOML_FIELD_CACHE_LIMIT: usize = 512;
+const TOML_FIELD_CACHE_BYTES_LIMIT: usize = 8 * 1024 * 1024;
 const THUMBNAIL_CACHE_LIMIT: usize = 256;
 const PREVIEW_CACHE_LIMIT: usize = 16;
 const PREVIEW_SIZE: u32 = 1600;
@@ -73,6 +87,12 @@ pub struct ExifParseSummary {
     pub skipped: usize,
     pub failed: usize,
     pub total: usize,
+    /// Images handled by the in-process MTK decoder.
+    pub direct: usize,
+    /// Images written from an existing/generated DebugParser sidecar.
+    pub fallback: usize,
+    /// Direct results still missing unsupported modules; import caches preserve fallback eligibility.
+    pub partial: usize,
 }
 
 struct ParseTempDir(PathBuf);
@@ -92,14 +112,81 @@ impl Drop for ParseTempDir {
     }
 }
 
+struct PendingExifWork {
+    entry: ImageEntry,
+    sidecar: Option<PathBuf>,
+    direct_partial: bool,
+    copied_image: Option<PathBuf>,
+    direct_written: bool,
+}
+
+const MAX_DIRECT_EXIF_BYTES: usize = 16 * 1024 * 1024;
+
+fn read_jpeg_metadata(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut file = std::io::BufReader::with_capacity(64 * 1024, fs::File::open(path)?);
+    let invalid = |message| std::io::Error::new(std::io::ErrorKind::InvalidData, message);
+    let mut soi = [0u8; 2];
+    file.read_exact(&mut soi)?;
+    if soi != [0xff, 0xd8] {
+        return Err(invalid("not a JPEG"));
+    }
+    let mut data = Vec::with_capacity(256 * 1024);
+    data.extend_from_slice(&soi);
+    let mut scanned = 2usize;
+    loop {
+        let mut byte = [0u8; 1];
+        file.read_exact(&mut byte)?;
+        scanned += 1;
+        if byte[0] != 0xff {
+            return Err(invalid("invalid JPEG metadata marker"));
+        }
+        loop {
+            file.read_exact(&mut byte)?;
+            scanned += 1;
+            if scanned > MAX_DIRECT_EXIF_BYTES {
+                return Err(invalid("JPEG metadata exceeds the 16 MiB parser limit"));
+            }
+            if byte[0] != 0xff { break; }
+        }
+        let marker = byte[0];
+        if marker == 0 {
+            return Err(invalid("unexpected stuffed byte in JPEG metadata"));
+        }
+        if marker == 0x01 || (0xd0..=0xd8).contains(&marker) {
+            continue;
+        }
+        data.extend_from_slice(&[0xff, marker]);
+        if matches!(marker, 0xda | 0xd9) { break; }
+
+        let mut length_bytes = [0u8; 2];
+        file.read_exact(&mut length_bytes)?;
+        let segment_length = u16::from_be_bytes(length_bytes) as usize;
+        if segment_length < 2 { return Err(invalid("invalid JPEG segment length")); }
+        scanned = scanned.saturating_add(segment_length);
+        if scanned > MAX_DIRECT_EXIF_BYTES {
+            return Err(invalid("JPEG metadata exceeds the 16 MiB parser limit"));
+        }
+        let payload_length = segment_length - 2;
+        data.extend_from_slice(&length_bytes);
+        let payload_start = data.len();
+        data.resize(payload_start + payload_length, 0);
+        file.read_exact(&mut data[payload_start..])?;
+    }
+    Ok(data)
+}
+
+fn prepared_needs_fallback(path: &Path) -> bool {
+    MetadataSource::prepared(path).and_then(|source| source.read_text()).ok()
+        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+        .and_then(|root| root.get("__luxe_exif").and_then(|info| info.get("needs_fallback")).and_then(toml::Value::as_bool))
+        .unwrap_or(false)
+}
+
 pub fn parse_exif_directory(
-    parser_path: &Path,
+    parser_path: Option<&Path>,
     image_dir: &Path,
     mut on_progress: impl FnMut(ExifParseProgress),
 ) -> AppResult<ExifParseSummary> {
-    if !parser_path.is_file() {
-        return Err(AppError::NotFound(format!("DebugParser.exe: {}", parser_path.display())));
-    }
     if !image_dir.is_dir() {
         return Err(AppError::NotFound(format!("image directory: {}", image_dir.display())));
     }
@@ -107,56 +194,123 @@ pub fn parse_exif_directory(
     if entries.is_empty() {
         return Err(AppError::Invalid("图片文件夹中没有 JPG、JPEG 或 PNG 图片".into()));
     }
-    let pending: Vec<_> = entries.iter().filter(|entry| !Path::new(&entry.toml_path).is_file()).collect();
+
+    let mut target_counts = HashMap::<String, usize>::new();
+    for entry in &entries {
+        *target_counts.entry(entry.toml_path.to_ascii_lowercase()).or_default() += 1;
+    }
+    let pending: Vec<_> = entries
+        .iter()
+        .filter(|entry| !Path::new(&entry.toml_path).is_file() || prepared_needs_fallback(Path::new(&entry.toml_path)))
+        .cloned()
+        .collect();
     let total = pending.len();
+    let can_fallback = parser_path.is_some_and(Path::is_file);
     let mut summary = ExifParseSummary {
         processed: 0,
         skipped: entries.len() - total,
         failed: 0,
         total: entries.len(),
+        direct: 0,
+        fallback: 0,
+        partial: 0,
     };
+
     on_progress(ExifParseProgress { stage: "EXIF", completed: 0, total });
-    let temp_root = std::env::temp_dir().join(format!(
-        "luxe-exif-{}-{}",
-        std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos(),
-    ));
-    fs::create_dir(&temp_root)?;
-    let _temp_guard = ParseTempDir(temp_root.clone());
+    let temp_root = if can_fallback && total > 0 {
+        let root = std::env::temp_dir().join(format!(
+            "luxe-exif-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos(),
+        ));
+        fs::create_dir(&root)?;
+        Some(root)
+    } else {
+        None
+    };
+    let _temp_guard = temp_root.clone().map(ParseTempDir);
 
-    let mut exif_paths = Vec::with_capacity(total);
-    let mut copied_images = Vec::with_capacity(total);
-    for entry in &pending {
-        let image = Path::new(&entry.jpg_path);
-        let exif = PathBuf::from(format!("{}.exif", entry.jpg_path));
-        if !exif.is_file() {
-            let filename = image
-                .file_name()
-                .ok_or_else(|| AppError::Invalid("invalid image filename".into()))?;
-            let copied_image = temp_root.join(filename);
-            fs::copy(image, &copied_image)?;
-            copied_images.push((copied_image, exif.clone()));
+    let mut work = Vec::with_capacity(total);
+    for (index, entry) in pending.into_iter().enumerate() {
+        let image_path = PathBuf::from(&entry.jpg_path);
+        let sidecar = PathBuf::from(format!("{}.exif", entry.jpg_path));
+        let mut item = PendingExifWork {
+            entry,
+            sidecar: sidecar.is_file().then_some(sidecar),
+            direct_partial: false,
+            copied_image: None,
+            direct_written: false,
+        };
+        if target_counts.get(&item.entry.toml_path.to_ascii_lowercase()).copied().unwrap_or(0) > 1 {
+            tracing::warn!(path = %image_path.display(), "ambiguous image metadata stem; not exporting a guessed sidecar");
+            item.sidecar = None;
+            work.push(item);
+            on_progress(ExifParseProgress { stage: "EXIF", completed: index + 1, total });
+            continue;
         }
-        exif_paths.push(exif);
+
+        if Path::new(&item.entry.toml_path).is_file() {
+            // Import has already inspected the JPEG, even for partial/native
+            // or metadata-only files. DP is last resort, not a second decoder pass.
+            item.direct_partial = MetadataSource::prepared(Path::new(&item.entry.toml_path))
+                .and_then(|source| source.read_text()).ok()
+                .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+                .and_then(|root| metadata_import::read_preparation(&root))
+                .is_some_and(|info| info.selected_source == "jpeg");
+            if item.sidecar.is_none() {
+                if let Some(root) = temp_root.as_ref() {
+                    item.copied_image = copy_fallback_image(root, &image_path, index);
+                }
+            }
+            work.push(item);
+            on_progress(ExifParseProgress { stage: "EXIF", completed: index + 1, total });
+            continue;
+        }
+
+        let direct_result = read_jpeg_metadata(&image_path)
+            .map_err(AppError::from)
+            .and_then(|data| mtk_exif::decode_to_toml(&data).map_err(AppError::Other));
+
+        match direct_result {
+            Ok(output) if output.needs_fallback => {
+                // Supported tags remain available through the lazy JPEG reader.
+                // Never write a partial sidecar that would mask a later DP retry.
+                item.direct_partial = true;
+                if item.sidecar.is_none() {
+                    if let Some(root) = temp_root.as_ref() {
+                        item.copied_image = copy_fallback_image(root, &image_path, index);
+                    }
+                }
+            }
+            Ok(output) => {
+                tracing::debug!(path = %image_path.display(), bytes = output.toml.len(), "direct MTK EXIF decoded");
+                let export = exif_document::stamp_export(&output.toml, "native", output.modules, false);
+                if let Err(error) = export.and_then(|contents| write_toml_atomic(Path::new(&item.entry.toml_path), &contents).map_err(AppError::from)) {
+                    tracing::warn!(path = %item.entry.toml_path, %error, "write direct image TOML failed");
+                } else {
+                    item.direct_written = true;
+                }
+            }
+            Err(error) => {
+                tracing::debug!(path = %image_path.display(), %error, "direct MTK EXIF decode unavailable");
+                if item.sidecar.is_none() && can_fallback {
+                    if let Some(root) = temp_root.as_ref() {
+                        item.copied_image = copy_fallback_image(root, &image_path, index);
+                    }
+                }
+            }
+        }
+        work.push(item);
+        on_progress(ExifParseProgress { stage: "EXIF", completed: index + 1, total });
     }
 
-    let existing_exif = total - copied_images.len();
-    let mut exif_completed = 0;
-    if existing_exif > exif_completed {
-        exif_completed = existing_exif;
-        on_progress(ExifParseProgress { stage: "EXIF", completed: exif_completed, total });
-    }
-    if !copied_images.is_empty() {
-        match spawn_debug_parser(parser_path, &temp_root) {
+    let fallback_items = work.iter().filter(|item| item.copied_image.is_some()).count();
+    if fallback_items > 0 {
+        on_progress(ExifParseProgress { stage: "DP", completed: 0, total: fallback_items });
+        let root = temp_root.as_ref().expect("fallback work requires a temp directory");
+        let parser = parser_path.expect("fallback work requires a parser path");
+        match spawn_debug_parser(parser, root) {
             Ok(mut child) => loop {
-                let generated = copied_images.iter().filter(|(image, _)| {
-                    PathBuf::from(format!("{}.exif", image.display())).is_file()
-                }).count();
-                let completed = existing_exif + generated;
-                if completed > exif_completed {
-                    exif_completed = completed;
-                    on_progress(ExifParseProgress { stage: "EXIF", completed, total });
-                }
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         if !status.success() {
@@ -174,40 +328,88 @@ pub fn parse_exif_directory(
             },
             Err(error) => tracing::warn!(%error, "DebugParser launch failed"),
         }
-
-        for (copied_image, target) in &copied_images {
-            let generated = PathBuf::from(format!("{}.exif", copied_image.display()));
-            if generated.is_file() {
-                if let Err(error) = fs::copy(generated, target) {
-                    tracing::warn!(path = %target.display(), %error, "copy generated EXIF failed");
-                }
-            }
-        }
-    }
-    if exif_completed < total {
-        on_progress(ExifParseProgress { stage: "EXIF", completed: total, total });
+        on_progress(ExifParseProgress { stage: "DP", completed: fallback_items, total: fallback_items });
     }
 
     on_progress(ExifParseProgress { stage: "TOML", completed: 0, total });
-    for (index, (entry, exif)) in pending.iter().zip(exif_paths.iter()).enumerate() {
-        match exif_to_toml(exif) {
-            Ok(Some(contents)) => {
-                if let Err(error) = fs::write(&entry.toml_path, contents) {
-                    tracing::warn!(path = %entry.toml_path, %error, "write image TOML failed");
-                    summary.failed += 1;
-                } else {
-                    summary.processed += 1;
+    for (index, item) in work.into_iter().enumerate() {
+        if item.direct_written {
+            summary.processed += 1;
+            summary.direct += 1;
+        } else {
+            let sidecar = item.sidecar.or_else(|| item.copied_image
+                .map(|image| PathBuf::from(format!("{}.exif", image.display()))));
+            let contents = match sidecar.as_ref().map(|path| exif_to_toml(path)) {
+                Some(Ok(contents)) => contents,
+                Some(Err(error)) => {
+                    tracing::warn!(path = %item.entry.jpg_path, %error, "read EXIF fallback failed");
+                    None
                 }
-            }
-            Ok(None) => summary.failed += 1,
-            Err(error) => {
-                tracing::warn!(path = %exif.display(), %error, "read generated EXIF failed");
+                None => None,
+            };
+            if let Some(contents) = contents {
+                match metadata_import::apply_debug_parser_fallback(Path::new(&item.entry.jpg_path), Path::new(&item.entry.toml_path), &contents) {
+                    Ok(true) => {
+                        summary.processed += 1;
+                        summary.fallback += 1;
+                    }
+                    Ok(false) if item.direct_partial => {
+                        summary.processed += 1;
+                        summary.direct += 1;
+                        summary.partial += 1;
+                    }
+                    Ok(false) => summary.failed += 1,
+                    Err(error) => {
+                        tracing::warn!(path = %item.entry.toml_path, %error, "write image TOML failed");
+                        summary.failed += 1;
+                    }
+                }
+            } else if item.direct_partial {
+                summary.processed += 1;
+                summary.direct += 1;
+                summary.partial += 1;
+            } else {
                 summary.failed += 1;
             }
         }
         on_progress(ExifParseProgress { stage: "TOML", completed: index + 1, total });
     }
     Ok(summary)
+}
+
+fn copy_fallback_image(root: &Path, source: &Path, index: usize) -> Option<PathBuf> {
+    let filename = source.file_name()?.to_owned();
+    let mut target = root.join(&filename);
+    if target.exists() {
+        target = root.join(format!("{index:06}_{}", filename.to_string_lossy()));
+    }
+    match fs::copy(source, &target) {
+        Ok(_) => Some(target),
+        Err(error) => {
+            tracing::warn!(path = %source.display(), %error, "copy image for DebugParser fallback failed");
+            None
+        }
+    }
+}
+
+fn write_toml_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+    let filename = path.file_name().and_then(|value| value.to_str()).unwrap_or("image.toml");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = path.with_file_name(format!(".{filename}.luxe-{}-{nonce}-{}.tmp", std::process::id(), next_cache_tick()));
+    if let Err(error) = fs::write(&temporary, contents) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    match fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            Err(error)
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -283,37 +485,8 @@ fn exif_to_toml(path: &Path) -> AppResult<Option<String>> {
     if !path.is_file() {
         return Ok(None);
     }
-    let text = fs::read_to_string(path)?;
-    let mut root = toml::map::Map::new();
-    let mut section: Option<String> = None;
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        if line.starts_with('[') && line.ends_with(']') {
-            let name = line[1..line.len() - 1].trim();
-            section = (!name.is_empty()).then(|| name.to_string());
-            continue;
-        }
-        for pair in line.split('|') {
-            let Some((key, value)) = pair.split_once(':') else { continue };
-            let key = key.trim();
-            let value = value.trim();
-            if key.is_empty() || value.is_empty() { continue; }
-            let parsed = if let Ok(number) = value.parse::<i64>() {
-                toml::Value::Integer(number)
-            } else if let Ok(number) = value.parse::<f64>() {
-                if number.is_finite() { toml::Value::Float(number) } else { toml::Value::String(value.into()) }
-            } else {
-                toml::Value::String(value.into())
-            };
-            if let Some(name) = section.as_ref() {
-                let table = root.entry(name.clone()).or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-                if let toml::Value::Table(fields) = table { fields.insert(key.into(), parsed); }
-            } else {
-                root.insert(key.into(), parsed);
-            }
-        }
-    }
-    if root.is_empty() { return Ok(None); }
-    Ok(Some(toml::to_string(&toml::Value::Table(root))?))
+    let text = MetadataSource::resolve(path)?.read_text()?;
+    exif_document::debug_parser_to_toml(&text)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,12 +498,14 @@ struct TomlSignature {
 struct CachedToml {
     signature: TomlSignature,
     data:      HashMap<String, String>,
+    bytes: usize,
     last_used: AtomicU64,
 }
 
 struct CachedTomlFields {
     signature: TomlSignature,
     data:      HashMap<String, String>,
+    bytes: usize,
     last_used: AtomicU64,
 }
 
@@ -458,7 +633,35 @@ fn prune_cache<T>(
     }
 }
 
-/// Load a single image TOML and flatten it into a key → value map.
+fn metadata_map_bytes(data: &HashMap<String, String>) -> usize {
+    data.capacity().saturating_mul(std::mem::size_of::<(String, String)>() + 1)
+        .saturating_add(data.iter().map(|(key, value)| key.capacity() + value.capacity()).sum::<usize>())
+}
+
+fn prune_metadata_cache<T>(
+    cache: &DashMap<String, Arc<T>>,
+    limit: usize,
+    budget: usize,
+    describe: impl Fn(&T) -> (u64, usize),
+) {
+    let mut entries: Vec<_> = cache.iter().map(|entry| {
+        let (used, bytes) = describe(entry.value().as_ref());
+        (entry.key().clone(), used, bytes)
+    }).collect();
+    let mut count = entries.len();
+    let mut bytes = entries.iter().map(|(_, _, bytes)| *bytes).sum::<usize>();
+    if count <= limit && bytes <= budget { return; }
+    entries.sort_by_key(|(_, used, _)| *used);
+    for (key, _, size) in entries {
+        if count <= limit && bytes <= budget { break; }
+        cache.remove(&key);
+        count = count.saturating_sub(1);
+        bytes = bytes.saturating_sub(size);
+    }
+}
+
+/// Load a sidecar, or lazily decode a sibling JPEG when the sidecar is absent.
+/// The logical path and the existing key/value IPC contract stay unchanged.
 ///
 /// Flattening rules (mirrors hiz `_flatten_toml_items`):
 /// - For every nested map node, walk recursively and record leaves.
@@ -468,18 +671,40 @@ fn prune_cache<T>(
 /// - Arrays are joined with ", " (so the value is a single string just like
 ///   the Python flattener returns).
 pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
+    load_image_toml_with_progress(path, |_| {})
+}
+
+pub fn load_image_toml_with_progress(
+    path: &Path, on_progress: impl FnMut(ExifParseProgress),
+) -> AppResult<HashMap<String, String>> {
+    load_metadata_map(path, MetadataSource::resolve(path)?, on_progress)
+}
+
+/// UI entry: never decode a JPEG implicitly after import.
+pub fn load_prepared_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
+    load_metadata_map(path, MetadataSource::prepared(path)?, |_| {})
+}
+
+fn load_metadata_map(
+    path: &Path, source: MetadataSource, mut on_progress: impl FnMut(ExifParseProgress),
+) -> AppResult<HashMap<String, String>> {
     let generation = CACHE_GENERATION.load(Ordering::Acquire);
-    let cache_key = path.to_string_lossy().into_owned();
-    let signature = toml_signature(path)?;
+    let cache_key = format!("{}\0{}", path.to_string_lossy(), source.cache_identity());
+    let signature = toml_signature(source.path())?;
 
     if let Some(cached) = TOML_CACHE.get(&cache_key) {
         if cached.signature == signature {
             cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+            on_progress(source.progress(source.progress_total()));
             return Ok(cached.data.clone());
         }
     }
 
-    let data = parse_image_toml(path)?;
+    let text = source.read_text_with_progress(&mut on_progress)?;
+    let root: toml::Value = toml::from_str(&text)?;
+    let mut data = HashMap::new();
+    walk(&root, "", &mut data);
+    on_progress(source.progress(source.progress_total()));
     let _write = CACHE_WRITE_LOCK.lock();
     if generation != CACHE_GENERATION.load(Ordering::Acquire) {
         return Ok(data);
@@ -488,17 +713,26 @@ pub fn load_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
         cache_key,
         Arc::new(CachedToml {
             signature,
+            bytes: metadata_map_bytes(&data),
             data: data.clone(),
             last_used: AtomicU64::new(next_cache_tick()),
         }),
     );
-    prune_cache(&TOML_CACHE, TOML_CACHE_LIMIT, |entry| {
-        entry.last_used.load(Ordering::Relaxed)
+    prune_metadata_cache(&TOML_CACHE, TOML_CACHE_LIMIT, TOML_CACHE_BYTES_LIMIT, |entry| {
+        (entry.last_used.load(Ordering::Relaxed), entry.bytes)
     });
     Ok(data)
 }
 
 pub fn load_image_toml_batch(paths: Vec<String>) -> AppResult<HashMap<String, HashMap<String, String>>> {
+    metadata_map_batch(paths, false)
+}
+
+pub fn load_prepared_image_toml_batch(paths: Vec<String>) -> AppResult<HashMap<String, HashMap<String, String>>> {
+    metadata_map_batch(paths, true)
+}
+
+fn metadata_map_batch(paths: Vec<String>, prepared_only: bool) -> AppResult<HashMap<String, HashMap<String, String>>> {
     let mut out = HashMap::with_capacity(paths.len());
 
     for path in paths {
@@ -506,7 +740,8 @@ pub fn load_image_toml_batch(paths: Vec<String>) -> AppResult<HashMap<String, Ha
             continue;
         }
 
-        match load_image_toml(Path::new(&path)) {
+        let data = if prepared_only { load_prepared_image_toml(Path::new(&path)) } else { load_image_toml(Path::new(&path)) };
+        match data {
             Ok(data) => {
                 out.insert(path, data);
             }
@@ -521,8 +756,19 @@ pub fn load_image_toml_batch(paths: Vec<String>) -> AppResult<HashMap<String, Ha
 }
 
 pub fn load_image_toml_fields_batch(
-    paths: Vec<String>,
-    keys: Vec<String>,
+    paths: Vec<String>, keys: Vec<String>,
+) -> AppResult<HashMap<String, HashMap<String, String>>> {
+    metadata_fields_batch(paths, keys, false)
+}
+
+pub fn load_prepared_image_toml_fields_batch(
+    paths: Vec<String>, keys: Vec<String>,
+) -> AppResult<HashMap<String, HashMap<String, String>>> {
+    metadata_fields_batch(paths, keys, true)
+}
+
+fn metadata_fields_batch(
+    paths: Vec<String>, keys: Vec<String>, prepared_only: bool,
 ) -> AppResult<HashMap<String, HashMap<String, String>>> {
     let request_keys: Vec<String> = keys
         .into_iter()
@@ -546,7 +792,7 @@ pub fn load_image_toml_fields_batch(
         .map(|path| {
             (
                 path.clone(),
-                load_image_toml_fields_for_batch(path, &key_lookup, &key_signature),
+                load_image_toml_fields_for_batch(path, &key_lookup, &key_signature, prepared_only),
             )
         })
         .collect();
@@ -557,8 +803,9 @@ fn load_image_toml_fields_for_batch(
     path: &str,
     key_lookup: &HashMap<String, String>,
     key_signature: &str,
+    prepared_only: bool,
 ) -> HashMap<String, String> {
-    match load_image_toml_fields(Path::new(path), key_lookup, key_signature) {
+    match load_image_toml_fields(Path::new(path), key_lookup, key_signature, prepared_only) {
         Ok(data) => data,
         Err(err) => {
             tracing::warn!(%path, %err, "image TOML field batch item failed");
@@ -571,15 +818,17 @@ fn load_image_toml_fields(
     path: &Path,
     key_lookup: &HashMap<String, String>,
     key_signature: &str,
+    prepared_only: bool,
 ) -> AppResult<HashMap<String, String>> {
     let generation = CACHE_GENERATION.load(Ordering::Acquire);
     if key_lookup.is_empty() {
         return Ok(HashMap::new());
     }
 
+    let source = if prepared_only { MetadataSource::prepared(path)? } else { MetadataSource::resolve(path)? };
     let path_key = path.to_string_lossy().into_owned();
-    let cache_key = format!("{path_key}\0{key_signature}");
-    let signature = toml_signature(path)?;
+    let cache_key = format!("{path_key}\0{}\0{key_signature}", source.cache_identity());
+    let signature = toml_signature(source.path())?;
 
     if let Some(cached) = TOML_FIELD_CACHE.get(&cache_key) {
         if cached.signature == signature {
@@ -588,7 +837,20 @@ fn load_image_toml_fields(
         }
     }
 
-    let data = parse_image_toml_fields(path, key_lookup)?;
+    // The selected image may already have a full map. Reuse only the requested
+    // fields without cloning that map or decoding its JPEG a second time.
+    let full_cache_key = format!("{path_key}\0{}", source.cache_identity());
+    let cached_fields = TOML_CACHE.get(&full_cache_key).and_then(|cached| {
+        if cached.signature != signature { return None; }
+        cached.last_used.store(next_cache_tick(), Ordering::Relaxed);
+        Some(key_lookup.iter().filter_map(|(normalized, requested)| {
+            cached.data.get(normalized).map(|value| (requested.clone(), value.clone()))
+        }).collect::<HashMap<String, String>>())
+    });
+    let data = match cached_fields {
+        Some(data) => data,
+        None => parse_image_toml_fields(&source, key_lookup)?,
+    };
     let _write = CACHE_WRITE_LOCK.lock();
     if generation != CACHE_GENERATION.load(Ordering::Acquire) {
         return Ok(data);
@@ -597,12 +859,13 @@ fn load_image_toml_fields(
         cache_key,
         Arc::new(CachedTomlFields {
             signature,
+            bytes: metadata_map_bytes(&data),
             data: data.clone(),
             last_used: AtomicU64::new(next_cache_tick()),
         }),
     );
-    prune_cache(&TOML_FIELD_CACHE, TOML_FIELD_CACHE_LIMIT, |entry| {
-        entry.last_used.load(Ordering::Relaxed)
+    prune_metadata_cache(&TOML_FIELD_CACHE, TOML_FIELD_CACHE_LIMIT, TOML_FIELD_CACHE_BYTES_LIMIT, |entry| {
+        (entry.last_used.load(Ordering::Relaxed), entry.bytes)
     });
     Ok(data)
 }
@@ -1230,16 +1493,16 @@ fn read_tiff_u32(buf: &[u8], offset: usize, endian: TiffEndian) -> Option<u32> {
     })
 }
 
-fn parse_image_toml(path: &Path) -> AppResult<HashMap<String, String>> {
-    let text = fs::read_to_string(path)?;
-    let root: toml::Value = toml::from_str(&text)?;
-    let mut out: HashMap<String, String> = HashMap::new();
-    walk(&root, "", &mut out);
-    Ok(out)
+pub fn load_image_toml_sections(path: &Path) -> AppResult<Vec<ImageTomlSection>> {
+    project_metadata_sections(MetadataSource::resolve(path)?)
 }
 
-pub fn load_image_toml_sections(path: &Path) -> AppResult<Vec<ImageTomlSection>> {
-    let text = fs::read_to_string(path)?;
+pub fn load_prepared_image_toml_sections(path: &Path) -> AppResult<Vec<ImageTomlSection>> {
+    project_metadata_sections(MetadataSource::prepared(path)?)
+}
+
+fn project_metadata_sections(source: MetadataSource) -> AppResult<Vec<ImageTomlSection>> {
+    let text = source.read_text()?;
     let root: toml::Value = toml::from_str(&text)?;
     let mut sections = Vec::new();
     if let toml::Value::Table(table) = root {
@@ -1269,6 +1532,7 @@ fn collect_toml_sections(
         });
     }
     for (key, value) in table {
+        if prefix.is_empty() && key == "__luxe_exif" { continue; }
         let name = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
         match value {
             toml::Value::Table(child) => collect_toml_sections(&name, child, sections),
@@ -1300,10 +1564,10 @@ fn selected_key_lookup(keys: &[String]) -> HashMap<String, String> {
 }
 
 fn parse_image_toml_fields(
-    path: &Path,
+    source: &MetadataSource,
     key_lookup: &HashMap<String, String>,
 ) -> AppResult<HashMap<String, String>> {
-    let text = fs::read_to_string(path)?;
+    let text = source.read_text()?;
     if let Some(out) = fast_parse_image_toml_fields(&text, key_lookup) {
         return Ok(out);
     }
@@ -1326,8 +1590,15 @@ fn fast_parse_image_toml_fields(
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line.starts_with("[[") {
-            return None;
+        if let Some(array_header) = line.strip_prefix("[[") {
+            let (name, trailing) = array_header.split_once("]]")?;
+            let array_section = parse_toml_key_path(name.trim())?;
+            if !strip_inline_comment(trailing)?.trim().is_empty()
+                || !array_section.first().is_some_and(|name| matches!(name.as_str(), "__luxe_exif" | "AE_Table")) {
+                return None;
+            }
+            section = array_section;
+            continue;
         }
 
         if line.starts_with('[') {
@@ -1340,6 +1611,9 @@ fn fast_parse_image_toml_fields(
             continue;
         }
 
+        if section.first().is_some_and(|name| matches!(name.as_str(), "__luxe_exif" | "AE_Table")) {
+            continue;
+        }
         let Some(eq_pos) = find_unquoted_char(line, '=') else {
             continue;
         };
@@ -1372,6 +1646,9 @@ fn compose_toml_path(section: &[String], key_path: &[String]) -> String {
 }
 
 fn is_selected_toml_path(full_path: &str, key_lookup: &HashMap<String, String>) -> bool {
+    if matches!(full_path.split('.').next(), Some("__luxe_exif" | "AE_Table")) {
+        return false;
+    }
     if key_lookup.contains_key(&full_path.to_ascii_lowercase()) {
         return true;
     }
@@ -1627,6 +1904,11 @@ fn walk_selected(
     match v {
         toml::Value::Table(t) => {
             for (k, child) in t.iter() {
+                // Statistics and provenance are presentation-only; never let
+                // their generic leaf names shadow existing camera keywords.
+                if prefix.is_empty() && matches!(k.as_str(), "__luxe_exif" | "AE_Table") {
+                    continue;
+                }
                 let full = if prefix.is_empty() {
                     k.clone()
                 } else {
@@ -1669,6 +1951,11 @@ fn walk(v: &toml::Value, prefix: &str, out: &mut HashMap<String, String>) {
     match v {
         toml::Value::Table(t) => {
             for (k, child) in t.iter() {
+                // Statistics and provenance are presentation-only; never let
+                // their generic leaf names shadow existing camera keywords.
+                if prefix.is_empty() && matches!(k.as_str(), "__luxe_exif" | "AE_Table") {
+                    continue;
+                }
                 let full = if prefix.is_empty() {
                     k.clone()
                 } else {
@@ -1716,6 +2003,28 @@ fn stringify(v: &toml::Value) -> String {
         toml::Value::Boolean(b)  => b.to_string(),
         toml::Value::Datetime(d) => d.to_string(),
         toml::Value::Array(_) | toml::Value::Table(_) => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod metadata_budget_tests {
+    use super::prune_metadata_cache;
+    use dashmap::DashMap;
+    use std::sync::Arc;
+
+    #[test]
+    fn metadata_lru_enforces_both_count_and_payload_budget() {
+        let cache = DashMap::new();
+        for (name, tick) in [("old", 1), ("middle", 2), ("new", 3)] {
+            cache.insert(name.to_string(), Arc::new((tick, 1024usize)));
+        }
+        prune_metadata_cache(&cache, 96, 1500, |entry| *entry);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains_key("new"));
+        cache.insert("newer".into(), Arc::new((4, 100usize)));
+        prune_metadata_cache(&cache, 1, 8192, |entry| *entry);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains_key("newer"));
     }
 }
 

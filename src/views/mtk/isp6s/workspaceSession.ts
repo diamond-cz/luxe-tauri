@@ -9,7 +9,7 @@ export interface WorkspaceSession {
   imageDir: string | null;
   imagePath: string | null;
   imageScrollPath: string | null;
-  selectedToml: { dir: string; path: string; data: Record<string, string> } | null;
+  selectedToml: { dir: string; path: string; revision: number; data: Record<string, string> } | null;
   imageScroll: ScrollPosition | null;
   detailsTab: DetailsTab;
   detailsScroll: Partial<Record<DetailsTab, ScrollPosition>>;

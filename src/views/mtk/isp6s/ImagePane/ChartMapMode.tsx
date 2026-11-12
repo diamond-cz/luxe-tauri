@@ -65,6 +65,7 @@ interface Props {
   sourceBasePath: string;
   schema:   Isp6sSchemaRoot;
   entries: ImageEntry[];
+  imageDataRevision?: number;
   currentImagePath?: string;
   visibleHeatmapPaths?: string[] | null;
   selectedHeatmapPaths?: string[];
@@ -855,6 +856,7 @@ export function ChartMapMode({
   sourceBasePath,
   schema,
   entries,
+  imageDataRevision = 0,
   currentImagePath,
   visibleHeatmapPaths,
   selectedHeatmapPaths = [],
@@ -925,6 +927,7 @@ export function ChartMapMode({
   const [heatmapRetry, setHeatmapRetry] = useState(0);
   const [heatmapRows, setHeatmapRows] = useState<{
     entries: ImageEntry[];
+    revision: number;
     bvKey: string;
     fieldsKey: string;
     rows: Record<string, Record<string, string>>;
@@ -1043,14 +1046,15 @@ export function ChartMapMode({
     loadImageTomlFieldsBatchShared(
       entries.map((entry) => entry.toml_path),
       requestedHeatmapFields,
+      { entries, revision: imageDataRevision },
     ).then((rows) => {
-      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows, failed: false });
+      if (!cancelled) setHeatmapRows({ entries, revision: imageDataRevision, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows, failed: false });
     }).catch(() => {
-      if (!cancelled) setHeatmapRows({ entries, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows: {}, failed: true });
+      if (!cancelled) setHeatmapRows({ entries, revision: imageDataRevision, bvKey: heatmapBvKey, fieldsKey: requestedHeatmapFieldsKey, rows: {}, failed: true });
     });
     return () => { cancelled = true; };
-  }, [entries, heatmapBvKey, heatmapRequested, heatmapRetry, requestedHeatmapFields, requestedHeatmapFieldsKey]);
-  const currentHeatmapRows = heatmapRows?.entries === entries && heatmapRows.bvKey === heatmapBvKey
+  }, [entries, imageDataRevision, heatmapBvKey, heatmapRequested, heatmapRetry, requestedHeatmapFields, requestedHeatmapFieldsKey]);
+  const currentHeatmapRows = heatmapRows?.entries === entries && heatmapRows.revision === imageDataRevision && heatmapRows.bvKey === heatmapBvKey
     && heatmapRows.fieldsKey === requestedHeatmapFieldsKey
     ? heatmapRows
     : null;

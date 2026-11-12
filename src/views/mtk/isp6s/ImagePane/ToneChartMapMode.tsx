@@ -30,6 +30,7 @@ interface Props {
   caLtmMessage: string | null;
   tomlData: Record<string, string>;
   entries: ImageEntry[];
+  imageDataRevision?: number;
   visibleHeatmapPaths?: string[] | null;
   sourceDraftText: string | null;
   sourceInitialText: string | null;
@@ -337,7 +338,7 @@ function buildCaLtmGroups(result: ParseResult): ToneGroup[] {
 
 export function ToneChartMapMode({
   filePath, parsed, caLtmParsed, caLtmPath, caLtmSourcePath, caLtmSourceRevision, caLtmStatus, caLtmMessage,
-  tomlData, entries, visibleHeatmapPaths, sourceDraftText, sourceInitialText, sourceSavedText,
+  tomlData, entries, imageDataRevision = 0, visibleHeatmapPaths, sourceDraftText, sourceInitialText, sourceSavedText,
   onSourceDraftTextChange, onSaveSourceDraft, onSelectHeatmapImages, onSourceJump,
 }: Props) {
   const [result, setResult] = useState(parsed);
@@ -353,7 +354,7 @@ export function ToneChartMapMode({
       return [id, { enabled: saved?.enabled ?? false, showCounts: saved?.show_hit_counts ?? true }];
     }),
   ) as Record<ToneLceTableId, HeatmapMode>;
-  const [heatmapData, setHeatmapData] = useState<{ entries: ImageEntry[]; points: HeatmapPoint[]; failed: boolean } | null>(null);
+  const [heatmapData, setHeatmapData] = useState<{ entries: ImageEntry[]; revision: number; points: HeatmapPoint[]; failed: boolean } | null>(null);
   const [heatmapRetry, setHeatmapRetry] = useState(0);
   const sourceDraftRef = useRef(sourceDraftText);
   sourceDraftRef.current = sourceDraftText;
@@ -362,16 +363,16 @@ export function ToneChartMapMode({
   useEffect(() => {
     if (!heatmapRequested || entries.length === 0) return;
     let cancelled = false;
-    loadImageTomlFieldsBatchShared(entries.map((entry) => entry.toml_path), TONE_HEATMAP_KEYS)
+    loadImageTomlFieldsBatchShared(entries.map((entry) => entry.toml_path), TONE_HEATMAP_KEYS, { entries, revision: imageDataRevision })
       .then((rows) => {
-        if (!cancelled) setHeatmapData({ entries, points: entries.map((entry) => ({
+        if (!cancelled) setHeatmapData({ entries, revision: imageDataRevision, points: entries.map((entry) => ({
           path: entry.toml_path, position: imagePosition(rows[entry.toml_path] ?? {}),
         })), failed: false });
       })
-      .catch(() => { if (!cancelled) setHeatmapData({ entries, points: [], failed: true }); });
+      .catch(() => { if (!cancelled) setHeatmapData({ entries, revision: imageDataRevision, points: [], failed: true }); });
     return () => { cancelled = true; };
-  }, [entries, heatmapRequested, heatmapRetry]);
-  const currentHeatmap = heatmapData?.entries === entries ? heatmapData : null;
+  }, [entries, imageDataRevision, heatmapRequested, heatmapRetry]);
+  const currentHeatmap = heatmapData?.entries === entries && heatmapData.revision === imageDataRevision ? heatmapData : null;
   const visibleHeatmapPathSet = useMemo(() => visibleHeatmapPaths == null ? null : new Set(visibleHeatmapPaths), [visibleHeatmapPaths]);
   const visibleHeatmapPoints = useMemo(() => visibleHeatmapPathSet && currentHeatmap
     ? currentHeatmap.points.filter((point) => visibleHeatmapPathSet.has(point.path)) : currentHeatmap?.points ?? [],

@@ -16,11 +16,12 @@ fn existing_exif_generates_toml_and_existing_toml_is_preserved() {
     fs::write(dir.join("existing.toml"), "AE_TAG_CWV = 789\n").unwrap();
 
     let mut progress = Vec::new();
-    let result = parse_exif_directory(&parser, &dir, |event| {
+    let result = parse_exif_directory(Some(&parser), &dir, |event| {
         progress.push((event.stage, event.completed, event.total));
     }).unwrap();
 
     assert_eq!((result.processed, result.skipped, result.failed, result.total), (1, 1, 0, 2));
+    assert_eq!((result.direct, result.fallback), (0, 1));
     let generated = fs::read_to_string(dir.join("new.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&generated).unwrap();
     assert_eq!(parsed["AE"]["AE_TAG_REALBVX1000"].as_integer(), Some(123));
