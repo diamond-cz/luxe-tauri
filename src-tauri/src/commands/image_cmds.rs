@@ -24,6 +24,7 @@ pub async fn parse_image_exif(
     image_dir: String,
     on_progress: Channel<image_scan::ExifParseProgress>,
 ) -> AppResult<image_scan::ExifParseSummary> {
+    let _ = on_progress.send(image_scan::ExifParseProgress { stage: "QUEUED", completed: 0, total: 0 });
     let _permit = EXIF_TASKS.acquire().await
         .map_err(|error| AppError::Other(format!("EXIF task queue closed: {error}")))?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -42,6 +43,7 @@ pub async fn parse_image_exif(
 pub async fn prepare_image_metadata(
     image_dir: String, on_progress: Channel<image_scan::ExifParseProgress>,
 ) -> AppResult<image_scan::ImageMetadataPreparationResult> {
+    let _ = on_progress.send(image_scan::ExifParseProgress { stage: "QUEUED", completed: 0, total: 0 });
     let _permit = EXIF_TASKS.acquire().await
         .map_err(|error| AppError::Other(format!("metadata preparation queue closed: {error}")))?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -50,14 +52,15 @@ pub async fn prepare_image_metadata(
 }
 
 #[tauri::command]
-pub async fn merge_image_metadata(
+pub async fn replace_image_metadata(
     image_dir: String, image_paths: Vec<String>, on_progress: Channel<image_scan::ExifParseProgress>,
 ) -> AppResult<image_scan::ImageMetadataPreparationResult> {
+    let _ = on_progress.send(image_scan::ExifParseProgress { stage: "QUEUED", completed: 0, total: 0 });
     let _permit = EXIF_TASKS.acquire().await
-        .map_err(|error| AppError::Other(format!("metadata merge queue closed: {error}")))?;
-    tauri::async_runtime::spawn_blocking(move || image_scan::merge_image_metadata(&PathBuf::from(image_dir), image_paths,
+        .map_err(|error| AppError::Other(format!("metadata replacement queue closed: {error}")))?;
+    tauri::async_runtime::spawn_blocking(move || image_scan::replace_image_metadata(&PathBuf::from(image_dir), image_paths,
         |progress| { let _ = on_progress.send(progress); }))
-        .await.map_err(|error| AppError::Other(format!("metadata merge task failed: {error}")))?
+        .await.map_err(|error| AppError::Other(format!("metadata replacement task failed: {error}")))?
 }
 
 #[tauri::command]

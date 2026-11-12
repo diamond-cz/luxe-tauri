@@ -1,8 +1,9 @@
-//! Bounded metadata preparation, explicit native merge, and explicit DP replace.
+//! Bounded metadata preparation and explicit native/DP replacement.
 //!
-//! Automatic import reuses every valid TOML byte-for-byte. Only the explicit
-//! merge action inspects JPEGs behind existing TOMLs. A fixed 1-2 worker pool
-//! owns at most two per-image documents; completion messages contain no payload.
+//! Automatic import reuses every valid TOML byte-for-byte. Explicit native
+//! replacement discards old payload only after a usable fresh JPEG decode; the
+//! legacy merge API remains additive. A fixed 1-2 worker pool owns at most two
+//! per-image documents; completion messages contain no payload.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
@@ -47,7 +48,7 @@ pub struct ImageMetadataPreparationResult {
 pub struct ImageMetadataPreparationSummary {
     pub total: usize,
     pub created: usize,
-    /// Existing files successfully changed by an explicit native merge.
+    /// Existing files successfully written by an explicit native operation.
     pub replaced: usize,
     pub retained: usize,
     /// Valid existing TOMLs reused automatically, without JPEG reads or writes.
@@ -96,6 +97,7 @@ pub(super) fn read_preparation(root: &toml::Value) -> Option<ImageMetadataPrepar
 enum PreparationMode {
     Automatic,
     NativeMerge,
+    NativeReplace,
 }
 
 /// Existing valid TOMLs, including unmarked legacy or metadata-only TOMLs,
@@ -112,8 +114,8 @@ pub fn prepare_image_metadata(
     )
 }
 
-/// Explicitly inspect JPEGs and add missing observations without replacing old
-/// same-key values. Empty selection means the entire current image directory.
+/// Legacy additive API: inspect JPEGs and add missing observations without
+/// replacing old same-key values. Empty selection means the entire directory.
 pub fn merge_image_metadata(
     image_dir: &Path,
     image_paths: Vec<String>,
@@ -123,6 +125,23 @@ pub fn merge_image_metadata(
         image_dir,
         image_paths,
         PreparationMode::NativeMerge,
+        on_progress,
+    )
+}
+
+/// Explicitly replace sidecars with only usable fresh native JPEG content.
+/// Existing bytes are never parsed or merged; unavailable native content leaves
+/// them untouched and reports unavailable so callers can offer DebugParser.
+/// Empty selection means the entire current image directory.
+pub fn replace_image_metadata(
+    image_dir: &Path,
+    image_paths: Vec<String>,
+    on_progress: impl FnMut(ExifParseProgress),
+) -> AppResult<ImageMetadataPreparationResult> {
+    run_preparation(
+        image_dir,
+        image_paths,
+        PreparationMode::NativeReplace,
         on_progress,
     )
 }
@@ -198,7 +217,7 @@ fn run_preparation(
                     Ok(outcome) => {
                         match outcome.decision {
                             OutcomeKind::Created => summary.created += 1,
-                            OutcomeKind::Merged => summary.replaced += 1,
+                            OutcomeKind::Replaced => summary.replaced += 1,
                             OutcomeKind::Retained => summary.retained += 1,
                             OutcomeKind::Reused => summary.cached += 1,
                             OutcomeKind::Unavailable => summary.unavailable += 1,
@@ -236,10 +255,10 @@ fn run_preparation(
         super::clear_memory_caches();
     }
     tracing::info!(
-        operation = if matches!(mode, PreparationMode::Automatic) {
-            "automatic"
-        } else {
-            "native_merge"
+        operation = match mode {
+            PreparationMode::Automatic => "automatic",
+            PreparationMode::NativeMerge => "native_merge",
+            PreparationMode::NativeReplace => "native_replace",
         },
         total,
         reused = summary.cached,
@@ -293,7 +312,7 @@ fn select_entries(
 #[derive(Clone, Copy)]
 enum OutcomeKind {
     Created,
-    Merged,
+    Replaced,
     Retained,
     Reused,
     Unavailable,
@@ -319,7 +338,14 @@ fn prepare_one(
         .regular_file(image)?
         .ok_or_else(|| AppError::NotFound(format!("image disappeared: {}", image.display())))?;
     let previous = FileSnapshot::read(scope, target)?;
-    let previous_root = previous.as_ref().map(FileSnapshot::parse).transpose()?;
+    // An explicit native replacement uses old bytes only as a bounded raw
+    // concurrency guard. Invalid UTF-8/TOML and reserved user sections cannot
+    // influence the freshly decoded payload or prevent its replacement.
+    let previous_root = if matches!(mode, PreparationMode::NativeReplace) {
+        None
+    } else {
+        previous.as_ref().map(FileSnapshot::parse).transpose()?
+    };
     if matches!(mode, PreparationMode::Automatic) {
         if let Some(root) = previous_root.as_ref() {
             return Ok(Outcome {
@@ -334,12 +360,24 @@ fn prepare_one(
     let image_guard = open_checked(scope, image, false)?;
     let image_before = FileIdentity::new(image, &image_guard.metadata()?)?;
     let native = inspect_native(image)?;
-    if native.failed && previous.is_some() {
+    if native.failed && previous.is_some() && !matches!(mode, PreparationMode::NativeReplace) {
         return Err(AppError::Invalid(
             "native metadata read/decode failed; existing TOML left unchanged".into(),
         ));
     }
     let usable = has_payload(&native.root);
+    if matches!(mode, PreparationMode::NativeReplace) && previous.is_some() && !usable {
+        // Do not stamp even metadata-only diagnostics into an old sidecar. The
+        // caller must see this JPEG as unavailable despite any old TOML source
+        // or needs_fallback flag, and may explicitly fall back to DebugParser.
+        return Ok(Outcome {
+            decision: OutcomeKind::Unavailable,
+            written: false,
+            native_parsed: native.parsed,
+            native_failed: native.failed,
+            partial: false,
+        });
+    }
     let (mut root, decision, parser, content_mode) = if let Some(mut root) = previous_root {
         if !usable || !merge_payload(&mut root, native.root) {
             return Ok(Outcome {
@@ -350,11 +388,13 @@ fn prepare_one(
                 partial: is_partial(&root),
             });
         }
-        (root, OutcomeKind::Merged, "native", "native_merge")
+        (root, OutcomeKind::Replaced, "native", "native_merge")
     } else {
         (
             native.root,
-            if usable {
+            if previous.is_some() {
+                OutcomeKind::Replaced
+            } else if usable {
                 OutcomeKind::Created
             } else {
                 OutcomeKind::Unavailable
@@ -1312,7 +1352,7 @@ impl FileSnapshot {
         }
         // Read the checked handle, not a second pathname open that could race
         // with an editor's delete-sharing rename. Raw bytes also protect invalid
-        // UTF-8/TOML during an explicitly authorized DP replacement.
+        // UTF-8/TOML during explicitly authorized native or DP replacement.
         let mut bytes = Vec::new();
         (&guard).take(MAX_TEXT_BYTES + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_TEXT_BYTES {

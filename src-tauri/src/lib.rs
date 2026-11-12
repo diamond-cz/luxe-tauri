@@ -146,7 +146,7 @@ pub fn run() {
             commands::image_cmds::scan_image_dir,
             commands::image_cmds::parse_image_exif,
             commands::image_cmds::prepare_image_metadata,
-            commands::image_cmds::merge_image_metadata,
+            commands::image_cmds::replace_image_metadata,
             commands::image_cmds::load_image_toml,
             commands::image_cmds::load_image_toml_sections,
             commands::image_cmds::load_image_exif,

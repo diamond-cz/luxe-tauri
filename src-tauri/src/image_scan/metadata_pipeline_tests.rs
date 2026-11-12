@@ -83,12 +83,21 @@ fn explicit_dp_overwrites_complete_tomls_with_fresh_output_and_never_uses_old_si
     }
     let mut temporary = None;
     let mut called = 0;
-    let mut progress = Vec::new();
+    let progress = std::cell::RefCell::new(Vec::new());
     let summary = parse_debug_parser_directory_with(
         Some(&parser),
         &dir.0,
-        |event| progress.push((event.stage, event.completed, event.total)),
+        |event| {
+            progress
+                .borrow_mut()
+                .push((event.stage, event.completed, event.total))
+        },
         |executable, root| {
+            assert_eq!(
+                progress.borrow().last(),
+                Some(&("DP", 0, 0)),
+                "running is reported before the blocking tool call"
+            );
             called += 1;
             temporary = Some(root.to_path_buf());
             assert_eq!(executable, parser);
@@ -140,10 +149,10 @@ fn explicit_dp_overwrites_complete_tomls_with_fresh_output_and_never_uses_old_si
             .contains("STALE"));
     }
     assert!(!temporary.unwrap().exists());
-    assert!(progress
-        .iter()
-        .all(|(stage, _, _)| *stage != "JPEG" && *stage != "EXIF"));
-    assert_eq!(progress.last(), Some(&("TOML", 2, 2)));
+    assert_eq!(progress.into_inner(), vec![
+        ("PREPARE", 0, 0), ("PREPARE", 0, 2), ("PREPARE", 1, 2), ("PREPARE", 2, 2),
+        ("DP", 0, 0), ("TOML", 0, 2), ("TOML", 1, 2), ("TOML", 2, 2),
+    ], "preparation and writes report real image counts; the tool itself never claims a percentage");
 }
 
 #[test]
@@ -162,14 +171,20 @@ fn explicit_dp_requires_a_tool_and_failure_or_empty_output_leaves_original_toml(
         |_, _| panic!("missing tool cannot run")
     )
     .is_err());
+    let mut failed_progress = Vec::new();
     let failed = parse_debug_parser_directory_with(
         Some(&parser),
         &dir.0,
-        |_| {},
+        |event| failed_progress.push((event.stage, event.completed, event.total)),
         |_, _| Err(AppError::Other("tool failed".into())),
     )
     .unwrap();
     assert_eq!(failed.failed, 1);
+    assert_eq!(
+        failed_progress.last(),
+        Some(&("DP", 0, 0)),
+        "failure must not emit a fake DP completion count"
+    );
     assert_eq!(fs::read_to_string(&toml).unwrap(), original);
     let empty = parse_debug_parser_directory_with(
         Some(&parser),
@@ -207,6 +222,44 @@ fn changed_source_during_external_parsing_cannot_attach_results_to_a_different_i
     .unwrap();
     assert_eq!((result.processed, result.failed), (0, 1));
     assert_eq!(fs::read_to_string(toml).unwrap(), "KEEP=42\n");
+}
+
+#[test]
+fn dp_preflight_failures_advance_real_preparation_and_write_counts() {
+    let dir = TempDir::new();
+    let parser = dir.parser();
+    for name in ["good", "bad"] {
+        fs::write(dir.0.join(format!("{name}.jpg")), b"image").unwrap();
+    }
+    // A directory masquerading as TOML must fail before being sent to DP.
+    fs::create_dir(dir.0.join("bad.toml")).unwrap();
+    let mut progress = Vec::new();
+    let result = parse_debug_parser_directory_with(
+        Some(&parser),
+        &dir.0,
+        |event| progress.push((event.stage, event.completed, event.total)),
+        |_, root| {
+            assert_eq!(fs::read_dir(root)?.count(), 1);
+            assert!(!root.join("bad.jpg").exists());
+            fs::write(root.join("good.jpg.exif"), "[AE]\nVALUE: 7 |\n")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!((result.processed, result.failed), (1, 1));
+    assert_eq!(
+        progress,
+        vec![
+            ("PREPARE", 0, 0),
+            ("PREPARE", 0, 2),
+            ("PREPARE", 1, 2),
+            ("PREPARE", 2, 2),
+            ("DP", 0, 0),
+            ("TOML", 1, 2),
+            ("TOML", 2, 2),
+        ]
+    );
+    assert!(dir.0.join("bad.toml").is_dir());
 }
 
 #[test]

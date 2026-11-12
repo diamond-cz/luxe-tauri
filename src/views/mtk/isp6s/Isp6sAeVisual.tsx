@@ -6,9 +6,8 @@ import { useTranslation } from "react-i18next";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { getIsp6sSchema, type Isp6sSchemaRoot } from "@/ipc/cppParser";
 import { loadImageToml, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
-import { mergeWorkspaceImageMetadata, ImageExifTaskError, parseWorkspaceImageExif } from "@/services/imageExifService";
+import { replaceWorkspaceImageMetadata, ImageExifTaskError, parseWorkspaceImageExif } from "@/services/imageExifService";
 import { ImageExifOverwriteDialog } from "./TablePane/ImageExifOverwriteDialog";
-import { MetadataProgress } from "./TablePane/MetadataProgress";
 import type { ToastKind } from "@/components/common/Toast";
 import { saveStateSection } from "@/ipc/stateIo";
 import { useMtkStore, DEFAULT_IMAGE_DIR_STATE } from "@/stores/mtkStore";
@@ -126,6 +125,20 @@ export function Isp6sAeVisual({
   const workspaceSelection = useMtkStore((s) => s.imageSelection[workspaceKey]);
   const setImageSelection = useMtkStore((s) => s.setImageSelection);
   const imageDir = imageDirEntry ?? DEFAULT_IMAGE_DIR_STATE;
+  const exifDirectoryRef = useRef(imageDir.dir);
+  useEffect(() => {
+    if (exifDirectoryRef.current === imageDir.dir) return;
+    exifDirectoryRef.current = imageDir.dir;
+    // The shared service still finishes the disk task. Only this view's old
+    // progress/confirmation is invalidated, including directory A -> B -> A.
+    exifRequestRef.current += 1;
+    exifProgressControllerRef.current?.abort();
+    exifProgressControllerRef.current = null;
+    exifParsingRef.current = false;
+    setExifParsing(false);
+    setExifProgress(null);
+    setDpOverwrite(null);
+  }, [imageDir.dir]);
   const imageDataRevision = imageDir.metadataRevision ?? 0;
   const selectionSyncEnabled = useIsp6sVisualStore((s) => s.selectionSyncEnabled);
   const setSelectionSyncEnabled = useIsp6sVisualStore((s) => s.setSelectionSyncEnabled);
@@ -202,7 +215,7 @@ export function Isp6sAeVisual({
   }, [currentEntry?.jpg_path, imageDir.dir, imageDir.entries, session, setImageSelection, workspaceKey, workspaceSelection]);
 
   const handleParseExif = async () => {
-    if (exifParsingRef.current) return;
+    if (exifParsingRef.current || imageDir.metadataPreparing) return;
     const dir = imageDir.dir;
     if (!dir || imageDir.entries.length === 0) {
       onNotice({ kind: "info", title: t("image_exif.error.empty") });
@@ -216,7 +229,7 @@ export function Isp6sAeVisual({
     exifProgressControllerRef.current = progressController;
     exifParsingRef.current = true;
     setExifParsing(true);
-    setExifProgress({ stage: "DP", completed: 0, total: imageDir.entries.length });
+    setExifProgress({ stage: "QUEUED", completed: 0, total: 0 });
     try {
       const result = await parseWorkspaceImageExif(isp, imageTabIdx, debugParserPath, (progress) => {
         if (sameWorkspace()) setExifProgress(progress);
@@ -245,7 +258,7 @@ export function Isp6sAeVisual({
     }
   };
 
-  const handleMergeExif = async (imagePaths: string[]) => {
+  const handleReplaceExif = async () => {
     if (exifParsingRef.current || imageDir.metadataPreparing) return;
     const request = ++exifRequestRef.current;
     const dir = imageDir.dir;
@@ -255,14 +268,14 @@ export function Isp6sAeVisual({
     exifProgressControllerRef.current = controller;
     exifParsingRef.current = true;
     setExifParsing(true);
-    setExifProgress({ stage: "JPEG", completed: 0, total: imagePaths.length || imageDir.entries.length });
+    setExifProgress({ stage: "QUEUED", completed: 0, total: 0 });
     try {
-      const { summary } = await mergeWorkspaceImageMetadata(isp, imageTabIdx, imagePaths,
+      const { summary } = await replaceWorkspaceImageMetadata(isp, imageTabIdx, [],
         (progress) => { if (sameWorkspace()) setExifProgress(progress); }, workspaceKey, controller.signal);
-      if (sameWorkspace()) onNotice({ kind: summary.failed ? "error" : summary.unavailable ? "info" : "success",
-        title: t("image_exif.merge.completed"), detail: t("image_exif.import.summary", { ...summary }) });
+      if (sameWorkspace()) onNotice({ kind: summary.failed ? "error" : summary.unavailable || summary.partial ? "info" : "success",
+        title: t("image_exif.native.completed"), detail: t("image_exif.native.summary", { ...summary }) });
     } catch (error) {
-      if (sameWorkspace()) onNotice({ kind: "error", title: t("image_exif.merge.failed"),
+      if (sameWorkspace()) onNotice({ kind: "error", title: t("image_exif.native.failed"),
         detail: error instanceof ImageExifTaskError ? t(`image_exif.error.${error.code}`) : String(error) });
     } finally {
       controller.abort();
@@ -279,8 +292,8 @@ export function Isp6sAeVisual({
       if (!unchanged) { onNotice({ kind: "info", title: t("image_exif.error.changed") }); return; }
       void handleParseExif();
     }} />;
-  const metadataProgress = imageDir.metadataPreparing ? <MetadataProgress progress={imageDir.preparationProgress} />
-    : exifProgress ? <MetadataProgress progress={exifProgress} /> : null;
+  const currentExifParsing = exifParsing && exifDirectoryRef.current === imageDir.dir;
+  const metadataProgress = imageDir.metadataPreparing ? imageDir.preparationProgress : currentExifParsing ? exifProgress : null;
 
   const visual   = useIsp6sVisualStore((s) => s.visual);
   const patchVis = useIsp6sVisualStore((s) => s.patch);
@@ -508,14 +521,15 @@ export function Isp6sAeVisual({
               syncPairedScroll(currentEntry.jpg_path, position);
             }
           }}
-          exifParsing={exifParsing || imageDir.metadataPreparing}
+          exifParsing={currentExifParsing || imageDir.metadataPreparing}
           onParseExif={() => {
             if (!debugParserPath) { onNotice({ kind: "info", title: t("image_exif.error.parser_required") }); return; }
             if (imageDir.dir && !imageDir.metadataPreparing && !exifParsingRef.current) {
               setDpOverwrite({ dir: imageDir.dir, entries: imageDir.entries });
             }
           }}
-          onMergeExif={(paths) => void handleMergeExif(paths)}
+          onReplaceExif={() => void handleReplaceExif()}
+          metadataProgress={metadataProgress}
           onNotice={onNotice}
           onPickImage={onPickImage}
           onImageDirChange={onImageDirChange}
@@ -585,7 +599,6 @@ export function Isp6sAeVisual({
     return (
       <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
         {overwriteDialog}
-        {metadataProgress}
         <WorkspaceColumns session={session} sourceSize={session.toneSourceSize}
           onSourceSizeChange={(size) => { session.toneSourceSize = size; }}
           dividerId={WORKSPACE_DIVIDER_ID}
@@ -624,7 +637,6 @@ export function Isp6sAeVisual({
   return (
     <div ref={workspaceRootRef} className="flex h-full w-full min-w-0 flex-col">
     {overwriteDialog}
-    {metadataProgress}
     <WorkspaceColumns session={session} sourceSize={sourceColumnSize}
       onSourceSizeChange={updateSourceColumnSize}
       dividerId={WORKSPACE_DIVIDER_ID}

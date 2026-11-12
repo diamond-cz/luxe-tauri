@@ -1,4 +1,4 @@
-import { mergeImageMetadata, loadImageToml, parseImageExif, prepareImageMetadata, scanImageDir, type ExifParseProgress, type ExifParseSummary, type ImageEntry, type ImageMetadataPreparationResult } from "@/ipc/imageScan";
+import { replaceImageMetadata, loadImageToml, parseImageExif, prepareImageMetadata, scanImageDir, type ExifParseProgress, type ExifParseSummary, type ImageEntry, type ImageMetadataPreparationResult } from "@/ipc/imageScan";
 import { useMtkStore } from "@/stores/mtkStore";
 import type { IspId } from "@/views/mtk/ispTabs";
 
@@ -27,7 +27,7 @@ type ExifJob = {
 // progress updates from the other view.
 const EXIF_JOB_LIMIT = 16;
 const jobs = new Map<string, ExifJob>();
-const mergeJobs = new Set<string>();
+const nativeJobs = new Set<string>();
 // Only live import jobs. Completion is on disk; never retain directory-sized EXIF.
 type ImportJob = { dir: string; generation: number; promise: Promise<ImageMetadataPreparationResult> };
 const imports = new Map<string, ImportJob>();
@@ -44,11 +44,11 @@ export function prepareWorkspaceImageDirectory(
   if (live?.dir === dir && previous?.metadataPreparing && previous.loadRevision === live.generation) return live.promise;
   // A new folder explicitly supersedes the stale view generation. Its Rust
   // work remains serialized by EXIF_TASKS, but cannot republish old progress.
-  if (jobs.has(key) || mergeJobs.has(key) || (!live && imports.size >= EXIF_JOB_LIMIT)) return Promise.reject(new ImageExifTaskError("busy"));
+  if (jobs.has(key) || nativeJobs.has(key) || (!live && imports.size >= EXIF_JOB_LIMIT)) return Promise.reject(new ImageExifTaskError("busy"));
   const restorePath = selectedImage ?? (previous?.dir === dir ? previous.entries[previous.current]?.jpg_path
     ?? store.mtk.image_workspaces?.[key]?.selected_image : null);
   store.setImageDir(isp, tabIdx, { dir, entries: [], current: 0, tomlData: {}, status: "scanning", message: null,
-    metadataPreparing: true, preparationProgress: { stage: "JPEG", completed: 0, total: 0 }, preparationSummary: null });
+    metadataPreparing: true, preparationProgress: { stage: "QUEUED", completed: 0, total: 0 }, preparationSummary: null });
   const generation = useMtkStore.getState().imageDir[key].loadRevision;
   const active = () => {
     const image = useMtkStore.getState().imageDir[key];
@@ -130,23 +130,33 @@ async function refreshMetadata(isp: IspId, tabIdx: number, job: MetadataSnapshot
 }
 
 async function runJob(isp: IspId, tabIdx: number, parserPath: string | null, job: ExifJob) {
-  const result = await parseImageExif(parserPath, job.dir, (progress) => {
+  let parsing = true;
+  const publish = (progress: ExifParseProgress) => {
+    const latest = useMtkStore.getState().imageDir[`${isp}|${tabIdx}`];
+    if (latest?.dir !== job.dir || latest.entries !== job.entries) return;
     job.lastProgress = progress;
     for (const listener of job.listeners) listener.callback(progress);
-  });
-  await refreshMetadata(isp, tabIdx, job);
-  return result;
+  };
+  try {
+    const result = await parseImageExif(parserPath, job.dir, (progress) => {
+      if (parsing) publish(progress);
+    });
+    parsing = false;
+    publish({ stage: "REFRESH", completed: 0, total: 0 });
+    await refreshMetadata(isp, tabIdx, job);
+    return result;
+  } finally { parsing = false; }
 }
 
-/** Explicit native merge is additive and never removes a metadata file. */
-export async function mergeWorkspaceImageMetadata(
+/** Explicit fresh native content replaces TOML; no comparison or merge on this path. */
+export async function replaceWorkspaceImageMetadata(
   isp: IspId, tabIdx: number, imagePaths: string[], onProgress?: (progress: ExifParseProgress) => void,
   selectionWorkspaceKey?: string, signal?: AbortSignal,
 ): Promise<ImageMetadataPreparationResult> {
   const key = `${isp}|${tabIdx}`;
   const image = useMtkStore.getState().imageDir[key];
   if (!image?.dir || !image.entries.length) throw new ImageExifTaskError("empty");
-  if (imports.has(key) || jobs.has(key) || mergeJobs.has(key) || mergeJobs.size >= EXIF_JOB_LIMIT) throw new ImageExifTaskError("busy");
+  if (imports.has(key) || jobs.has(key) || nativeJobs.has(key) || nativeJobs.size >= EXIF_JOB_LIMIT) throw new ImageExifTaskError("busy");
   const paths = [...new Set(imagePaths)];
   if (!paths.every((path) => image.entries.some((entry) => entry.jpg_path === path))) throw new ImageExifTaskError("changed");
   const snapshot = { dir: image.dir, entries: image.entries, selectionWorkspaceKey };
@@ -155,19 +165,20 @@ export async function mergeWorkspaceImageMetadata(
     const latest = useMtkStore.getState().imageDir[key];
     return latest?.dir === snapshot.dir && latest.entries === snapshot.entries;
   };
-  mergeJobs.add(key);
+  nativeJobs.add(key);
   try {
-    const result = await mergeImageMetadata(snapshot.dir, paths, (progress) => {
+    const result = await replaceImageMetadata(snapshot.dir, paths, (progress) => {
       if (!settled && !signal?.aborted && unchanged()) onProgress?.(progress);
     });
     settled = true;
+    if (!signal?.aborted && unchanged()) onProgress?.({ stage: "REFRESH", completed: 0, total: 0 });
     await refreshMetadata(isp, tabIdx, snapshot, result);
     return result;
   } catch (error) {
     settled = true;
     await refreshMetadata(isp, tabIdx, snapshot);
     throw error;
-  } finally { mergeJobs.delete(key); }
+  } finally { nativeJobs.delete(key); }
 }
 
 function subscribeProgress(
@@ -200,7 +211,7 @@ export function parseWorkspaceImageExif(
   const image = useMtkStore.getState().imageDir[key];
   if (!image?.dir || image.entries.length === 0) return Promise.reject(new ImageExifTaskError("empty"));
   if (!parserPath) return Promise.reject(new ImageExifTaskError("parser_required"));
-  if (imports.has(key) || mergeJobs.has(key)) return Promise.reject(new ImageExifTaskError("busy"));
+  if (imports.has(key) || nativeJobs.has(key)) return Promise.reject(new ImageExifTaskError("busy"));
   const existing = jobs.get(key);
   if (existing?.dir === image.dir && existing.entries === image.entries) {
     subscribeProgress(existing, onProgress, signal);

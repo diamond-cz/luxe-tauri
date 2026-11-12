@@ -12,7 +12,7 @@ mod exif_document;
 mod metadata_import;
 mod metadata_source;
 
-pub use self::metadata_import::{prepare_image_metadata, merge_image_metadata, ImageMetadataPreparationResult, ImageMetadataPreparationSummary};
+pub use self::metadata_import::{prepare_image_metadata, merge_image_metadata, replace_image_metadata, ImageMetadataPreparationResult, ImageMetadataPreparationSummary};
 mod mtk_exif;
 mod natural_order;
 pub use self::exif_document::{
@@ -75,6 +75,8 @@ pub struct ImageTomlSection {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExifParseProgress {
+    /// IPC stages mirror src/types/ipc.ts. DP has no reliable tool percentage;
+    /// explicit tasks use total=0 there, and count real PREPARE/TOML image work.
     pub stage: &'static str,
     pub completed: usize,
     pub total: usize,
@@ -410,6 +412,7 @@ fn parse_debug_parser_directory_with(
     let started = std::time::Instant::now();
     let parser = parser_path.filter(|path| path.is_file())
         .ok_or_else(|| AppError::Invalid("DebugParser executable is required for explicit overwrite".into()))?;
+    on_progress(ExifParseProgress { stage: "PREPARE", completed: 0, total: 0 });
     let writer = metadata_import::DebugParserMetadataWriter::new(image_dir)?;
     let entries = scan_directory(image_dir)?;
     if entries.is_empty() { return Err(AppError::Invalid("no images to parse".into())); }
@@ -420,27 +423,32 @@ fn parse_debug_parser_directory_with(
     let _guard = ParseTempDir(root.clone());
     let mut summary = ExifParseSummary { processed: 0, skipped: 0, failed: 0, total, direct: 0, fallback: 0, partial: 0 };
     let mut work = Vec::with_capacity(total);
-    on_progress(ExifParseProgress { stage: "DP", completed: 0, total });
-    for entry in entries {
+    on_progress(ExifParseProgress { stage: "PREPARE", completed: 0, total });
+    for (index, entry) in entries.into_iter().enumerate() {
         let image = Path::new(&entry.jpg_path);
         let target = Path::new(&entry.toml_path);
-        let Some(filename) = image.file_name() else { summary.failed += 1; continue; };
+        let Some(filename) = image.file_name() else {
+            summary.failed += 1;
+            on_progress(ExifParseProgress { stage: "PREPARE", completed: index + 1, total });
+            continue;
+        };
         let copied = root.join(filename);
         match writer.copy_for_parser(image, target, &copied) {
             Ok(snapshot) => work.push((entry, copied, snapshot)),
             Err(error) => { tracing::warn!(path = %entry.jpg_path, %error, "DP overwrite copy/preflight rejected"); summary.failed += 1; }
         }
-        // Copy/preflight belongs to DP stage; do not claim parsing completed.
+        on_progress(ExifParseProgress { stage: "PREPARE", completed: index + 1, total });
     }
     if !work.is_empty() {
+        // This runner receives neither a per-image callback nor a reliable
+        // tool percentage. Keep this phase indeterminate, not simulated 0/N.
+        on_progress(ExifParseProgress { stage: "DP", completed: 0, total: 0 });
         if let Err(error) = run_parser(parser, &root) {
             tracing::warn!(%error, "DP overwrite process failed");
             summary.failed += work.len();
-            on_progress(ExifParseProgress { stage: "DP", completed: total, total });
             return Ok(summary);
         }
     }
-    on_progress(ExifParseProgress { stage: "DP", completed: total, total });
     on_progress(ExifParseProgress { stage: "TOML", completed: summary.failed, total });
     for (entry, copied, snapshot) in work {
         let sidecar = PathBuf::from(format!("{}.exif", copied.display()));

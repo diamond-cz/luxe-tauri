@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Button, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from "@fluentui/react-components";
+import { Button } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown24Regular,
@@ -28,7 +28,8 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emit, listen } from "@tauri-apps/api/event";
 import { Panel, PanelGroup } from "react-resizable-panels";
 
-import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
+import { loadImageHoverPreview, loadImageThumbnailBatch, loadImageTomlFieldsBatchShared, type ExifParseProgress, type ImageEntry } from "@/ipc/imageScan";
+import { MetadataProgress } from "./MetadataProgress";
 import { useImagePreview, useImagePreviewUrl } from "@/hooks/useImagePreviewUrl";
 import { ensureDirectory } from "@/ipc/shell";
 import { flushStateNow, loadState, saveImageTableMode, saveStateSection } from "@/ipc/stateIo";
@@ -112,7 +113,8 @@ interface Props {
   onImageSearchQueryChange: (value: string) => void;
   onImageSearch: () => void;
   onParseExif: () => void;
-  onMergeExif: (imagePaths: string[]) => void;
+  onReplaceExif: () => void;
+  metadataProgress: ExifParseProgress | null;
   onNotice: (toast: { kind: "success" | "error"; title: string; detail?: string }) => void;
   exifParsing: boolean;
   imageDataRevision: number;
@@ -325,7 +327,8 @@ export function TablePane({
   onImageSearchQueryChange,
   onImageSearch,
   onParseExif,
-  onMergeExif,
+  onReplaceExif,
+  metadataProgress,
   onNotice,
   exifParsing,
   imageDataRevision,
@@ -504,29 +507,18 @@ export function TablePane({
             aria-label={selectionSyncEnabled ? "关闭 AE Basic 与 ToneMap 图片选择同步" : "开启 AE Basic 与 ToneMap 图片选择同步"}
             aria-pressed={selectionSyncEnabled}
             onClick={() => onSelectionSyncChange(!selectionSyncEnabled)} />
-          <Menu openOnContext>
-            <MenuTrigger disableButtonEnhancement>
-              <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
-                title={t("image_exif.action_title")}
-                disabled={entries.length === 0 || exifParsing}
-                onClick={onParseExif} aria-label={t("image_exif.action_label")} />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem disabled={!entries[current] || exifParsing}
-                  onClick={() => { const entry = entries[current]; if (entry) onMergeExif([entry.jpg_path]); }}>
-                  {t("image_exif.merge.current")}
-                </MenuItem>
-                <MenuItem disabled={entries.length === 0 || exifParsing} onClick={() => onMergeExif([])}>
-                  {t("image_exif.merge.all")}
-                </MenuItem>
-                <MenuItem disabled={!selectedImageIndexes.length || exifParsing}
-                  onClick={() => onMergeExif(selectedImageIndexes.map((index) => entries[index].jpg_path))}>
-                  {t("image_exif.merge.selected", { count: selectedImageIndexes.length })}
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+          <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<DocumentData24Regular className="h-4 w-4" />}
+            title={t("image_exif.action_title")}
+            data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={360}
+            disabled={entries.length === 0 || exifParsing}
+            onClick={onParseExif}
+            onContextMenu={(event) => {
+              // main.tsx prevents the native menu in capture. Deliberately do
+              // not gate on defaultPrevented as Fluent MenuTrigger does.
+              event.preventDefault();
+              event.stopPropagation();
+              if (entries.length > 0 && !exifParsing) onReplaceExif();
+            }} aria-label={t("image_exif.action_label")} />
           {!toneMode && <Button size="small" appearance="subtle" style={{ width: 28, minWidth: 28, height: 28, padding: 0 }} icon={<CalculatorArrowClockwise24Regular className="h-4 w-4" />}
             title="左键：Apply all image；右键：Apply single image（当前图片）"
             disabled={entries.length === 0 || !calculatorSourcePath || applyPending || Boolean(parseProgress && parseProgress.done < parseProgress.total)}
@@ -540,6 +532,7 @@ export function TablePane({
           {onHide && <WorkspaceHideButton side="images" onHide={onHide} />}
         </div>
       </div>
+      {exifParsing && <MetadataProgress progress={metadataProgress} />}
       <div className="hidden"
            style={{
              background: "var(--colorNeutralBackground1)",

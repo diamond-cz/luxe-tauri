@@ -31,6 +31,13 @@ export interface ImageMetadataImportInfo {
   decision: "native_created" | "native_replaced" | "existing_retained" | "native_unavailable" | "fallback" | "unavailable";
 }
 
+/** Real image counts within a stage; QUEUED, DP and REFRESH have no percentage. */
+export interface ExifParseProgress {
+  stage: "QUEUED" | "PREPARE" | "EXIF" | "DP" | "TOML" | "JPEG" | "REFRESH";
+  completed: number;
+  total: number;
+}
+
 export interface ImageMetadataPreparationSummary {
   total: number;
   created: number;

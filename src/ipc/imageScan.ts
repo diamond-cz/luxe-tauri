@@ -1,8 +1,8 @@
 import { call } from "./client";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Channel } from "@tauri-apps/api/core";
-import type { ImageExifDocument, ImageMetadataPreparationSummary, ImageTomlSection } from "@/types/ipc";
-export type { ImageExifDocument, ImageExifModule, ImageExifTable, ImageTomlSection } from "@/types/ipc";
+import type { ExifParseProgress, ImageExifDocument, ImageMetadataPreparationSummary, ImageTomlSection } from "@/types/ipc";
+export type { ExifParseProgress, ImageExifDocument, ImageExifModule, ImageExifTable, ImageTomlSection } from "@/types/ipc";
 
 export interface ImageEntry {
   name:      string;
@@ -13,18 +13,12 @@ export interface ImageEntry {
 export const scanImageDir = (dir: string) =>
   call<ImageEntry[]>("scan_image_dir", { dir });
 
-export interface ExifParseProgress {
-  stage: "EXIF" | "DP" | "TOML" | "JPEG";
-  completed: number;
-  total: number;
-}
-
 export interface ImageMetadataPreparationResult {
   entries: ImageEntry[];
   summary: ImageMetadataPreparationSummary;
 }
 
-/** Import-time reconciliation only. Normal image clicks read the prepared TOML. */
+/** Import reuses valid TOML first. Normal clicks only read the prepared TOML. */
 export const prepareImageMetadata = (imageDir: string, onProgress: (progress: ExifParseProgress) => void) =>
   call<ImageMetadataPreparationResult>("prepare_image_metadata", { imageDir, onProgress: metadataProgressChannel(onProgress) });
 
@@ -62,9 +56,9 @@ export const loadImageToml = (path: string) =>
 export const loadImageExif = (path: string) =>
   call<ImageExifDocument>("load_image_exif", { path });
 
-/** Explicit right-click action: re-read JPEG and add missing content without deletion. */
-export const mergeImageMetadata = (imageDir: string, imagePaths: string[], onProgress: (progress: ExifParseProgress) => void) =>
-  call<ImageMetadataPreparationResult>("merge_image_metadata", { imageDir, imagePaths, onProgress: metadataProgressChannel(onProgress) });
+/** Explicit right-click action: fresh usable JPEG content replaces TOML without merging. */
+export const replaceImageMetadata = (imageDir: string, imagePaths: string[], onProgress: (progress: ExifParseProgress) => void) =>
+  call<ImageMetadataPreparationResult>("replace_image_metadata", { imageDir, imagePaths, onProgress: metadataProgressChannel(onProgress) });
 
 export const loadImageTomlSections = (path: string) =>
   call<ImageTomlSection[]>("load_image_toml_sections", { path });

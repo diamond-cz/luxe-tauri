@@ -2942,3 +2942,30 @@
 - 实际运行 `rustfmt --check --edition 2021 --config skip_children=true` 检查 `exif_document.rs`、`metadata_import.rs`、`image_metadata_import.rs`、`image_prepared_reads.rs`：通过；`mod.rs`、`image_cmds.rs`、`lib.rs` 仍用 `rustfmt --emit stdout` 非编译静态解析通过。新Rust单元用例覆盖内容计数/去重/歧义/上限、冲突数组前缀和DP重复项计数，集成用例覆盖连续合并与旧累计文件读取不改字节，未执行，待CI。
 - `git diff --check`：通过，仅有既有LF/CRLF提示；2个未跟踪文件文本空白检查通过，未发现新增禁止生成物、updater私钥/密码或本地state.toml文件名。
 - 本轮没有运行Cargo/Rust编译或测试、Tauri启动、真实工具/图片处理、桌面截图及性能benchmark。未声称真实字段一致性、速度倍数或内存降幅已验收；未提交或推送。
+
+### 2026-11-12：EXIF 右键直读覆盖、悬浮换行与 DP 分阶段进度
+
+**亮点**
+
+- `TablePane.tsx` 将 EXIF 操作改为直接 `onContextMenu`：右键立刻调用当前目录的 `replaceWorkspaceImageMetadata`，不经过菜单，也不再调用比较合并 IPC；左键保留 DP 覆盖确认。三行操作提示复用 `GlobalTitleTooltip` 委托入口，明确 `below-start`、`wrap=true`、最大宽度 360，不为每行/单元格新增 tooltip 实例。
+- `replace_image_metadata` 复用 `metadata_import.rs` 的有界 1–2 worker、目录 scope、原字节快照和原子写入，以本次 native 有效业务完整替换旧内容，标记 `parser=native / content_mode=native`；不解析旧业务文档或合并数组/统计。无可用新数据、非 JPEG 或失败时保留已有文件，partial 仍保留真实待 DP 状态。旧 Rust 合并 API/旧来源投影仅兼容既有文件和测试，不再暴露给按钮/IPC；自动导入 TOML 优先与普通切图 TOML-only 不变。
+- `parse_debug_parser_directory_with` 在逐张安全检查/复制时发 `PREPARE`，阻塞工具调用前发未知百分比的 `DP 0/0`，逐张转换/写入发真实 `TOML` 计数；排队、完成后刷新分别为 `QUEUED / REFRESH`。`imageExifService.ts` 在工具返回后屏蔽迟到 Channel 消息，刷新仍匹配的数据集并保留完成时选中项。
+- `MetadataProgress.tsx` 移入共用图片列表卡片内部，以语义主题背景/边框、图标、阶段标题、右对齐等宽计数和 Fluent 进度条替换工作区全宽薄条；AE Basic/ToneMap 共用入口，左右卡片顶边不再随解析进度整体移位。DP/排队/刷新使用不确定动画和说明，不新增定时器、监听器或完成结果缓存。五语言补齐阶段及操作说明。
+
+**痛点**
+
+- 悬浮长提示仅设置 `title`，委托 tooltip 默认 `white-space: nowrap`，即使外框有最大宽度，文字仍会越出；修复点应是该长提示的换行/定位契约，不是降低字体或扩大所有全局 tooltip。
+- `main.tsx` 的捕获监听会 `preventDefault()` 禁用浏览器原生右键菜单；Fluent `MenuTrigger` 看到 `event.isDefaultPrevented()` 又直接退出，导致原业务菜单没有出现。直接事件处理有意不以该标志拦截业务，并独立检查空目录/任务忙状态，不能为恢复一个按钮而放开全应用原生菜单。
+- 原 DP 在复制全部图片和等待外部工具期间只发一个 `DP 0/N`，前端把它当确定零进度；现有调用链没有收到外部工具的可靠百分比，不能用轮询时间或输出文件大小编造百分比。此改动改善阶段可见性，不声称缩短 DebugParser 本身的计算耗时。
+
+**闭坑**
+
+- 右键覆盖范围是当前目录全部图片，提示必须明确新内容替换旧业务；不恢复删除 sidecar 或补缺合并菜单。损坏旧 TOML 可在明确覆盖时替换，但只读/占用/link/reparse/同 stem/16 MiB/并发改动保护不放宽；不能用空 native 输出覆盖有效旧 TOML。
+- 检查真实按钮 JSX 与全局 capture 处理一起执行的回归；只调用自造 onClick 不能覆盖 `defaultPrevented` 导致的菜单故障。进度用例需断言工具调用前已发布 DP 状态、PREPARE/TOML 含失败图数、工具失败不发假完成；晚到消息和卸载订阅不得重开进度。
+- UI 静态/行为回归不能代替 Windows/WebView2 桌面截图及真实 JPEG/DP 验收。性能收益目前只限于取消旧业务解析和比较合并的代码路径，未测量速度倍数、峰值内存或工具耗时。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过。Node 22.23.5 的 EXIF 单脚本 49 项通过；图片联动/工作区/EXIF/头库/表格五脚本组合 72 项通过（`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/image-table-mapping.test.mjs`），覆盖五语言插值一致、直接右键覆盖范围、全局取消菜单后仍触发、未知 DP 百分比、REFRESH 屏蔽晚到消息、目录切换清理进度/确认及原有内容代次隔离。
+- `rustfmt --check --edition 2021 --config skip_children=true src-tauri/src/image_scan/metadata_import.rs src-tauri/tests/image_metadata_import.rs src-tauri/src/image_scan/metadata_pipeline_tests.rs`：通过；既有未统一格式的 `mod.rs` / `image_cmds.rs` / `lib.rs` 用 `rustfmt --emit stdout --edition 2021 --config skip_children=true` 非编译静态解析通过。新增 7 项 native 覆盖用例、既有安全用例的 replace 路径及 DP 阶段 Rust 行为用例尚未执行，等待 GitHub Actions。
+- `git diff --check`：通过（仅 LF/CRLF 提示）。检查 21 个改动文件、0 个未跟踪文件，新增路径无禁止产物/本地 state/updater 密钥文件名，新增文本无常见私钥/GitHub token 标记。未运行本地 Cargo/Tauri 编译、Rust 行为测试、真实用户图片/DP 工具、性能 benchmark 或桌面截图；不把类型检查当作桌面交互验收。未提交或推送。
