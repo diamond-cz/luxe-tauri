@@ -42,6 +42,8 @@
   "face_link_formula.result": "最終値",
   "face_link_formula.parameter": "パラメータ計算",
   "face_link_formula.parameters": "パラメータ境界：",
+  "face_link_formula.exif_bounds": "EXIF 境界：",
+  "face_link_formula.bound_value_hint": "{{bound}}係数：{{value}}\n参照元：{{source}}",
   "face_link_formula.low": "下限",
   "face_link_formula.high": "上限",
   "face_link_formula.jump": "{{bound}}パラメータへ移動：{{path}}（現在値 {{value}}）",

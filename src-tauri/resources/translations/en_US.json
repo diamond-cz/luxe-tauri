@@ -42,6 +42,8 @@
   "face_link_formula.result": "Final value",
   "face_link_formula.parameter": "Parameters",
   "face_link_formula.parameters": "Parameter bounds:",
+  "face_link_formula.exif_bounds": "EXIF bounds:",
+  "face_link_formula.bound_value_hint": "{{bound}} coefficient: {{value}}\nSource: {{source}}",
   "face_link_formula.low": "Lower bound",
   "face_link_formula.high": "Upper bound",
   "face_link_formula.jump": "Locate {{bound}}: {{path}} (current value {{value}})",

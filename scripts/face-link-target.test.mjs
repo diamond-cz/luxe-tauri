@@ -305,7 +305,42 @@ test('Face Link summary has two compact rows and moves full math into focusable 
   assert.match(rows[1].props.title, /low_bound\s+300\.0\s+\|\s+AE.cpp · \[0\]\[4\]\[1\]\.19/);
   assert.match(rows[1].props.title, /high_bound\s+500\.0\s+\|\s+AE.cpp · \[0\]\[4\]\[1\]\.20/);
   assert.ok(rows.every(row => row.props.tabIndex === 0 && row.props['data-tooltip-wrap'] === 'true' && row.props['data-tooltip-monospace'] === 'true'));
-  assert.deepEqual(nodesOfType(tree, 'Link').map(link => visibleText(link)), ['下限 [0][4][1].19', '上限 [0][4][1].20']);
+  assert.deepEqual(nodesOfType(tree, 'Link').map(link => visibleText(link)), ['300', '500']);
+  assert.doesNotMatch(visibleText(tree), /\[0\]\[4\]\[1\]\.19|\[0\]\[4\]\[1\]\.20/);
+});
+
+test('boundary rows display independent EXIF and parameter coefficients instead of paths or scaled limits', () => {
+  const props = chartFormulaProps();
+  props.exif = { ...props.exif, lowBound: 90, highBound: 9000, lowLimit: 66.09375, highLimit: 6609.375 };
+  props.parameter = { ...props.parameter, lowBound: 100, highBound: 8000 };
+  const tree = FaceLinkFormula(props);
+  const groups = nodesOfType(tree, 'div').filter(node => node.props.role === 'group');
+  assert.equal(groups.length, 2);
+  assert.match(visibleText(groups[0]), /EXIF 边界：下限90上限9000/);
+  assert.match(visibleText(groups[1]), /参数边界：下限100上限8000/);
+  assert.equal(nodesOfType(groups[0], 'Link').length, 0, 'EXIF coefficients are read-only, not AE.cpp jump controls');
+  const exifValues = nodesOfType(groups[0], 'span').filter(node => node.props.tabIndex === 0);
+  assert.equal(exifValues.length, 2);
+  assert.match(exifValues[0].props.title, /下限系数：90\.0\n来源：EXIF · AE_TAG_FACE_LOW_BOUND/);
+  assert.match(exifValues[1].props.title, /上限系数：9000\.0\n来源：EXIF · AE_TAG_FACE_HIGH_BOUND/);
+  assert.deepEqual(nodesOfType(groups[1], 'Link').map(node => visibleText(node)), ['100', '8000']);
+  assert.match(nodesOfType(groups[1], 'Link')[0].props.title, /\[0\]\[4\]\[1\]\.19/);
+  assert.match(nodesOfType(groups[1], 'Link')[1].props.title, /\[0\]\[4\]\[1\]\.20/);
+});
+
+test('zero remains a clickable coefficient while missing parameter values stay disabled and independent of EXIF', () => {
+  const low = field('[0][4][1].19', 0, 0), high = field('[0][4][1].20', 500, 1);
+  const currentSource = { ...source, fields: [low, high], cwrBounds: { low: 0, high: NaN, fields: [low, high] } };
+  const calls = [];
+  const tree = FaceLinkFormula(chartFormulaProps({ currentSource, lowBoundField: low, highBoundField: high,
+    onSourceJump: (...args) => calls.push(args) }));
+  const links = nodesOfType(tree, 'Link');
+  assert.equal(visibleText(links[0]), '0'); assert.equal(links[0].props.disabled, false);
+  links[0].props.onClick(); assert.equal(calls[0][1].paths[0], low.path);
+  assert.equal(visibleText(links[1]), '-'); assert.equal(links[1].props.disabled, true);
+  assert.equal(links[1].props.onClick, undefined);
+  const exifGroup = nodesOfType(tree, 'div').find(node => node.props.role === 'group');
+  assert.match(visibleText(exifGroup), /下限200上限600/);
 });
 
 test('integer summary and one-decimal hints preserve internal precision and missing-data status', () => {
@@ -378,11 +413,12 @@ test('both parameter hyperlinks switch to parameter mapping with the exact path 
   new Function('module', ...Object.keys(globals), outputText)(module, ...Object.values(globals));
   const low = field('[0][4][1].19', 90, 0), high = field('[0][4][1].20', 9000, 1);
   high.line = low.line; // Same-line source values must select different tokens.
-  const currentSource = { ...source, fields: [low, high], cwrBounds: { low: 90, high: 9000, fields: [low, high] } };
+  const currentSource = { ...source, fields: [low, high], cwrBounds: { low: 95, high: 8800, fields: [low, high] } };
   const tree = FaceLinkFormula(chartFormulaProps({ currentSource, lowBoundField: low, highBoundField: high,
     sourceDraftTextRef: { current: '95, 8800,' }, onSourceJump: module.exports }));
   const links = nodesOfType(tree, 'Link');
   assert.ok(links.every(link => link.props.as === 'button' && !link.props.disabled));
+  assert.deepEqual(links.map(link => visibleText(link)), ['95', '8800'], 'the displayed coefficient itself is the jump control');
   links[0].props.onClick(); links[1].props.onClick();
   assert.deepEqual(events.filter(([kind]) => kind === 'mode'), [['mode', 'param_map'], ['mode', 'param_map']]);
   const selections = events.filter(([kind]) => kind === 'selection').map(([, value]) => value);
@@ -419,7 +455,7 @@ test('all five summary locales have complete matching keys and interpolation fie
   for (const locale of ['zh_CN', 'zh_TW', 'en_US', 'ja_JP', 'tr_TR']) {
     const values = JSON.parse(readFileSync(new URL(`../src-tauri/resources/translations/${locale}.json`, import.meta.url), 'utf8'));
     const keys = Object.keys(values).filter(key => key.startsWith('face_link_formula.')).sort();
-    assert.equal(keys.length, 19);
+    assert.equal(keys.length, 21);
     const current = keys.map(key => [key, [...values[key].matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]).sort()]);
     if (shape) assert.deepEqual(current, shape, locale); else shape = current;
   }

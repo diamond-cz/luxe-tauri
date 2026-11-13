@@ -42,6 +42,8 @@
   "face_link_formula.result": "最终值",
   "face_link_formula.parameter": "参数计算",
   "face_link_formula.parameters": "参数边界：",
+  "face_link_formula.exif_bounds": "EXIF 边界：",
+  "face_link_formula.bound_value_hint": "{{bound}}系数：{{value}}\n来源：{{source}}",
   "face_link_formula.low": "下限",
   "face_link_formula.high": "上限",
   "face_link_formula.jump": "定位{{bound}}参数：{{path}}（当前值 {{value}}）",

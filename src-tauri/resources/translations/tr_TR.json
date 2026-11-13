@@ -42,6 +42,8 @@
   "face_link_formula.result": "Son değer",
   "face_link_formula.parameter": "Parametreler",
   "face_link_formula.parameters": "Parametre sınırları:",
+  "face_link_formula.exif_bounds": "EXIF sınırları:",
+  "face_link_formula.bound_value_hint": "{{bound}} katsayısı: {{value}}\nKaynak: {{source}}",
   "face_link_formula.low": "Alt sınır",
   "face_link_formula.high": "Üst sınır",
   "face_link_formula.jump": "{{bound}} parametresine git: {{path}} (geçerli değer {{value}})",

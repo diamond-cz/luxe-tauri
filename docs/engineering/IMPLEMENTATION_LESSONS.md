@@ -3047,3 +3047,25 @@
 
 - `npm run typecheck`、`npm run version:check`：通过；Node 22 的 Face 专项 27 项通过。`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/face-link-target.test.mjs`：97 项通过。
 - `git diff --check`：通过，仅既有 LF/CRLF 提示；新增文件另检查空白和脚本语法。保留已有未提交改动，未本地运行 Cargo/Tauri 编译或桌面截图验收；未提交或推送。
+
+### 2026-11-13：Face 原始边界系数对照与数值点击定位
+
+**亮点**
+
+- `FaceLinkFormula.tsx` 在摘要下分两行列出“EXIF 边界 / 参数边界”的原始下限、上限系数，整数展示；EXIF 使用只读、可聚焦的值，悬浮展示独立来源标签和一位小数值。参数行以系数数值本身作为 Fluent Link，路径移至悬浮与无障碍名称，复用此前 `.19/.20` 参数映射和当前草稿 token 选中链路，不新增跳转 API 或计算。
+- 原有“整数摘要 / 一位小数等宽悬浮”契约不变，新增非有限系数禁用链接的保护，零值仍可跳转；五语言新增 EXIF 边界名称与系数来源提示，专题文档同步区分原始系数和计算后的限制范围。
+
+**痛点**
+
+- 之前只露出 `.19/.20` 路径，用户无法直接比较 EXIF 与参数的系数；上方 `[66, 6609]` 是乘以 AE Target 后的范围，不能把它放进原始边界栏或代替 `90/9000` 等系数。
+- 数值来源必须按行隔离：EXIF 只读值不能绑定 AE.cpp 跳转，参数也不能在缺失时借用 EXIF 值。点击定位须使用真实源码 token，不使用整数显示或悬浮的一位小数文本检索。
+
+**闭坑**
+
+- 回归验证两组系数不同情况下的展示、EXIF 标签关联、参数路径仅悬浮可见、数值本身点击后进入 param_map 并选中同一行正确 token；保留缺字段/缺回调/无效行禁用断言。非有限值显示 `-` 且不绑定点击，零值保持有效。
+- 本轮不改变共享计算器、持久化数据或字体委托入口，不为展示系数新增请求、缓存、监听器；真实桌面与截图效果仍需产物验收。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过。Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过；`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/face-link-target.test.mjs`：99 项通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。未本地执行 Cargo/Tauri 编译、真实桌面参数选中或截图验收；未提交或推送。

@@ -95,17 +95,34 @@ export function FaceLinkFormula({ exif, parameter, lowBoundPath, highBoundPath, 
         </td>
       </tr>)}</tbody>
     </table>
-    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>
-      <span>{t("face_link_formula.parameters")}</span>
-      {[
-        { key: "low", path: lowBoundPath, value: parameter.lowBound, jump: onJumpToLow },
-        { key: "high", path: highBoundPath, value: parameter.highBound, jump: onJumpToHigh },
-      ].map(({ key, path, value, jump }) => <Link key={key} as="button" disabled={!jump} onClick={jump} style={{ fontSize: "inherit" }}
-        title={t("face_link_formula.jump", { bound: t(`face_link_formula.${key}`), path, value: formulaNumber(value) })}
-        aria-label={t("face_link_formula.jump", { bound: t(`face_link_formula.${key}`), path, value: formulaNumber(value) })}
-        data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={480} data-tooltip-monospace="true">
-        {t(`face_link_formula.${key}`)} <code>{path}</code>
-      </Link>)}
+    <div className="mt-2 grid gap-1.5 text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>
+      {rows.map(({ key: sourceKey, values }) => {
+        const label = t(sourceKey === "exif" ? "face_link_formula.exif_bounds" : "face_link_formula.parameters");
+        return <div key={sourceKey} role="group" aria-label={label} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="min-w-[6em]">{label}</span>
+          {[
+            { key: "low", path: lowBoundPath, value: values.lowBound, source: values.lowBoundSource, jump: onJumpToLow },
+            { key: "high", path: highBoundPath, value: values.highBound, source: values.highBoundSource, jump: onJumpToHigh },
+          ].map(({ key, path, value, source, jump }) => {
+            const bound = t(`face_link_formula.${key}`);
+            const hint = t("face_link_formula.bound_value_hint", { bound, source, value: formulaNumber(value) });
+            return <span key={key} className="inline-flex items-center gap-1.5">
+              <span>{bound}</span>
+              {sourceKey === "exif" ? <span tabIndex={0} title={hint} aria-label={hint}
+                className="font-medium tabular-nums" style={{ color: "var(--colorNeutralForeground1)" }}
+                data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={480} data-tooltip-monospace="true">
+                {displayNumber(value)}
+              </span> : <Link as="button" disabled={!jump || !Number.isFinite(value)} onClick={Number.isFinite(value) ? jump : undefined} style={{ fontSize: "inherit" }}
+                className="tabular-nums"
+                title={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}
+                aria-label={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}
+                data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={480} data-tooltip-monospace="true">
+                {displayNumber(value)}
+              </Link>}
+            </span>;
+          })}
+        </div>;
+      })}
     </div>
   </div>;
 }
