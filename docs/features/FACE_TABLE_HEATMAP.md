@@ -43,6 +43,24 @@ Face、Face_FLT 页面中的 `FaceProb`、`FDSZ_RA`、`FDDR_RA` 使用相同的�
 
 `FDSZ_RA` 的图片 `AE_TAG_FLT_FDSZ` 与源码 `face_sz` 轴按现有计算规则统一除以 100；Face 和 Face_FLT 的 `FDDR_RA` 分别读取各自的 FDDR key。FaceProb 读取 `FACE_PROB_KEYS` 中首个有效字段。单轴统计只要求对应的 EXIF 轴值有效；`fd_th_tbl` 的二维统计必须同时具有有效 BV 和 DR。
 
+## Face Link Target 极值限制
+
+详情面板 Face 页的 `FLT.Link_FACE_CWR` 与 Face_FLT 页的 `Face Link Target` 卡片均遵循**先加权、再钳制**，不在混合前限制 FLT Target：
+
+```text
+raw = FLTCwrTarget * FDSZ_RA / 1024 + NormalTarget * (1 - FDSZ_RA / 1024)
+low = AE_TAG_AE_TARGET * low_bound / 1024
+high = AE_TAG_AE_TARGET * high_bound / 1024
+Face Link Target = limit(raw, low, high)
+```
+
+- **EXIF 链路**：`low_bound / high_bound` 分别来自图片的 `AE_TAG_FACE_LOW_BOUND / AE_TAG_FACE_HIGH_BOUND`。详情表资源 `src-tauri/resources/face_table.toml` 直接引用顶部已有的 `TOP.极值限制_low / TOP.极值限制_high`；`FaceTable.tsx` 的既有表达式求值器保留原始精度，仅最终展示四舍五入，悬浮提示同步显示带 `limit(...)` 的公式及代入值。`Cal_FLT / Cal_Gain` 自动使用钳制后结果。
+- **参数链路**：AE.cpp 的标量路径 `[0][4][1].19 / [0][4][1].20` 分别提供下限/上限系数，基数仍是图片 `AE_TAG_AE_TARGET`，不是 `NormalTarget`，也不是 `[0][4][1][19] / [0][4][1][20]` 数组。`loadFaceCwrBounds` 在加载 Face_FLT 源码快照时读取两项，源码草稿变化时 `previewFaceCwrBoundsFromDraft` 用现有 token 定位更新派生范围，不写图片 TOML。
+- **显示与复用**：`FaceLinkFormula.tsx` 将公式栏精简为 EXIF / 参数计算两行“加权值 → 限制范围 → 最终值”摘要，并标明范围内/抬至下限/压至上限/数据不全；行内加权值、范围与最终值统一四舍五入为整数；行悬浮提示按“加权计算 / 极值范围 / 最终结果 / 来源”分区，计算数字统一显示一位小数，按“数值 | 标签/路径”分别列出 AE Target、FDSZ_RA、Normal Target、low/high 系数来源。参数 FDSZ_RA 同时列出真实 `face_sz / face_sz_ra` 轴路径，Tab 聚焦该行同样可查看。`data-tooltip-monospace="true"` 仅为这些公式/路径提示启用等宽字体、较大行距和内边距，普通全局 tooltip 保持原样；所有舍入只用于展示，不回写共享计算器或改变边界判断。摘要不重新计算数值，标题和图片列表仍共享 `calculateFaceTargetMetrics` 的最终结果；列表批量读取列表补入 AE Target 与两项 EXIF 系数，不为每个单元格额外发请求。现有 FDSZ_RA 来源切换只改变 EXIF 加权因子，不混用两套边界。
+- **参数超链接**：摘要下保留 AE.cpp 下限 `[0][4][1].19`、上限 `[0][4][1].20` 两个 Fluent Link 按钮。`jumpToFaceCwrBoundSource` 复用既有 `onSourceJump → ImagePane.handleSourceJump → param_map` 路由，传入精确 path、当前源码 token、行号及同一行 ordinal，既定位对应参数又避免相同数值/同一行多个参数误选。字段缺失、行号无效或没有跳转能力时禁用链接，不打开浏览器、不新增 IPC 或观察器，也不改写/保存参数。
+- **异常边界**：缺少/非有限的基数、系数或加权输入时对应最终值显示 `-`，不能拿另一条链路的边界或未钳制值冒充成功；零边界有效，颠倒上下限沿用现有 `limitNumber / limit` 的排序语义。Face 页的 FBT `Back Scene Target` 不新增本次 FLT 限制。
+- **验证**：`scripts/face-link-target.test.mjs` 执行实际 TOML 公式、Face 表求值器、卡片/列表计算器、源码边界加载与草稿映射，并执行真实公式栏 JSX 的渲染逻辑；由 `npm run sync:test` 接入既有 Windows CI。Rust schema 用例仅验证资源契约，编译/行为测试由 CI 执行。本次未通过本地 Tauri 编译验收真实桌面显示。
+
 ## 性能约束
 
 - 图片 TOML 必须批量读取，不能在每个单元格内发起 IPC。

@@ -2969,3 +2969,81 @@
 - `npm run typecheck`、`npm run version:check`：通过。Node 22.23.5 的 EXIF 单脚本 49 项通过；图片联动/工作区/EXIF/头库/表格五脚本组合 72 项通过（`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/image-table-mapping.test.mjs`），覆盖五语言插值一致、直接右键覆盖范围、全局取消菜单后仍触发、未知 DP 百分比、REFRESH 屏蔽晚到消息、目录切换清理进度/确认及原有内容代次隔离。
 - `rustfmt --check --edition 2021 --config skip_children=true src-tauri/src/image_scan/metadata_import.rs src-tauri/tests/image_metadata_import.rs src-tauri/src/image_scan/metadata_pipeline_tests.rs`：通过；既有未统一格式的 `mod.rs` / `image_cmds.rs` / `lib.rs` 用 `rustfmt --emit stdout --edition 2021 --config skip_children=true` 非编译静态解析通过。新增 7 项 native 覆盖用例、既有安全用例的 replace 路径及 DP 阶段 Rust 行为用例尚未执行，等待 GitHub Actions。
 - `git diff --check`：通过（仅 LF/CRLF 提示）。检查 21 个改动文件、0 个未跟踪文件，新增路径无禁止产物/本地 state/updater 密钥文件名，新增文本无常见私钥/GitHub token 标记。未运行本地 Cargo/Tauri 编译、Rust 行为测试、真实用户图片/DP 工具、性能 benchmark 或桌面截图；不把类型检查当作桌面交互验收。未提交或推送。
+
+### 2026-11-12：Face Link Target 加权后极值限制与双来源边界
+
+**亮点**
+
+- `src-tauri/resources/face_table.toml` 在 `FLT.Link_FACE_CWR` 原加权公式外包 `limit(...)`，直接引用已有 `TOP.极值限制_low / TOP.极值限制_high`，与详情表范围同源；不新增一套求值器或先四舍五入范围。`FaceTable.tsx` 既有表达式/悬浮代入自动展示新公式，`Cal_FLT / Cal_Gain` 跟随钳制后结果。
+- `ChartMapMode.tsx::calculateFaceTargetMetrics` 保留 raw blend 与 EXIF/参数两套实际上下限，FLT 模式在加权结束后调用既有 `limitNumber`；EXIF 使用图片 `AE_TAG_FACE_LOW_BOUND / AE_TAG_FACE_HIGH_BOUND`，参数使用 AE.cpp 标量 `[0][4][1].19 / [0][4][1].20`，两者范围基数均为 `AE_TAG_AE_TARGET`。标题/公式栏和图片列表复用最终结果，FBT `Back Scene Target` 行为不变。
+- `loadFaceCwrBounds` 在已有源码加载中只读取两个精确标量，字段并入 `FaceFbtSource.fields`，`previewFaceCwrBoundsFromDraft` 按既有源码 token 映射响应草稿修改；无新全局缓存/后台任务/持久化设置。`TablePane.tsx` 的批量键列表补入基数和两个 EXIF 系数，避免当前图可算、批量列表却缺边界。
+- 新增 `scripts/face-link-target.test.mjs` 并加入 `npm run sync:test`：直接执行实际资源公式/Face 求值器/卡片计算器/加载器/草稿映射/公式 JSX，而不是维护另一份测试用计算逻辑。新增 Rust schema 断言验证 limit 与上下限引用资源契约，等待 CI。
+
+**痛点**
+
+- 顶部“极值限制”此前仅展示范围，`Link_FACE_CWR` 和卡片最终混合值没有消费它，不能只改公式文字。限制必须位于整条加权表达式外，不能先钳制 FLTCwrTarget 再混合；也不能用 NormalTarget 替代截图公式的 AE Target 基数。
+- AE.cpp 的 `.19 / .20` 标量与同编号 `[19] / [20]` 数组职责不同；读取宽泛父路径或对缺失值取首个邻接字段会误用 BV/DR 轴。缺少参数边界不能借 EXIF 边界填补，否则“参数计算”来源错误；EXIF 无参数文件仍应独立计算。
+- 原值显示有整数/一位小数格式化，新增钳制须保留内部精度，只在显示时格式化；缺失边界不能当零或无限范围，真正零边界仍有效。首次 rustfmt 检查发现既有两行及新测试路径行格式差异，格式化该小文件后复查通过。
+
+**闭坑**
+
+- 用例必须覆盖低于/高于/恰好位于边界、混合后才限制、颠倒/相等/零边界、缺基数/系数、两来源范围不同、FDSZ 来源切换、源码标量与数组区分、草稿同一行多个 token、批量键齐全及 FBT 不受影响。
+- 公式栏要同时保留 raw 中间值与 final 值，标题/列表使用 final；Face 表 `Cal_Gain` 不能绕过已钳制的 `FLT.Link_FACE_CWR`。无效输入显示 `-`，不静默返回未钳制数值。
+- 此次仅新增公式/标签/路径等原始数学标识，无新自然语言 UI 文案、IPC 命令或状态持久化字段。桌面截图、真实 AE.cpp 与 EXIF 数据对照仍需 Windows CI 产物验收，不将 Node JSX 逻辑测试等同于实际布局验收。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过；`npx --yes --package=node@22 node --test --test-reporter=spec scripts/face-link-target.test.mjs`：21 项通过；`npx --yes --package=node@22 -c "node --version && npm run sync:test"`：Node 22.23.5，91 项通过。
+- `rustfmt --check --edition 2021 --config skip_children=true src-tauri/src/config/face_table.rs`：首次仅格式差异；使用 rustfmt 格式化后复查通过。没有本地执行 Cargo build/check/test、Tauri 启动/编译、Rust 行为测试或真实图片/参数交互。
+- `git diff --check`：通过（仅 LF/CRLF 提示）；新增测试文件另外检查空白/语法。未提交或推送；实际桌面显示及新增 Rust 测试仍待 CI/产物验收。
+
+### 2026-11-13：Face Link 公式摘要与参数路径超链接
+
+**亮点**
+
+- 新增同目录 `ImagePane/FaceLinkFormula.tsx`，将 Face Link 原八行展开式改成 EXIF/参数两行“加权值、限制范围、最终值”对照，显示范围内/抬至下限/压至上限/数据不全状态。只格式化显示一位小数，不修改上一轮共享计算器；未四舍五入的完整公式、代入数值、系数来源和实际 FDSZ_RA 来源保存在行 `title` 中，复用 `GlobalTitleTooltip` 的换行/宽度/焦点委托，不新增监听器或逐行 tooltip 状态。
+- 下限 `.19`、上限 `.20` 保持可见路径，使用 Fluent `Link as="button"` 调用 `ChartMapMode.tsx::jumpToFaceCwrBoundSource`，复用 `sourceFieldToken / sourceJumpDetails → onSourceJump → ImagePane.handleSourceJump → param_map`，传精确标量路径、行号、当前草稿 token 与行内 ordinal；不打开外部链接、不保存参数、不新增 IPC。
+- 新摘要组件独立负责只读展示，FBT 的原公式展示不变；缺少可用字段/正行号/跳转回调时禁用对应链接。五语言补齐 15 个摘要、状态与跳转说明键；专题文档更新当前展示和路由契约。
+
+**痛点**
+
+- 直接列出每条加权、上下限和钳制代入式导致重复值占据八行；必须区分“日常摘要”和“排查详情”，不能为精简而删除中间结果或缩短内部数值精度。摘要中的范围可排序显示，悬浮仍保留原始 low/high 系数方向。
+- 参数路径不能用浏览器 href 处理，也不能只跳到整段源码：低/高值可能在同一行，或在多个位置数值重复；缺少行内 ordinal 或使用旧字段值会选错 token。点击时读取 `sourceDraftTextRef.current`，而非闭包中的旧数值。
+- EXIF 的 FDSZ_RA 可切到参数插值，悬浮来源必须随开关变化，但不能同时误切 EXIF 边界来源。未在真实桌面中验收字体/宽度/多语言换行，单元测试不替代 UI 截图。
+
+**闭坑**
+
+- 路径链接应从实际 `cwrBounds.fields` 取 `.19/.20`，拒绝空字段、非正行号及同编号数组路径。复查实际组件调用点、跳转 helper 和 ImagePane 路由整链；缺跳转能力时不能显示可点击的假链接。
+- 回归需覆盖摘要只显示两行、可 Tab 聚焦的详细提示、未舍入代入值、逆序/缺失边界状态、两链接分别进入 param_map、同一行两个当前草稿 token、无回调/无字段禁用和五语言插值一致。保留原加权后钳制及 FBT 行为用例。
+- 继续使用 Fluent 语义令牌、原有路由/全局 tooltip，不增加数据缓存或后台任务；不借 UI 精简更改计算、持久化或发布权限。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过。Node 22 的 `scripts/face-link-target.test.mjs` 专项 25 项通过；`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/face-link-target.test.mjs`：95 项通过。
+- `git diff --check`：通过，仅既有 LF/CRLF 提示；新增文件另查空白与脚本语法。保留上一轮尚未提交的计算/资源/Rust 测试变更，没有本地 Cargo/Tauri 编译、真实桌面定位/截图验收；相关桌面交互仍待 CI 产物或用户桌面验收。未提交或推送。
+
+### 2026-11-13：Face 公式整数摘要与等宽悬浮来源对照
+
+**亮点**
+
+- `FaceLinkFormula.tsx` 将摘要行的加权值、限制范围和最终值统一四舍五入为整数；悬浮及参数链接提示统一用 `formulaNumber` 保留一位小数。只在展示边界格式化，不修改传入数据、原始计算精度、钳制状态或跳转使用的真实源码 token。
+- 悬浮按“加权计算 / 极值范围 / 最终结果 / 来源”分区，来源对照以等宽“名称、数值 | EXIF 标签或 AE.cpp 路径”列出 AE Target、FDSZ_RA、Normal Target、low/high；`ChartMapMode.tsx` 分别传入上下限来源，参数 FDSZ_RA 显示实际 `face_sz / face_sz_ra` 的 `[0][4][1][47] / [0][4][1][48]` 路径，而不是笼统的“AE.cpp FDSZ_RA”。
+- `HoverTooltip.tsx` 新增 opt-in `data-tooltip-monospace="true"`，仅公式和参数路径提示使用 Consolas/Cascadia Mono 等宽字体、tabular 数字、较宽松字号/行距/内边距；既有普通 tooltip 的默认字体和尺寸不变。字体标记参与委托状态比较和重新测量，仍复用原监听器与 portal。
+- 五语言新增 4 个分区标题键，保留之前的路径超链接及键盘聚焦能力；当前专题文档同步整数摘要/一位小数悬浮的契约。
+
+**痛点**
+
+- 原 `String(value)` 将 1509.9675516224188 等浮点尾数直接展示，且 tooltip 没有等宽 opt-in，运算与来源混在一起难以核对。不能仅缩小字号或在计算阶段截断数值来解决展示问题。
+- 单一 `boundSource` 串同时列两个标签/路径，不易确认数值分别对应谁；来源改成独立 low/high 字段，并把系数值与路径放在同一行。FDSZ_RA 来源随现有开关变化，但 EXIF 上下限仍保持 EXIF 来源。
+- 摘要舍入后的端点不等于内部约束端点，不能把显示字符串重新参与 clamp 或参数跳转；边界状态仍按真实未舍入数值判定。未实测 Windows 高 DPI/多语言长路径的实际字体和定位。
+
+**闭坑**
+
+- 新样式必须 opt-in：公式行和链接显式传标记，普通 tooltip 不被全局改成等宽。切换锚点/标记后要重新比较状态，防止上一个提示的字体留到下一个提示。
+- 回归需覆盖整数摘要、一位小数代入、分区与“值 | 来源”关联、无长浮点尾数、默认/等宽 portal 样式隔离；既有同一行低/高链接和当前草稿 token 定位仍需通过，不能改成用舍入值检索源码。
+- 本轮无新增缓存、观察器、后台任务、IPC 或持久化字段。实际桌面截图/高 DPI/深浅主题验收仍交 CI 产物或用户环境，不以 JSX 和类型测试替代。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过；Node 22 的 Face 专项 27 项通过。`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/face-link-target.test.mjs`：97 项通过。
+- `git diff --check`：通过，仅既有 LF/CRLF 提示；新增文件另检查空白和脚本语法。保留已有未提交改动，未本地运行 Cargo/Tauri 编译或桌面截图验收；未提交或推送。

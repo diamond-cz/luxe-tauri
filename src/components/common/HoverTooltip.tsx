@@ -157,6 +157,7 @@ export function GlobalTitleTooltip() {
     positioning: TooltipPositioning;
     wrap: boolean;
     maxWidth?: number;
+    monospace: boolean;
     theme: TooltipTheme;
   } | null>(null);
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
@@ -231,13 +232,15 @@ export function GlobalTitleTooltip() {
       const positioning = readGlobalTooltipPositioning(anchor);
       const wrap = anchor.getAttribute("data-tooltip-wrap") === "true";
       const maxWidth = readGlobalTooltipMaxWidth(anchor);
+      const monospace = readGlobalTooltipMonospace(anchor);
       setState((current) => {
         if (
           current?.anchor === anchor &&
           current.content === content &&
           current.positioning === positioning &&
           current.wrap === wrap &&
-          current.maxWidth === maxWidth
+          current.maxWidth === maxWidth &&
+          current.monospace === monospace
         ) {
           return current;
         }
@@ -248,6 +251,7 @@ export function GlobalTitleTooltip() {
           positioning,
           wrap,
           maxWidth,
+          monospace,
           theme: readTooltipTheme(anchor),
         };
       });
@@ -314,6 +318,7 @@ export function GlobalTitleTooltip() {
       theme={state.theme}
       wrap={state.wrap}
       maxWidth={effectiveTooltipMaxWidth(state.maxWidth)}
+      monospace={state.monospace}
       pointerEvents="none"
     />
   );
@@ -326,6 +331,7 @@ function TooltipPortal({
   theme,
   wrap,
   maxWidth,
+  monospace = false,
   pointerEvents,
   onMouseEnter,
   onMouseLeave,
@@ -336,6 +342,7 @@ function TooltipPortal({
   theme: TooltipTheme;
   wrap: boolean;
   maxWidth: number;
+  monospace?: boolean;
   pointerEvents?: CSSProperties["pointerEvents"];
   onMouseEnter?: () => void;
   onMouseLeave?: React.MouseEventHandler<HTMLSpanElement>;
@@ -344,7 +351,7 @@ function TooltipPortal({
   return createPortal(
     <span
       ref={refNode}
-      className="fixed z-[9999] rounded-md border px-2 py-1 text-[11px] leading-4"
+      className={`fixed z-[9999] rounded-md border ${monospace ? "px-3 py-2 text-xs leading-5" : "px-2 py-1 text-[11px] leading-4"}`}
       style={{
         ...tooltipSurfaceStyle(theme),
         left: coords.left,
@@ -352,6 +359,8 @@ function TooltipPortal({
         whiteSpace: wrap ? "pre-wrap" : "nowrap",
         wordBreak: wrap ? "break-word" : undefined,
         maxWidth,
+        fontFamily: monospace ? "Consolas, 'Cascadia Mono', 'Courier New', monospace" : undefined,
+        fontVariantNumeric: monospace ? "tabular-nums" : undefined,
         pointerEvents,
       }}
       onMouseEnter={onMouseEnter}
@@ -611,4 +620,8 @@ function readGlobalTooltipPositioning(anchor: HTMLElement): TooltipPositioning {
 function readGlobalTooltipMaxWidth(anchor: HTMLElement): number | undefined {
   const value = Number(anchor.getAttribute("data-tooltip-max-width"));
   return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readGlobalTooltipMonospace(anchor: HTMLElement): boolean {
+  return anchor.getAttribute("data-tooltip-monospace") === "true";
 }

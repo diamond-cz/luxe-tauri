@@ -82,4 +82,5 @@ FDY = "AE_TAG_FLT_FDY"
 CWV = "AE_TAG_FACE_20_CWV"
 FLTCwrTarget = "= CWV * (Target / FDY)"
 
-Link_FACE_CWR = "= FLTCwrTarget * FDSZ_RA / 1024 + NormalTarget * (1 - FDSZ_RA / 1024)"
+# Blend first, then clamp against the same unrounded range shown in the CWR block.
+Link_FACE_CWR = "= limit(FLTCwrTarget * FDSZ_RA / 1024 + NormalTarget * (1 - FDSZ_RA / 1024), TOP.极值限制_low, TOP.极值限制_high)"

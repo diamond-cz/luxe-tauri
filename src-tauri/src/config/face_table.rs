@@ -68,8 +68,35 @@ mod tests {
 
     #[test]
     fn cal_flt_uses_link_face_cwr() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/face_table.toml");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/face_table.toml");
         let schema = FaceTableSchema::load(&path).unwrap();
-        assert_eq!(schema.top_kv.get("Cal_FLT").map(String::as_str), Some("= FLT.Link_FACE_CWR"));
+        assert_eq!(
+            schema.top_kv.get("Cal_FLT").map(String::as_str),
+            Some("= FLT.Link_FACE_CWR")
+        );
+    }
+
+    #[test]
+    fn face_link_blend_is_limited_by_the_displayed_top_range() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/face_table.toml");
+        let schema = FaceTableSchema::load(&path).unwrap();
+        assert_eq!(
+            schema.flt.get("Link_FACE_CWR").map(String::as_str),
+            Some("= limit(FLTCwrTarget * FDSZ_RA / 1024 + NormalTarget * (1 - FDSZ_RA / 1024), TOP.极值限制_low, TOP.极值限制_high)")
+        );
+        assert_eq!(
+            schema.top_kv.get("极值限制_low").map(String::as_str),
+            Some("= AE_TAG_AE_TARGET * AE_TAG_FACE_LOW_BOUND  / 1024")
+        );
+        assert_eq!(
+            schema.top_kv.get("极值限制_high").map(String::as_str),
+            Some("= AE_TAG_AE_TARGET * AE_TAG_FACE_HIGH_BOUND / 1024")
+        );
+        assert_eq!(
+            schema.top_kv.get("Cal_Gain").map(String::as_str),
+            Some("= FLT.Link_FACE_CWR / FBT.BackTarget")
+        );
     }
 }

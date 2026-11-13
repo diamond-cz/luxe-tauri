@@ -24,6 +24,7 @@ import { ResizeHandle } from "@/components/common/ResizeHandle";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import type { FieldEntry } from "@/types/cpp_parser";
+import { FaceLinkFormula } from "./FaceLinkFormula";
 
 type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT" | "Touch";
 type StepperDirection = "up" | "down";
@@ -392,7 +393,14 @@ interface FaceProbabilityAxis {
   fields: FieldEntry[];
 }
 
+interface FaceCwrBounds {
+  low: number;
+  high: number;
+  fields: FieldEntry[];
+}
+
 interface FaceFbtSource {
+  cwrBounds: FaceCwrBounds | null;
   fdTh: FaceBvDrTableSource;
   nsFdTh: FaceBvDrTableSource;
   fdMinTh: FaceBvDrTableSource;
@@ -512,6 +520,11 @@ const FACE_PROB_KEYS = ["AE_TAG_FACE_PROB", "AE_TAG_PROB_FACE"] as const;
 const FACE_STS_SIZE_KEY = "AE_TAG_FACE_STS_SIZE";
 const FACE_STS_LOC_KEY = "AE_TAG_FACE_STS_LOC";
 const FACE_NORMAL_TARGET_KEY = "AE_TAG_FACE_20_NORMAL_TARGET";
+const FACE_AE_TARGET_KEY = "AE_TAG_AE_TARGET";
+const FACE_CWR_LOW_BOUND_KEY = "AE_TAG_FACE_LOW_BOUND";
+const FACE_CWR_HIGH_BOUND_KEY = "AE_TAG_FACE_HIGH_BOUND";
+const FACE_CWR_LOW_BOUND_PATH = "[0][4][1].19";
+const FACE_CWR_HIGH_BOUND_PATH = "[0][4][1].20";
 const FACE_FBT_OE_SYS_KEY = "AE_TAG_FBT_OE_SYS";
 const FACE_FBT_TARGET_KEY = "AE_TAG_FBT_TARGET";
 const FACE_FBT_FDDR_KEY = "AE_TAG_FBT_FDDR";
@@ -570,6 +583,7 @@ const FACE_FLT_FDSZ_TABLE_ROWS = [
   { label: "face_sz", path: "[0][4][1][47]" },
   { label: "face_sz_ra", path: "[0][4][1][48]" },
 ] as const;
+const FACE_FLT_FDSZ_SOURCE = `AE.cpp · ${FACE_FLT_FDSZ_TABLE_ROWS.map(({ label, path }) => `${label}: ${path}`).join(" -> ")}`;
 const FACE_METRIC_CARD_ORDER: FaceMetricCardId[] = [
   "backSceneTargetFormula",
   "faceLinkTargetFormula",
@@ -2373,6 +2387,9 @@ export function ChartMapMode({
               })}
               nsProbValue={nsProbValue}
               normalTargetValue={faceNormalTargetValue}
+              aeTargetValue={readTomlValue(tomlData, FACE_AE_TARGET_KEY)}
+              cwrLowBoundValue={readTomlValue(tomlData, FACE_CWR_LOW_BOUND_KEY)}
+              cwrHighBoundValue={readTomlValue(tomlData, FACE_CWR_HIGH_BOUND_KEY)}
               normalTargetSource={normalTargetFormulaSource}
               normalTargetParameterValues={normalTargetParameterValues}
               oeSysValue={tab === "Face_FLT" ? faceFltOeSysValue : faceFbtOeSysValue}
@@ -2916,7 +2933,7 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
   const fdRowHeaderPath = fltMode ? FACE_FLT_BV_HEADER_PATH : FACE_FBT_FD_ROW_HEADER_PATH;
   const nsColumnHeaderPath = fltMode ? FACE_FLT_NS_DR_HEADER_PATH : FACE_FBT_NS_DR_HEADER_PATH;
   const nsRowHeaderPath = fltMode ? FACE_FLT_NS_BV_HEADER_PATH : FACE_FBT_NS_FD_ROW_HEADER_PATH;
-  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth, faceProb, fddrRa, fdszRa, faceStsSize, faceStsLoc] = await Promise.all([
+  const [fdTh, nsFdTh, fdMinTh, nsFdMinTh, oeth, nsOeth, faceProb, fddrRa, fdszRa, faceStsSize, faceStsLoc, cwrBounds] = await Promise.all([
     loadFaceBvDrTableSource(filePath, "fd_th_tbl", fltMode ? FACE_FLT_FDTH_TABLE_PATH : FACE_FBT_FDTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "ns_fd_th_tbl", fltMode ? FACE_FLT_NS_FDTH_TABLE_PATH : FACE_FBT_NS_FDTH_TABLE_PATH, nsColumnHeaderPath, nsRowHeaderPath),
     loadFaceBvDrTableSource(filePath, "fd_minth_tbl", fltMode ? FACE_FLT_FDMINTH_TABLE_PATH : FACE_FBT_FDMINTH_TABLE_PATH, fdColumnHeaderPath, fdRowHeaderPath),
@@ -2928,8 +2945,10 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
     fltMode ? loadFaceAxisRows(filePath, FACE_FLT_FDSZ_TABLE_ROWS) : Promise.resolve({ rows: [], fields: [] }),
     loadFaceProbabilityAxis(filePath, "[0][4][1][3]"),
     loadFaceProbabilityAxis(filePath, "[0][4][1][5]"),
+    fltMode ? loadFaceCwrBounds(filePath) : Promise.resolve(null),
   ]);
   return {
+    cwrBounds,
     fdTh,
     nsFdTh,
     fdMinTh,
@@ -2953,8 +2972,47 @@ async function loadFaceFbtSource(filePath: string, fltMode = false): Promise<Fac
       ...fdszRa.fields,
       ...faceStsSize.fields,
       ...faceStsLoc.fields,
+      ...(cwrBounds?.fields ?? []),
     ].sort(compareFieldEntries),
   };
+}
+
+async function loadFaceCwrBounds(filePath: string): Promise<FaceCwrBounds> {
+  const [lowFields, highFields] = await Promise.all([
+    loadFieldEntriesAtPath(filePath, FACE_CWR_LOW_BOUND_PATH),
+    loadFieldEntriesAtPath(filePath, FACE_CWR_HIGH_BOUND_PATH),
+  ]);
+  // Scalar .19/.20 are not the similarly numbered BV/DR array paths [19]/[20].
+  const low = lowFields.find((field) => field.path === FACE_CWR_LOW_BOUND_PATH);
+  const high = highFields.find((field) => field.path === FACE_CWR_HIGH_BOUND_PATH);
+  return {
+    low: parseFiniteNumber(low?.value), high: parseFiniteNumber(high?.value),
+    fields: [low, high].filter((field): field is FieldEntry => Boolean(field)),
+  };
+}
+
+function previewFaceCwrBoundsFromDraft(source: FaceFbtSource, sourceText: string): FaceFbtSource {
+  const bounds = source.cwrBounds;
+  if (!bounds) return source;
+  const value = (path: string, fallback: number) => parseFiniteNumber(sourceFieldToken(
+    sourceText, bounds.fields.find((field) => field.path === path), source.fields,
+  ) ?? String(fallback));
+  return { ...source, cwrBounds: { ...bounds,
+    low: value(FACE_CWR_LOW_BOUND_PATH, bounds.low), high: value(FACE_CWR_HIGH_BOUND_PATH, bounds.high),
+  } };
+}
+
+function jumpToFaceCwrBoundSource(
+  onSourceJump: ((label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void) | undefined,
+  source: FaceFbtSource | null, path: string, sourceText: string,
+) {
+  if (!onSourceJump || !source) return;
+  const field = source.cwrBounds?.fields.find((entry) => entry.path === path);
+  if (!field || field.line <= 0) return;
+  const value = sourceFieldToken(sourceText, field, source.fields) ?? field.value;
+  onSourceJump(`Face_FLT.FaceLinkTarget.${path === FACE_CWR_LOW_BOUND_PATH ? "low" : "high"}`, {
+    paths: [field.path], jump_to: "first", highlight: "ranges",
+  }, sourceJumpDetails(source.fields, field, value));
 }
 
 async function loadFaceProbabilityAxis(filePath: string, path: string): Promise<FaceProbabilityAxis> {
@@ -3051,6 +3109,9 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
     const common = {
       bv,
       cwv,
+      aeTarget: value(FACE_AE_TARGET_KEY),
+      exifCwrLowBound: value(FACE_CWR_LOW_BOUND_KEY),
+      exifCwrHighBound: value(FACE_CWR_HIGH_BOUND_KEY),
       nsProb: value(NS_PROB_KEY),
       normalTarget: value(FACE_NORMAL_TARGET_KEY),
     };
@@ -6439,6 +6500,9 @@ interface FaceTargetInputs {
   faceStsLoc: number;
   nsProb: number;
   normalTarget: number;
+  aeTarget: number;
+  exifCwrLowBound: number;
+  exifCwrHighBound: number;
   oeSys: number;
   fddr: number;
   fdsz: number;
@@ -6477,16 +6541,25 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const faceTarget = Number.isFinite(cwv) && Number.isFinite(thresholdValue) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (thresholdValue / fdy)
     : NaN;
-  const backSceneTarget = Number.isFinite(faceTarget) && Number.isFinite(faceWeight) && Number.isFinite(normalTarget)
+  const rawBackSceneTarget = Number.isFinite(faceTarget) && Number.isFinite(faceWeight) && Number.isFinite(normalTarget)
     ? (faceTarget * faceWeight + normalTarget * (1024 - faceWeight)) / 1024
     : NaN;
   const exifTarget = Number.isFinite(cwv) && Number.isFinite(exifThreshold) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (exifThreshold / fdy)
     : NaN;
-  const exifBackSceneTarget = Number.isFinite(exifTarget) && Number.isFinite(exifWeight) && Number.isFinite(normalTarget)
+  const rawExifBackSceneTarget = Number.isFinite(exifTarget) && Number.isFinite(exifWeight) && Number.isFinite(normalTarget)
     ? (exifTarget * exifWeight + normalTarget * (1024 - exifWeight)) / 1024
     : NaN;
+  const lowLimit = input.aeTarget * (source?.cwrBounds?.low ?? NaN) / 1024;
+  const highLimit = input.aeTarget * (source?.cwrBounds?.high ?? NaN) / 1024;
+  const exifLowLimit = input.aeTarget * input.exifCwrLowBound / 1024;
+  const exifHighLimit = input.aeTarget * input.exifCwrHighBound / 1024;
+  // Only Face Link Target is bounded here, after the full weighted blend.
+  // Missing bounds are unavailable, never an implicit unbounded success.
+  const backSceneTarget = fltMode ? limitNumber(rawBackSceneTarget, lowLimit, highLimit) : rawBackSceneTarget;
+  const exifBackSceneTarget = fltMode ? limitNumber(rawExifBackSceneTarget, exifLowLimit, exifHighLimit) : rawExifBackSceneTarget;
   return {
+    rawBackSceneTarget, rawExifBackSceneTarget, lowLimit, highLimit, exifLowLimit, exifHighLimit,
     fddrRa, faceWeight, exifWeight, oethInterpolated, nsOethInterpolated, fdMinThInterpolated,
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
     computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFaceTarget,
@@ -6597,6 +6670,9 @@ function FaceTabContent({
   onToggleFdszRaExifSource,
   nsProbValue,
   normalTargetValue,
+  aeTargetValue,
+  cwrLowBoundValue,
+  cwrHighBoundValue,
   normalTargetSource,
   normalTargetParameterValues,
   oeSysValue,
@@ -6640,6 +6716,9 @@ function FaceTabContent({
   onToggleFdszRaExifSource: () => void;
   nsProbValue: string | null;
   normalTargetValue: string | null;
+  aeTargetValue: string | null;
+  cwrLowBoundValue: string | null;
+  cwrHighBoundValue: string | null;
   normalTargetSource: NormalTargetFormulaSource;
   normalTargetParameterValues: NormalTargetParameterValues;
   oeSysValue: string | null;
@@ -6689,7 +6768,7 @@ function FaceTabContent({
         if (value !== null && value !== field.value) next = updateFaceFbtProbabilityAxisField(next, axisKey, field, value);
       }
     }
-    setEditableSource(next);
+    setEditableSource(previewFaceCwrBoundsFromDraft(next, sourceDraftText));
   }, [source, sourceDraftText]);
   useEffect(() => {
     sourceDraftTextRef.current = sourceDraftText ?? "";
@@ -6707,6 +6786,9 @@ function FaceTabContent({
   const faceProb = parseFiniteNumber(faceProbValue);
   const nsProb = parseFiniteNumber(nsProbValue);
   const normalTarget = parseFiniteNumber(normalTargetValue);
+  const aeTarget = parseFiniteNumber(aeTargetValue);
+  const exifCwrLowBound = parseFiniteNumber(cwrLowBoundValue);
+  const exifCwrHighBound = parseFiniteNumber(cwrHighBoundValue);
   const oeSys = parseFiniteNumber(oeSysValue);
   const exifThreshold = parseFiniteNumber(targetValue);
   const {
@@ -6714,8 +6796,9 @@ function FaceTabContent({
     nsFdMinThInterpolated, fdThInterpolated, nsFdThInterpolated, computedOeth,
     computedFdMinTh, computedFdTh, faceOeTar, pureTarget, computedFaceTarget,
     thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
+    rawBackSceneTarget, rawExifBackSceneTarget, lowLimit, highLimit, exifLowLimit, exifHighLimit,
   } = calculateFaceTargetMetrics(currentSource, {
-    bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys,
+    bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys, aeTarget, exifCwrLowBound, exifCwrHighBound,
     faceStsSize: parseFiniteNumber(faceStsSizeValue),
     faceStsLoc: parseFiniteNumber(faceStsLocValue),
     fddr: parseFiniteNumber(fddrValue),
@@ -6882,6 +6965,8 @@ function FaceTabContent({
   const linkTargetFormulaExpanded = !collapsed.has(linkTargetFormulaKey);
   const linkTargetFormulaId = `chart-face-${linkTargetFormulaKey}`;
   const thresholdFormulaId = `chart-face-${thresholdTitle.toLowerCase()}`;
+  const lowBoundField = currentSource?.cwrBounds?.fields.find((field) => field.path === FACE_CWR_LOW_BOUND_PATH);
+  const highBoundField = currentSource?.cwrBounds?.fields.find((field) => field.path === FACE_CWR_HIGH_BOUND_PATH);
 
   return (
     <div style={faceTabGridStyle}>
@@ -6907,10 +6992,27 @@ function FaceTabContent({
           </div>
         </div>
           {linkTargetFormulaExpanded && <div id={linkTargetFormulaId} style={faceFormulaRowStyle}>
-            <div style={faceFormulaTextStackStyle}>
-              <span>{fltMode
-                ? "Face Link Target = (FLT Target * FDSZ_RA + Normal Target * (1024-FDSZ_RA)) / 1024"
-                : "Back Scene Target = (FBT Target * FaceProb + Normal Target * (1024-FaceProb)) / 1024"}</span>
+            {fltMode ? <FaceLinkFormula
+              exif={{ faceTarget: exifTarget, weight: exifWeight, normalTarget, aeTarget,
+                lowBound: exifCwrLowBound, highBound: exifCwrHighBound,
+                rawTarget: rawExifBackSceneTarget, lowLimit: exifLowLimit, highLimit: exifHighLimit, result: exifBackSceneTarget,
+                lowBoundSource: `EXIF · ${FACE_CWR_LOW_BOUND_KEY}`, highBoundSource: `EXIF · ${FACE_CWR_HIGH_BOUND_KEY}`,
+                normalTargetSource: `EXIF · ${FACE_NORMAL_TARGET_KEY}`,
+                weightSource: useParameterFdszRaForExif ? FACE_FLT_FDSZ_SOURCE : `EXIF · ${FACE_FLT_FDSZ_RA_KEY}`,
+              }}
+              parameter={{ faceTarget, weight: faceWeight, normalTarget, aeTarget,
+                lowBound: currentSource?.cwrBounds?.low ?? NaN, highBound: currentSource?.cwrBounds?.high ?? NaN,
+                rawTarget: rawBackSceneTarget, lowLimit, highLimit, result: backSceneTarget,
+                lowBoundSource: `AE.cpp · ${FACE_CWR_LOW_BOUND_PATH}`, highBoundSource: `AE.cpp · ${FACE_CWR_HIGH_BOUND_PATH}`,
+                normalTargetSource: `EXIF · ${FACE_NORMAL_TARGET_KEY}`, weightSource: FACE_FLT_FDSZ_SOURCE,
+              }}
+              lowBoundPath={FACE_CWR_LOW_BOUND_PATH} highBoundPath={FACE_CWR_HIGH_BOUND_PATH}
+              onJumpToLow={onSourceJump && lowBoundField && lowBoundField.line > 0
+                ? () => jumpToFaceCwrBoundSource(onSourceJump, currentSource, FACE_CWR_LOW_BOUND_PATH, sourceDraftTextRef.current) : undefined}
+              onJumpToHigh={onSourceJump && highBoundField && highBoundField.line > 0
+                ? () => jumpToFaceCwrBoundSource(onSourceJump, currentSource, FACE_CWR_HIGH_BOUND_PATH, sourceDraftTextRef.current) : undefined}
+            /> : <div style={faceFormulaTextStackStyle}>
+              <span>Back Scene Target = (FBT Target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
               <span style={faceFormulaSubstitutionStyle}>
                 EXIF: (
                 <strong style={faceFormulaEmphasisStyle}>{formatRoundedNumber(exifTarget)}</strong>{" "}
@@ -6918,7 +7020,7 @@ function FaceTabContent({
                 <strong style={faceFormulaEmphasisStyle}>{formatRoundedNumber(normalTarget)}</strong>{" "}
                 * (1024 - {formatComputedNumber(exifWeight)})
                 ) / 1024 = {" "}
-                <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(exifBackSceneTarget)}</strong>
+                <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(rawExifBackSceneTarget)}</strong>
               </span>
               <span style={faceFormulaSubstitutionStyle}>
                 Calculation: (
@@ -6927,9 +7029,9 @@ function FaceTabContent({
                 <strong style={faceFormulaEmphasisStyle}>{formatComputedNumber(normalTarget)}</strong>{" "}
                 * (1024 - {formatComputedNumber(faceWeight)})
                 ) / 1024 ={" "}
-                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(backSceneTarget)}</strong>
+                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(rawBackSceneTarget)}</strong>
               </span>
-            </div>
+            </div>}
           </div>}
           <FaceDerivedTargetCard
             title={fltMode ? "FLT Target" : "FBT Target"}
