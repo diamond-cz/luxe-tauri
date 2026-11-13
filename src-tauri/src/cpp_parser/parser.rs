@@ -16,7 +16,7 @@ use crate::error::{AppError, AppResult};
 pub fn parse_file(file_path: &Path) -> AppResult<ParseResult> {
     let canon = fs::canonicalize(file_path)
         .map_err(|err| AppError::Path(format!("canonicalize {file_path:?}: {err}")))?;
-    let source = fs::read_to_string(&canon)?;
+    let source = crate::source_text::read_source(&canon)?;
     parse_source(&canon.to_string_lossy(), &source)
 }
 

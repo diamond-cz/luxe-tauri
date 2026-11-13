@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Code24Regular, DataHistogram24Regular, Save24Regular } from "@fluentui/react-icons";
 import { Panel, PanelGroup } from "react-resizable-panels";
+import { useTranslation } from "react-i18next";
 
 import { parseCppFile, type CardSourceSpec } from "@/ipc/cppParser";
 import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
@@ -8,6 +9,8 @@ import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
+import { calculateLceTarget, type LceTargetCalculation } from "./toneLceTarget";
+import { ToneLceTargetWeight } from "./ToneLceTargetWeight";
 
 const TONE_TABS = ["LTM", "LCE", "GMA", "DCE", "CA-LTM"] as const;
 type ToneTab = (typeof TONE_TABS)[number];
@@ -723,6 +726,7 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
   const targetWidth = Math.max(1, ...tables.target.map((fields) => fields.length));
   const ratioBracket = axisBracket(position.lv, tables.ratio[0].map((field) => Number(field.value)));
   const targetBracket = indexedBracket(position.lv / 10, position.lvLow, position.lvHigh, targetWidth);
+  const calculation = calculateLceTarget(props.tomlData, interpolateFields(tables.target[0] ?? [], targetBracket));
   return (
     <section style={lceCardStyle}>
       <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
@@ -733,41 +737,49 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
           </Panel>
           <ResizeHandle direction="horizontal" size={8} />
           <Panel defaultSize={50} minSize={25} className="min-w-0">
-            <ToneLceCalCard tomlData={props.tomlData} parameterLvTarget={interpolateFields(tables.target[0] ?? [], targetBracket)} />
+            <ToneLceCalCard calculation={calculation} />
           </Panel>
         </PanelGroup>
         <ToneLceValueGrid tableId="target" title="Target" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props} />
+        <ToneLceTargetWeight calculation={calculation} />
       </div>
     </section>
   );
 }
 
-function ToneLceCalCard({ tomlData, parameterLvTarget }: { tomlData: Record<string, string>; parameterLvTarget: number }) {
-  const lvTarget = imageNumber(tomlData, "SW_LCE_LVTarget");
-  const lvProb = imageNumber(tomlData, "SW_LCE_LVProb");
-  const lumaTarget = imageNumber(tomlData, "SW_LCE_LumaFlatTarget");
-  const lumaProb = imageNumber(tomlData, "SW_LCE_LumaFlatProb");
-  const flatProb = imageNumber(tomlData, "SW_LCE_FlatProb");
-  const flatTarget = imageNumber(tomlData, "SW_LCE_FlatTarget");
-  const lumaFlatProb = Math.round(lumaProb * flatProb / 1000);
-  const finalTarget = Math.round((lvTarget * lvProb + lumaTarget * (1000 - lvProb)) / 1000);
-  const parameterFinalTarget = Math.round((parameterLvTarget * lvProb + lumaTarget * (1000 - lvProb)) / 1000);
-  const lumaFlatTarget = flatTarget * lumaFlatProb + lumaTarget * (1000 - lumaFlatProb);
-  const value = (number: number) => Number.isFinite(number) ? String(number) : "-";
+function ToneLceCalCard({ calculation }: { calculation: LceTargetCalculation }) {
+  const { t } = useTranslation();
+  const { lvTarget, lvProb, lumaTarget, lumaProb, flatProb, flatTarget, lumaFlatProb, lumaFlatTarget,
+    finalTarget, parameterFinalTarget, recordedLumaFlatProb, recordedLumaFlatTarget, recordedFinalTarget } = calculation;
+  const value = formatInterpolation;
+  const comparison = (key: string, recorded: number, computed: number) => <div className="text-[10px]"
+    style={{ color: "var(--colorNeutralForeground3)" }}>
+    {t("tone_lce.recorded_comparison", { key, value: value(recorded), delta: value(computed - recorded) })}
+  </div>;
 
   return <section className="flex h-full min-w-0 flex-col" style={lceCardStyle}>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 border-b px-2 text-xs font-semibold"
       style={lceHeaderStyle}>
-      <span>Cal <span className="font-mono font-normal">EXIF: {value(finalTarget)}</span></span>
-      <span className="font-mono font-normal">参数插值: {value(parameterFinalTarget)}</span>
+      <span>Cal <span className="font-mono font-normal">{t("tone_lce.recalculated")}: {value(finalTarget)}</span></span>
+      <span className="font-mono font-normal" title={t("tone_lce.parameter_hint")}>{t("tone_lce.parameter_blend")}: {value(parameterFinalTarget)}</span>
     </div>
     <div className="flex min-w-0 flex-col gap-2 p-2 font-mono text-[11px] leading-5"
       style={{ color: "var(--colorNeutralForeground1)", overflowWrap: "anywhere" }}>
-      <div>FinalTarget = (LVTarget * LVProb + LumaFlatTarget * (1000 - LVProb)) / 1000</div>
-      <div>EXIF: ({value(lvTarget)} * {value(lvProb)} + {value(lumaTarget)} * (1000 - {value(lvProb)})) / 1000 = <strong>{value(finalTarget)}</strong></div>
-      <div>lumaFlatProb = (LumaProb * FlatProb) / 1000 = ({value(lumaProb)} * {value(flatProb)}) / 1000 = <strong>{value(lumaFlatProb)}</strong></div>
-      <div>LumaFlatTarget = FlatTarget * LumaFlatProb + LumaTarget * (1000 - LumaFlatProb)</div>
-      <div>EXIF: {value(flatTarget)} * {formatInterpolation(lumaFlatProb)} + {value(lumaTarget)} * (1000 - {formatInterpolation(lumaFlatProb)}) = <strong>{formatInterpolation(lumaFlatTarget)}</strong></div>
+      <div>
+        <div>LumaFlatProb = LumaProb * FlatProb / 1000</div>
+        <div>({value(lumaProb)} * {value(flatProb)}) / 1000 = <strong>{value(lumaFlatProb)}</strong></div>
+        {comparison("SW_LCE_LumaFlatProb", recordedLumaFlatProb, lumaFlatProb)}
+      </div>
+      <div>
+        <div>LumaFlatTarget = (FlatTarget * LumaFlatProb + LumaTarget * (1000 - LumaFlatProb)) / 1000</div>
+        <div>({value(flatTarget)} * {value(lumaFlatProb)} + {value(lumaTarget)} * (1000 - {value(lumaFlatProb)})) / 1000 = <strong>{value(lumaFlatTarget)}</strong></div>
+        {comparison("SW_LCE_LumaFlatTarget", recordedLumaFlatTarget, lumaFlatTarget)}
+      </div>
+      <div>
+        <div>FinalTarget = (LVTarget * LVProb + LumaFlatTarget * (1000 - LVProb)) / 1000</div>
+        <div>({value(lvTarget)} * {value(lvProb)} + {value(lumaFlatTarget)} * (1000 - {value(lvProb)})) / 1000 = <strong>{value(finalTarget)}</strong></div>
+        {comparison("SW_LCE_FinalTarget", recordedFinalTarget, finalTarget)}
+      </div>
     </div>
   </section>;
 }

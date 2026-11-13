@@ -67,7 +67,7 @@ pub fn resolve(
     parsed:    &ParseResult,
     spec:      &CardSourceSpec,
 ) -> AppResult<CardSourceHit> {
-    let source = std::fs::read_to_string(cpp_path)?;
+    let source = crate::source_text::read_source(cpp_path)?;
     let lines: Vec<&str> = source.lines().collect();
 
     let mut ranges: Vec<[u32; 2]> = Vec::new();

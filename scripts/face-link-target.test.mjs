@@ -252,7 +252,7 @@ test('parameter bound draft changes are projected without mutating the original 
 const bundle = JSON.parse(readFileSync(new URL('../src-tauri/resources/translations/zh_CN.json', import.meta.url), 'utf8'));
 const t = (key, args = {}) => (bundle[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) => String(args[name] ?? ''));
 const { FaceLinkFormula } = loadSelected('../src/views/mtk/isp6s/ImagePane/FaceLinkFormula.tsx', ['FaceLinkFormula'], {
-  Link: 'Link', useTranslation: () => ({ t }),
+  Link: 'Link', Tooltip: 'Tooltip', useTranslation: () => ({ t }),
 });
 function nodesOfType(node, type) {
   if (node == null || typeof node !== 'object') return [];
@@ -294,38 +294,48 @@ function chartFormulaProps(extra = {}) {
 test('Face Link summary has two compact rows and moves full math into focusable hover hints', () => {
   const tree = FaceLinkFormula(chartFormulaProps());
   const rows = nodesOfType(tree, 'tr').slice(1);
+  const hints = nodesOfType(tree, 'Tooltip').map(node => visibleText(node.props.content.children));
   assert.equal(rows.length, 2);
-  assert.match(visibleText(rows[0]), /EXIF550\[200, 600\]550范围内/);
-  assert.match(visibleText(rows[1]), /参数计算550\[300, 500\]500已压至上限/);
+  assert.equal(nodesOfType(tree, 'th').filter(node => node.props.scope === 'col').map(visibleText).join('|'),
+    '来源|加权值|边界显示|限制范围|最终值');
+  assert.match(visibleText(rows[0]), /EXIF550下限200上限600\[200, 600\]550范围内/);
+  assert.match(visibleText(rows[1]), /参数计算550下限300上限500\[300, 500\]500已压至上限/);
   assert.doesNotMatch(visibleText(tree), /limit\(|AE_TAG_FACE_|1024/);
-  assert.match(rows[0].props.title, /limit\(550\.0, 200\.0, 600\.0\) = 550\.0/);
-  assert.match(rows[0].props.title, /low_bound\s+200\.0\s+\|\s+EXIF · AE_TAG_FACE_LOW_BOUND/);
-  assert.match(rows[0].props.title, /high_bound\s+600\.0\s+\|\s+EXIF · AE_TAG_FACE_HIGH_BOUND/);
-  assert.match(rows[1].props.title, /limit\(550\.0, 300\.0, 500\.0\) = 500\.0/);
-  assert.match(rows[1].props.title, /low_bound\s+300\.0\s+\|\s+AE.cpp · \[0\]\[4\]\[1\]\.19/);
-  assert.match(rows[1].props.title, /high_bound\s+500\.0\s+\|\s+AE.cpp · \[0\]\[4\]\[1\]\.20/);
-  assert.ok(rows.every(row => row.props.tabIndex === 0 && row.props['data-tooltip-wrap'] === 'true' && row.props['data-tooltip-monospace'] === 'true'));
+  assert.match(hints[0], /limit\(550\.0, 200\.0, 600\.0\) = 550\.0/);
+  assert.match(hints[0], /low_bound200\.0EXIF · AE_TAG_FACE_LOW_BOUND/);
+  assert.match(hints[0], /high_bound600\.0EXIF · AE_TAG_FACE_HIGH_BOUND/);
+  assert.match(hints[1], /limit\(550\.0, 300\.0, 500\.0\) = 500\.0/);
+  assert.match(hints[1], /low_bound300\.0AE.cpp · \[0\]\[4\]\[1\]\.19/);
+  assert.match(hints[1], /high_bound500\.0AE.cpp · \[0\]\[4\]\[1\]\.20/);
+  assert.ok(rows.every(row => row.props.tabIndex === 0 && row.props['data-tooltip-disabled'] === 'true' && !row.props.title));
   assert.deepEqual(nodesOfType(tree, 'Link').map(link => visibleText(link)), ['300', '500']);
   assert.doesNotMatch(visibleText(tree), /\[0\]\[4\]\[1\]\.19|\[0\]\[4\]\[1\]\.20/);
 });
 
-test('boundary rows display independent EXIF and parameter coefficients instead of paths or scaled limits', () => {
+test('boundary column displays independent EXIF and parameter coefficients instead of paths or scaled limits', () => {
   const props = chartFormulaProps();
   props.exif = { ...props.exif, lowBound: 90, highBound: 9000, lowLimit: 66.09375, highLimit: 6609.375 };
   props.parameter = { ...props.parameter, lowBound: 100, highBound: 8000 };
   const tree = FaceLinkFormula(props);
   const groups = nodesOfType(tree, 'div').filter(node => node.props.role === 'group');
   assert.equal(groups.length, 2);
-  assert.match(visibleText(groups[0]), /EXIF 边界：下限90上限9000/);
-  assert.match(visibleText(groups[1]), /参数边界：下限100上限8000/);
+  assert.equal(groups[0].props['aria-label'], 'EXIF 边界：');
+  assert.equal(groups[1].props['aria-label'], '参数边界：');
+  assert.match(visibleText(groups[0]), /下限90上限9000/);
+  assert.match(visibleText(groups[1]), /下限100上限8000/);
+  const table = nodesOfType(tree, 'table')[0];
+  const rows = nodesOfType(table, 'tr').slice(1);
+  assert.deepEqual(nodesOfType(rows[0], 'td').map(visibleText), ['550', '下限90上限9000', '[66, 6609]', '550范围内']);
+  assert.deepEqual(nodesOfType(rows[1], 'td').map(visibleText), ['550', '下限100上限8000', '[300, 500]', '500已压至上限']);
+  assert.equal(nodesOfType(tree, 'table').length, 1);
+  assert.equal(nodesOfType(table, 'div').filter(node => node.props.role === 'group').length, 2, 'both groups are inside the table');
   assert.equal(nodesOfType(groups[0], 'Link').length, 0, 'EXIF coefficients are read-only, not AE.cpp jump controls');
-  const exifValues = nodesOfType(groups[0], 'span').filter(node => node.props.tabIndex === 0);
-  assert.equal(exifValues.length, 2);
-  assert.match(exifValues[0].props.title, /下限系数：90\.0\n来源：EXIF · AE_TAG_FACE_LOW_BOUND/);
-  assert.match(exifValues[1].props.title, /上限系数：9000\.0\n来源：EXIF · AE_TAG_FACE_HIGH_BOUND/);
+  const exifHint = visibleText(nodesOfType(tree, 'Tooltip')[0].props.content.children);
+  assert.match(exifHint, /low_bound90\.0EXIF · AE_TAG_FACE_LOW_BOUND/);
+  assert.match(exifHint, /high_bound9000\.0EXIF · AE_TAG_FACE_HIGH_BOUND/);
   assert.deepEqual(nodesOfType(groups[1], 'Link').map(node => visibleText(node)), ['100', '8000']);
-  assert.match(nodesOfType(groups[1], 'Link')[0].props.title, /\[0\]\[4\]\[1\]\.19/);
-  assert.match(nodesOfType(groups[1], 'Link')[1].props.title, /\[0\]\[4\]\[1\]\.20/);
+  assert.match(nodesOfType(groups[1], 'Link')[0].props['aria-label'], /\[0\]\[4\]\[1\]\.19/);
+  assert.match(nodesOfType(groups[1], 'Link')[1].props['aria-label'], /\[0\]\[4\]\[1\]\.20/);
 });
 
 test('zero remains a clickable coefficient while missing parameter values stay disabled and independent of EXIF', () => {
@@ -347,10 +357,12 @@ test('integer summary and one-decimal hints preserve internal precision and miss
   const props = chartFormulaProps();
   props.exif = { ...props.exif, rawTarget: 1886.049, lowLimit: 66.09375, highLimit: 6609.375, result: 1886.049 };
   props.parameter = { ...props.parameter, lowLimit: 500, highLimit: 300, result: 500 };
-  const rows = nodesOfType(FaceLinkFormula(props), 'tr').slice(1);
-  assert.match(rows[0].props.title, /limit\(1886\.0, 66\.1, 6609\.4\) = 1886\.0/);
+  const tree = FaceLinkFormula(props);
+  const rows = nodesOfType(tree, 'tr').slice(1);
+  const hint = visibleText(nodesOfType(tree, 'Tooltip')[0].props.content.children);
+  assert.match(hint, /limit\(1886\.0, 66\.1, 6609\.4\) = 1886\.0/);
   assert.ok(visibleText(rows[0]).includes('[66, 6609]1886'));
-  assert.doesNotMatch(rows[0].props.title, /1886\.049|66\.09375|6609\.375/);
+  assert.doesNotMatch(hint, /1886\.049|66\.09375|6609\.375/);
   assert.equal(props.exif.rawTarget, 1886.049, 'formatting cannot change calculator inputs');
   assert.equal(props.exif.lowLimit, 66.09375);
   assert.ok(visibleText(rows[1]).includes('[300, 500]'));
@@ -362,17 +374,28 @@ test('integer summary and one-decimal hints preserve internal precision and miss
   assert.match(visibleText(nodesOfType(FaceLinkFormula(props), 'tr').at(-1)), /已抬至下限/);
 });
 
-test('formula hints group one-decimal calculations with each source path and value', () => {
+test('formula cards separate calculations from source columns without changing numeric precision', () => {
   const props = chartFormulaProps({ useParameterFdszRaForExif: true });
   props.exif = { ...props.exif, rawTarget: 1509.9675516224188, result: 1509.9675516224188, lowLimit: 66.09375, highLimit: 6609.375 };
   const tree = FaceLinkFormula(props), row = nodesOfType(tree, 'tr')[1];
-  for (const heading of ['[1] 加权计算', '[2] 极值范围', '[3] 最终结果', '来源（数值 | 标签 / 路径）']) assert.ok(row.props.title.includes(heading));
-  assert.match(row.props.title, /limit\(1510\.0, 66\.1, 6609\.4\) = 1510\.0/);
-  assert.match(row.props.title, /FDSZ_RA\s+512\.0\s+\|\s+AE.cpp · face_sz: \[0\]\[4\]\[1\]\[47\]/);
-  assert.match(row.props.title, /AE_Target\s+1024\.0\s+\|\s+EXIF · AE_TAG_AE_TARGET/);
-  assert.doesNotMatch(row.props.title, /\d+\.\d{2,}/, 'no long floating-point expansions in the formula hint');
+  const tooltip = nodesOfType(tree, 'Tooltip')[0];
+  const card = tooltip.props.content.children, hint = visibleText(card);
+  const sections = nodesOfType(card, 'section');
+  assert.equal(sections.length, 4);
+  for (const [index, heading] of ['[1] 加权计算', '[2] 极值范围', '[3] 最终结果', '数值来源'].entries()) assert.ok(visibleText(sections[index]).startsWith(heading));
+  assert.match(hint, /limit\(1510\.0, 66\.1, 6609\.4\) = 1510\.0/);
+  const sourceRows = nodesOfType(nodesOfType(card, 'dl')[0], 'div');
+  assert.equal(sourceRows.length, 5);
+  assert.deepEqual(nodesOfType(sourceRows[1], 'dt').map(visibleText), ['FDSZ_RA']);
+  assert.match(visibleText(sourceRows[1]), /FDSZ_RA512\.0AE.cpp · face_sz: \[0\]\[4\]\[1\]\[47\]/);
+  assert.match(visibleText(sourceRows[0]), /AE_Target1024\.0EXIF · AE_TAG_AE_TARGET/);
+  assert.doesNotMatch(hint, /\d+\.\d{2,}/, 'no long floating-point expansions in the formula hint');
   assert.ok(nodesOfType(row, 'td').every(cell => !/\d+\.\d+/.test(visibleText(cell))), 'all summary cells use integers');
-  assert.ok(nodesOfType(tree, 'Link').every(link => link.props['data-tooltip-monospace'] === 'true' && /当前值 \d+\.\d\)/.test(link.props.title.replace('）', ')'))));
+  assert.ok(nodesOfType(tree, 'Link').every(link => /当前值 \d+\.\d）/.test(link.props['aria-label'])));
+  assert.equal(tooltip.props.relationship, 'description');
+  assert.equal(tooltip.props.positioning, 'below-start');
+  assert.equal(tooltip.props.content.style.maxWidth, 'min(560px, calc(100vw - 24px))');
+  assert.equal(tooltip.props.content.style.backgroundColor, 'var(--colorNeutralBackground1)');
 });
 
 test('monospaced tooltip styling is opt-in and leaves ordinary tooltips unchanged', () => {
@@ -455,7 +478,7 @@ test('all five summary locales have complete matching keys and interpolation fie
   for (const locale of ['zh_CN', 'zh_TW', 'en_US', 'ja_JP', 'tr_TR']) {
     const values = JSON.parse(readFileSync(new URL(`../src-tauri/resources/translations/${locale}.json`, import.meta.url), 'utf8'));
     const keys = Object.keys(values).filter(key => key.startsWith('face_link_formula.')).sort();
-    assert.equal(keys.length, 21);
+    assert.equal(keys.length, 22);
     const current = keys.map(key => [key, [...values[key].matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]).sort()]);
     if (shape) assert.deepEqual(current, shape, locale); else shape = current;
   }

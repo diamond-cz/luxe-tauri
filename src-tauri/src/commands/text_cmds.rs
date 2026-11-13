@@ -7,12 +7,12 @@ use std::{
 
 #[tauri::command]
 pub fn read_text_file(path: String) -> AppResult<String> {
-    Ok(std::fs::read_to_string(&path)?)
+    Ok(crate::source_text::read_source(Path::new(&path))?)
 }
 
 #[tauri::command]
 pub fn write_text_file(path: String, contents: String) -> AppResult<()> {
-    std::fs::write(&path, contents)?;
+    crate::source_text::write_source(Path::new(&path), &contents)?;
     Ok(())
 }
 

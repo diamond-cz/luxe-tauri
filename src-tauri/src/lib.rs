@@ -8,6 +8,7 @@ pub mod image_sync;
 mod memory_trim;
 pub mod poetry;
 pub mod shortcuts;
+pub mod source_text;
 pub mod state;
 pub mod tray;
 pub mod window_geom;

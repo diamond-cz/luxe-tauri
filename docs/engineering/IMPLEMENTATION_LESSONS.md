@@ -3069,3 +3069,83 @@
 
 - `npm run typecheck`、`npm run version:check`：通过。Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过；`npx --yes --package=node@22 node --test --test-reporter=spec scripts/image-sync.test.mjs scripts/workspace-persistence.test.mjs scripts/image-exif.test.mjs scripts/mtk-headers.test.mjs scripts/face-link-target.test.mjs`：99 项通过。
 - `git diff --check`：通过，仅 LF/CRLF 提示。未本地执行 Cargo/Tauri 编译、真实桌面参数选中或截图验收；未提交或推送。
+
+### 2026-11-13：Face 边界并入来源表格与悬浮卡片
+
+**亮点**
+
+- `src/views/mtk/isp6s/ImagePane/FaceLinkFormula.tsx` 将两组原始系数合入对应 EXIF/参数计算行，在加权值右侧增加“边界显示”列，删除表格下重复的边界区域。五列表头和数据继续共用 `colgroup`；系数和计算后的限制范围分别展示，较窄列内下限/上限可换行。
+- 参数数值继续使用 Fluent Link，直接复用 `.19/.20 → jumpToFaceCwrBoundSource → param_map` 的当前源码 token、行号与 ordinal 选中链路；EXIF 只读，参数零值有效，非有限系数或缺少跳转能力时禁用。
+- 原行 title 长文本改为两行各一个 Fluent Tooltip 卡片，计算分区、最终结果背景强调、来源按名称/数值/路径三列对齐；公式和数值保持等宽、一位小数，路径独立换行。卡片宽高受视口限制并允许纵向滚动，使用 Fluent 语义令牌。复用组件的定位、键盘和清理逻辑，未添加自定义全局监听器或数据请求。
+- 五种语言补齐“边界显示”列名并精简来源标题；同步 `docs/features/FACE_TABLE_HEATMAP.md` 与既有 `scripts/face-link-target.test.mjs` 的展示契约。
+
+**痛点**
+
+- 原始边界系数和乘以 AE Target 后的限制范围含义不同，合并列时必须消费 `lowBound/highBound`，不能挪用 `lowLimit/highLimit`。格式化只用于显示，参数定位仍由原回调读取真实草稿 token。
+- 行 Tooltip 与全局 title 委托若同时启用，会出现重叠提示；新行显式标记 `data-tooltip-disabled="true"` 并移除子值 title，路径在卡片和链接无障碍名称中保留。局部 Tooltip 仅用于此处固定的两行，不推广到大图片列表。
+- 系统默认 Node 为 24，按项目要求以 npx Node 22 运行专项测试；首次被沙箱阻止写入工作区外 npm 缓存，获准后通过。实际 Windows 窗口、高 DPI、深浅主题和短视口滚动未实测。
+
+**闭坑**
+
+- 回归检查五列顺序、每行四个数据单元格、两组系数均在表格内部，原始系数与缩放范围数值不同仍各自正确展示。
+- 保留参数链接进入 `param_map` 并选中同一行不同草稿 token 的测试；同时检查缺回调/缺字段/无效行号禁用、零值可点击、五语言键与插值一致，以及悬浮数值未降低计算精度。
+- Tooltip 必须同时支持行悬浮和 Tab 聚焦，阻止全局重复提示；长路径与较小视口保留换行/滚动入口，避免隐藏排查所需来源。
+
+**验证**
+
+- `npm run typecheck`：通过；`npx --yes --package=node@22 node --test --test-reporter=spec scripts/face-link-target.test.mjs`：29 项通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。未执行本地 Cargo/Tauri 编译、桌面截图或真实参数映射选中验收；未提交或推送。
+
+### 2026-11-13：ToneMap LCE 原始输入计算链与 Target Weight
+
+**亮点**
+
+- 新增 `ImagePane/toneLceTarget.ts` 集中读取原始 `SW_LCE_LumaProb / SW_LCE_LumaTarget`，修复误用已混合字段的问题；混合目标补 `/1000`，最终混合消费实际重算中间目标，LV 参数插值复用同一链路。保留原概率/最终值取整约定，中间目标不做显示舍入。
+- `ToneChartMapMode.tsx` 的 Cal 按概率、混合目标、最终值顺序显示，分别列出 EXIF 记录和重算差值。“LV 参数混合”明确只替换 LVTarget；不把重算值标作设备记录值。
+- 新增 `ToneLceTargetWeight.tsx`，放在 Target 参数表下，以原生 SVG/Fluent 蓝绿红语义令牌显示 LV/Luma/Flat 系数占比，图例旁展示四个概率关键字。绘图使用 EXIF 记录的 LVProb/LumaFlatProb；参考值 715/253 显示 71.5%/21.3%/7.2%。无额外 IPC、图表依赖、观察器或持久化设置。
+- 新增八项实际计算与 JSX 测试并加入 `npm run sync:test`；五语言补齐对照和异常文案，新增功能专题并更新文档索引。
+
+**痛点**
+
+- 原组件把 `LumaFlatProb` 当作 `LumaProb` 再乘 FlatProb，把 `LumaFlatTarget` 当作 LumaTarget 再混合；底部还缺归一化且未接入顶部，导致错误推导与看似正常的顶部结果并存。修改必须连通整个链路，不能只换一个 key 或改公式字符串。
+- 参考图按展示公式重算的中间目标是 1836.973，EXIF 记录为 1774；现有证据无法证明设备是否有其他处理，不能为了数值相等而猜测限制或截断。界面保留差值，权重图明确使用记录概率，不暗中使用另一来源。
+- 首次经 Windows PowerShell 管道写入新翻译时非 ASCII 文本被编码成问号；读取后发现，立即以 apply_patch 修复五语言文本，并加入翻译无问号替换校验。既有 Face 未提交改动保持保留。
+
+**闭坑**
+
+- 原始输入、重算中间值、记录中间值必须有独立名称；缺失原始输入显示 `-`，不能借记录值填空而伪装全链路重算成功。记录字段变更不能影响重算结果。
+- 图中 LV=v、Flat=(1-v)p、Luma=(1-v)(1-p)，p 来自记录 LumaFlatProb；三项合计 100%，不把概率本身或目标贡献误作最终权重。缺失/越界概率不绘制假分量，零和单分量 100% 均合法。
+- 需要验证真实桌面的窄布局、深浅主题、切图以及草稿插值联动；本地类型/JSX 检查不能宣称 Windows UI 已验收。设备后续限制、平滑与整数截断策略仍待算法实现证据。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过。使用已缓存 Node 22.23.5 运行 `scripts/tone-lce-target.test.mjs`：8 项通过；Node 22 执行 `sync:test` 对应六个脚本：107 项通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。未执行本地 Cargo/Rust/Tauri 编译或桌面截图验收；未提交或推送。
+
+### 2026-11-13：GBK AE.cpp 加载失败与源码编码统一
+
+**亮点**
+
+- `src-tauri/src/source_text.rs` 集中提供严格源码解码和保留编码写入；编辑器加载、tree-sitter 文件解析、卡片关键词定位三个入口均使用同一份解码文本。支持 UTF-8、UTF-8 BOM、UTF-16 LE/BE BOM，以及 Windows CP936/GBK 无损回退。
+- 复用锁定的 `windows 0.61.3`，仅启用 `Win32_Globalization` feature；不增加第三方依赖、编码状态缓存或 IPC。GBK 编码禁止 best-fit，解码/编码分别做往返校验，保存前完成编码，不可表示字符不会截断原文件。
+- 新增 `src-tauri/tests/source_text_encoding.rs` 的六项夹具测试覆盖显示/解析/关键词定位/UTF-8 草稿坐标、保留 BOM/换行/GBK 中文、编辑保存、无法表示字符不覆盖及新另存为 UTF-8，由 Windows CI 自动发现。专题文档和核心避坑规则同步记录入口。
+
+**痛点**
+
+- 现场 AE.cpp 共 143444 字节，在 UTF-8 偏移 54239 处失败；Python GBK 与 Windows CP936 严格解码后重新编码均与原字节一致。此前三个读取点使用 `read_to_string`，错误发生在解析前；只替换编辑器读取会让参数映射和卡片跳转继续失败。
+- 直接容错解码会把中文替换为乱码，直接 UTF-8 写入会改变参数文件编码；必须同时处理加载、解析坐标和保存。BOM 在统一入口移除，UTF-8 草稿和解析器均基于相同文本计算坐标。
+- 未自动猜测其他代码页、无 BOM UTF-16 或 GB18030 四字节扩展；无法确定的编码保持报错。此次不增加原子写入/并发外部编辑保护；保留已有保存接口边界。
+
+**闭坑**
+
+- 后续参数源码读取必须走 `source_text::read_source`；不得使用 `from_utf8_lossy`、原始 GBK 字节列或零散编码回退。图片 TOML/配置 JSON 等仍遵守各自严格 UTF-8 契约。
+- 新增 GBK 注释或数值编辑须测无修改字节往返、中文关键词跳转与同一行 token 坐标；无法表示字符和非法原文件必须在写入前失败。新另存为/临时草稿与覆盖已有文件的编码行为应分别验证。
+- 现场文件仅被只读诊断，没有转码或覆盖。Rust 修复需要包含改动的 Windows CI 应用产物才能验收；不得把 rustfmt 或前端检查表述为编码行为/桌面加载已经通过。
+
+**验证**
+
+- Python 严格 UTF-8/GBK 检查和 Windows CP936 `System.Text.Encoding` 严格往返：确认现场根因和字节可逆；没有写入原文件。
+- 通过 Python ctypes 直接调用与实现相同标志的 `MultiByteToWideChar(CP936, MB_ERR_INVALID_CHARS)` / `WideCharToMultiByte(CP936, WC_NO_BEST_FIT_CHARS)`：现场文件往返字节一致，原文件 SHA-256 保持不变。此检查验证系统 API 与数据，不代替 Rust 行为测试。
+- 新模块/测试的 `rustfmt --check --edition 2021`：通过；受影响既有 Rust 文件用 `rustfmt --emit stdout --config skip_children=true` 做语法静态检查：通过，未重排既有文件。
+- `npm run typecheck`、`npm run version:check`：通过。Rust 编译与六项行为测试未在本地运行，待 Windows CI；未执行 Tauri 编译或桌面加载/编辑/保存验收；未提交或推送。
+- `git diff --check`：通过，仅 LF/CRLF 提示；三个源码读取入口已无 `read_to_string`。

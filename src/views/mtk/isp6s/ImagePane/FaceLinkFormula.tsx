@@ -1,4 +1,4 @@
-import { Link } from "@fluentui/react-components";
+import { Link, Tooltip } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 
 interface FormulaValues {
@@ -31,30 +31,48 @@ interface Props {
 const displayNumber = (value: number) => Number.isFinite(value) ? String(Math.round(value)) : "-";
 const formulaNumber = (value: number) => Number.isFinite(value) ? value.toFixed(1) : "-";
 
-function formulaDetails(values: FormulaValues, headings: { blend: string; bounds: string; result: string; sources: string }): string {
+function formulaDetails(values: FormulaValues, headings: { blend: string; bounds: string; result: string; sources: string }) {
   const { faceTarget, weight, normalTarget, aeTarget, lowBound, highBound, rawTarget, lowLimit, highLimit, result } = values;
-  const sourceLine = (name: string, value: number, path: string) =>
-    `${name.padEnd(14)} ${formulaNumber(value).padStart(8)}  |  ${path}`;
-  return [
-    headings.blend,
-    "raw = (FLT_Target * FDSZ_RA + Normal_Target * (1024.0 - FDSZ_RA)) / 1024.0",
-    `    = (${formulaNumber(faceTarget)} * ${formulaNumber(weight)} + ${formulaNumber(normalTarget)} * (1024.0 - ${formulaNumber(weight)})) / 1024.0`,
-    `    = ${formulaNumber(rawTarget)}`,
-    "",
-    headings.bounds,
-    `low  = ${formulaNumber(aeTarget)} * ${formulaNumber(lowBound)} / 1024.0 = ${formulaNumber(lowLimit)}`,
-    `high = ${formulaNumber(aeTarget)} * ${formulaNumber(highBound)} / 1024.0 = ${formulaNumber(highLimit)}`,
-    "",
-    headings.result,
-    `limit(${formulaNumber(rawTarget)}, ${formulaNumber(lowLimit)}, ${formulaNumber(highLimit)}) = ${formulaNumber(result)}`,
-    "",
-    headings.sources,
-    sourceLine("AE_Target", aeTarget, "EXIF · AE_TAG_AE_TARGET"),
-    sourceLine("FDSZ_RA", weight, values.weightSource),
-    sourceLine("Normal_Target", normalTarget, values.normalTargetSource),
-    sourceLine("low_bound", lowBound, values.lowBoundSource),
-    sourceLine("high_bound", highBound, values.highBoundSource),
-  ].join("\n");
+  const calculations = [
+    { heading: headings.blend, lines: [
+      "raw = (FLT_Target × FDSZ_RA + Normal_Target × (1024 − FDSZ_RA)) / 1024",
+      `= (${formulaNumber(faceTarget)} × ${formulaNumber(weight)} + ${formulaNumber(normalTarget)} × (1024 − ${formulaNumber(weight)})) / 1024 = ${formulaNumber(rawTarget)}`,
+    ] },
+    { heading: headings.bounds, lines: [
+      `low = ${formulaNumber(aeTarget)} × ${formulaNumber(lowBound)} / 1024 = ${formulaNumber(lowLimit)}`,
+      `high = ${formulaNumber(aeTarget)} × ${formulaNumber(highBound)} / 1024 = ${formulaNumber(highLimit)}`,
+    ] },
+    { heading: headings.result, lines: [
+      `limit(${formulaNumber(rawTarget)}, ${formulaNumber(lowLimit)}, ${formulaNumber(highLimit)}) = ${formulaNumber(result)}`,
+    ] },
+  ];
+  const sources = [
+    { name: "AE_Target", value: aeTarget, path: "EXIF · AE_TAG_AE_TARGET" },
+    { name: "FDSZ_RA", value: weight, path: values.weightSource },
+    { name: "Normal_Target", value: normalTarget, path: values.normalTargetSource },
+    { name: "low_bound", value: lowBound, path: values.lowBoundSource },
+    { name: "high_bound", value: highBound, path: values.highBoundSource },
+  ];
+  return <div className="grid gap-3 text-xs leading-5" style={{ color: "var(--colorNeutralForeground1)" }}>
+    <div className="grid gap-2">
+      {calculations.map(({ heading, lines }) => <section key={heading}
+        className={heading === headings.result ? "rounded px-2 py-1.5" : undefined}
+        style={heading === headings.result ? { backgroundColor: "var(--colorNeutralBackground2)" } : undefined}>
+        <div className="mb-0.5 font-semibold" style={{ color: "var(--colorNeutralForeground2)" }}>{heading}</div>
+        {lines.map((line) => <code key={line} className="block whitespace-normal break-words font-mono tabular-nums">{line}</code>)}
+      </section>)}
+    </div>
+    <section className="border-t pt-2" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+      <div className="mb-1 font-semibold" style={{ color: "var(--colorNeutralForeground2)" }}>{headings.sources}</div>
+      <dl className="m-0 grid gap-1.5">
+        {sources.map(({ name, value, path }) => <div key={name} className="grid grid-cols-[6.5rem_3.5rem_minmax(0,1fr)] items-baseline gap-x-2">
+          <dt className="font-mono">{name}</dt>
+          <dd className="m-0 break-all font-mono font-semibold tabular-nums">{formulaNumber(value)}</dd>
+          <dd className="m-0 min-w-0 break-all text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{path}</dd>
+        </div>)}
+      </dl>
+    </section>
+  </div>;
 }
 
 function limitStatus(values: FormulaValues): "unavailable" | "raised" | "lowered" | "unchanged" {
@@ -76,53 +94,49 @@ export function FaceLinkFormula({ exif, parameter, lowBoundPath, highBoundPath, 
   return <div className="w-full min-w-0 text-xs" style={{ color: "var(--colorNeutralForeground2)", fontFamily: "var(--fontFamilyBase, 'Segoe UI', sans-serif)" }}>
     <p className="mb-2 mt-0 text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{t("face_link_formula.flow")}</p>
     <table className="w-full table-fixed border-collapse text-left" aria-label={t("face_link_formula.summary")}>
-      <colgroup><col style={{ width: "17%" }} /><col style={{ width: "22%" }} /><col style={{ width: "36%" }} /><col style={{ width: "25%" }} /></colgroup>
+      <colgroup><col style={{ width: "14%" }} /><col style={{ width: "16%" }} /><col style={{ width: "26%" }} /><col style={{ width: "22%" }} /><col style={{ width: "22%" }} /></colgroup>
       <thead><tr style={{ color: "var(--colorNeutralForeground3)" }}>
-        {["source", "weighted", "range", "result"].map((key) => <th key={key} scope="col" className="break-words px-1.5 pb-1 font-normal">{t(`face_link_formula.${key}`)}</th>)}
+        {["source", "weighted", "boundaries", "range", "result"].map((key) => <th key={key} scope="col" className="break-words px-1.5 pb-1 font-normal">{t(`face_link_formula.${key}`)}</th>)}
       </tr></thead>
-      <tbody>{rows.map(({ key, label, values }) => <tr key={key} tabIndex={0}
-        title={formulaDetails(values, headings)} data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={720} data-tooltip-monospace="true"
-        className="border-t" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-        <th scope="row" className="break-words px-1.5 py-1.5 font-medium">{label}</th>
-        <td className="break-words px-1.5 py-1.5 tabular-nums">{displayNumber(values.rawTarget)}</td>
-        <td className="break-words px-1.5 py-1.5 tabular-nums">{
-          Number.isFinite(values.lowLimit) && Number.isFinite(values.highLimit)
-            ? `[${displayNumber(Math.min(values.lowLimit, values.highLimit))}, ${displayNumber(Math.max(values.lowLimit, values.highLimit))}]` : "-"
-        }</td>
-        <td className="px-1.5 py-1.5">
-          <strong className="tabular-nums" style={{ color: "var(--colorNeutralForeground1)" }}>{displayNumber(values.result)}</strong>
-          <span className="ml-2 inline-block text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{t(`face_link_formula.${limitStatus(values)}`)}</span>
-        </td>
-      </tr>)}</tbody>
+      <tbody>{rows.map(({ key: sourceKey, label, values }) => <Tooltip key={sourceKey}
+        content={{ children: formulaDetails(values, headings), style: {
+          maxWidth: "min(560px, calc(100vw - 24px))", maxHeight: "calc(100vh - 24px)", overflowY: "auto", padding: "12px 14px",
+          backgroundColor: "var(--colorNeutralBackground1)", color: "var(--colorNeutralForeground1)",
+          border: "1px solid var(--colorNeutralStroke2)", borderRadius: "var(--borderRadiusMedium)",
+        } }} relationship="description" positioning="below-start" showDelay={250}>
+        <tr tabIndex={0} data-tooltip-disabled="true" className="border-t" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+          <th scope="row" className="break-words px-1.5 py-1.5 font-medium">{label}</th>
+          <td className="break-words px-1.5 py-1.5 tabular-nums">{displayNumber(values.rawTarget)}</td>
+          <td className="px-1.5 py-1.5">
+            <div role="group" aria-label={t(sourceKey === "exif" ? "face_link_formula.exif_bounds" : "face_link_formula.parameters")}
+              className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              {[
+                { key: "low", path: lowBoundPath, value: values.lowBound, jump: onJumpToLow },
+                { key: "high", path: highBoundPath, value: values.highBound, jump: onJumpToHigh },
+              ].map(({ key, path, value, jump }) => {
+                const bound = t(`face_link_formula.${key}`);
+                return <span key={key} className="inline-flex items-baseline gap-1">
+                  <span className="text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{bound}</span>
+                  {sourceKey === "exif" ? <span className="font-medium tabular-nums">{displayNumber(value)}</span>
+                    : <Link as="button" disabled={!jump || !Number.isFinite(value)} onClick={Number.isFinite(value) ? jump : undefined}
+                      style={{ fontSize: "inherit" }} className="tabular-nums"
+                      aria-label={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}>
+                      {displayNumber(value)}
+                    </Link>}
+                </span>;
+              })}
+            </div>
+          </td>
+          <td className="break-words px-1.5 py-1.5 tabular-nums">{
+            Number.isFinite(values.lowLimit) && Number.isFinite(values.highLimit)
+              ? `[${displayNumber(Math.min(values.lowLimit, values.highLimit))}, ${displayNumber(Math.max(values.lowLimit, values.highLimit))}]` : "-"
+          }</td>
+          <td className="px-1.5 py-1.5">
+            <strong className="tabular-nums" style={{ color: "var(--colorNeutralForeground1)" }}>{displayNumber(values.result)}</strong>
+            <span className="ml-2 inline-block text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{t(`face_link_formula.${limitStatus(values)}`)}</span>
+          </td>
+        </tr>
+      </Tooltip>)}</tbody>
     </table>
-    <div className="mt-2 grid gap-1.5 text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>
-      {rows.map(({ key: sourceKey, values }) => {
-        const label = t(sourceKey === "exif" ? "face_link_formula.exif_bounds" : "face_link_formula.parameters");
-        return <div key={sourceKey} role="group" aria-label={label} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="min-w-[6em]">{label}</span>
-          {[
-            { key: "low", path: lowBoundPath, value: values.lowBound, source: values.lowBoundSource, jump: onJumpToLow },
-            { key: "high", path: highBoundPath, value: values.highBound, source: values.highBoundSource, jump: onJumpToHigh },
-          ].map(({ key, path, value, source, jump }) => {
-            const bound = t(`face_link_formula.${key}`);
-            const hint = t("face_link_formula.bound_value_hint", { bound, source, value: formulaNumber(value) });
-            return <span key={key} className="inline-flex items-center gap-1.5">
-              <span>{bound}</span>
-              {sourceKey === "exif" ? <span tabIndex={0} title={hint} aria-label={hint}
-                className="font-medium tabular-nums" style={{ color: "var(--colorNeutralForeground1)" }}
-                data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={480} data-tooltip-monospace="true">
-                {displayNumber(value)}
-              </span> : <Link as="button" disabled={!jump || !Number.isFinite(value)} onClick={Number.isFinite(value) ? jump : undefined} style={{ fontSize: "inherit" }}
-                className="tabular-nums"
-                title={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}
-                aria-label={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}
-                data-tooltip-position="below-start" data-tooltip-wrap="true" data-tooltip-max-width={480} data-tooltip-monospace="true">
-                {displayNumber(value)}
-              </Link>}
-            </span>;
-          })}
-        </div>;
-      })}
-    </div>
   </div>;
 }
