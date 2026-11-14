@@ -3458,3 +3458,54 @@
 - 修复后：Node `22.23.5` 分别从 Windows PowerShell 5.1 与 PowerShell `7.4.22` 启动，`--test scripts/plugin-package.test.mjs` 均为 6 项通过，包括不兼容模块回归；`--test scripts/image-sync.test.mjs` 13 项通过。
 - Node 22 的 `--check scripts/plugin-package.test.mjs`、`node_modules/typescript/bin/tsc --noEmit` 通过；`git diff --check` 通过，仅 LF/CRLF 提示。
 - 未运行本地 Rust/Tauri 编译、未重新触发远程 workflow，也未实测互联网插件更新下载或桌面安装；不将本地脚本修复通过描述为远程完整插件构建已通过。
+
+### 2026-11-14：插件 0.1.5 更新目录发布、卡片命令与启用生命周期边界
+
+**亮点**
+
+- `manifest.json` 新增可见 `check-update / updater/open`，宿主已有 `userCommands()` 和卡片渲染逻辑可据此显示“检查插件更新”；保留 `sync / view/open` ID，将名称改为“检查 LUXE 图片联动状态”。命令与贡献点提供五语言翻译，四处插件版本同步为 `0.1.5`。
+- 原生端识别更新命令并显示窗口、发出 `plugin-update-requested`；`get_bridge_state.updateRequested` 保留 WebView 尚未就绪时的请求，UI 完成初始化后自动检查。按钮仅检查，不自动下载执行；后续下载仍走已有摘要/包身份验证和宿主安装边界。
+- `native/update.ps1` 的目录优先代理、失败回退同一 GitHub 源地址，单次 15 秒，两者均 404 返回稳定码 `catalog-not-published`。UI 五语言解释未发布原因；包下载保持代理和既有 180 秒/128 MiB 限制，目录尝试间清除未完成文件。
+- `.github/workflows/plugin.yml` 将 main 推送纳入 publish job 条件，插件测试/构建成功后先发布版本包再更新稳定目录；PR 不发布、应用 latest 不受影响。同版包不可换字节和目录不可降级的检查继续保留。
+- 插件提供隐藏 `viewer/start` 方法并将原生窗口初始设为隐藏，供未来宿主在启用时启动后台同步。该方法已实现，但当前宿主没有调用它，自动启动尚未完成，不能把声明入口当成运行时接线。
+
+**痛点**
+
+- 本轮只读 HTTP 检查确认：GitHub API 的 `luxe-plugin-updates` 和 `luxe-image-sync-v0.1.4` Release 均 404，gh-proxy.com 的 `plugins.json` 也 404。上一轮 main 构建成功、发布 job 按旧条件跳过；只有 artifact，线上没有更新目录或包，代理不是此次 404 根因。本地代码未推送并发布前不能宣称旧客户端更新地址已恢复。
+- 只读宿主 `hiviewer_plugins_configure` 发现“启用”只保存权限/新 revision、停止旧会话及刷新格式；没有启动 native-view。实际进程与快照订阅在 `native_view::open()` 内创建，因此旧插件确实要点击打开才同步。
+- 宿主 `native_view::open()` 每次命令先结束旧进程；仅增加状态/更新命令不能实现活动会话复用。宿主没有 sidecar 安装回调，卡片命令只可发起插件自有检查/下载，不能直接打开宿主安装确认或自行改写宿主存储。
+- 用户此前明确要求不修改 `D:/Image_process/hiviewer_rs`，本轮继续只读且其最终 Git 状态为空；“启用即同步”、启动恢复、状态命令不打断同步及宿主内安装需用户允许扩展宿主生命周期/安装边界后实现。具体路径与接线契约已写入插件 README。
+
+**闭坑**
+
+- 卡片新增命令可以通过清单完成，但精确按钮布局、后台自动启动和安装权限属于宿主；不得伪造激活 API、手动启动脱离授权管理的常驻进程、覆盖已安装 EXE 或改写宿主记录。
+- 后续完成宿主接线时，启用必须授权后建立唯一会话、禁用/更新/卸载必须撤销；应用重启恢复已授权插件，不依赖用户先打开设置。状态与更新命令复用会话；失败可观察和重试，不静默漏同步。
+- 自动发布已改变 main 的行为：下次推送构建成功会发布插件 0.1.5 和稳定目录；源码变更继续要求增加插件版本，不可把同版测试重建覆盖到已发布包。发布成功需另核对直连与代理目录可访问，不能只查看 artifact 成功。
+
+**验证**
+
+- Node `22.23.5` 执行 `scripts/plugin-package.test.mjs`：6 项通过；包含命令可见性/五语言、后台窗口隐藏、真实 ZIP、目录代理优先/失败回退、15 秒限时参数、双 404、网络错误、摘要失败和清理测试。
+- Node 22 执行 `sync:test` 对应六个脚本：117 项通过；新增卡片更新命令初始恢复/事件自动检查与未发布目录提示测试。`npm run typecheck` 通过；JS 语法检查、`rustfmt --check --edition 2021 plugins/luxe-image-sync/native/src/main.rs` 和 PyYAML 工作流解析通过。
+- 本轮没有本地 Rust/Tauri 编译、未触发远程构建或发布、未安装/重启用户应用、未做原生截图或实际更新安装验收。互联网目录 404 为实际检查，下载/回退行为测试使用模拟传输，二者分开记录。
+
+### 2026-11-14：宿主指南交付与插件 0.1.5 发布准备
+
+**亮点**
+
+- 按用户最新要求继续保持 HiViewer 源码只读，将完整指南写入 `docs/engineering/HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md`，并维护 docs 索引与插件 README。指南列出当前 configure/open/publish/install 的实际行为、四个方法的接线契约、会话幂等/取消/revision 方案、代理目录与宿主安装确认流程及验收矩阵。
+- 工作流将指南复制到插件 artifact 和版本 Release，用户下载插件时能同时获取后续宿主改造文档。当前完成的卡片命令、代理查询与发布修复和未来需要宿主支持的自动启用/安装明确分开。
+
+**痛点**
+
+- 不修改宿主时没有授权启用的执行钩子，单独更改 main.js 或清单不能创建持久快照会话。当前版本仍需用户首次点击状态/更新命令；未尝试改写宿主文件、注入 UI 或启动脱离生命周期管理的常驻服务。
+- 版本 Release 与固定目录必须实际发布才能解除 404；构建成功、artifact 存在和真实网络可访问是三个独立检查项。用户已授权本轮提交推送与新插件构建，后续须按该链路核对结果。
+
+**闭坑**
+
+- 宿主安装 fingerprint 不是目录 ZIP SHA-256；指南要求复用 download/inspect 返回的 fingerprint 和旧 revision，不能混用两种摘要。宿主更新后保持原有安装后停用/用户授权规则，不自动授予权限。
+- 状态窗口检查当前会话不能依靠旧宿主无条件 open 的重启行为；真正的后台启用、会话复用与重启恢复留待宿主协调入口实现，不能标记为本轮已验收。
+
+**验证**
+
+- Node 22 执行 `scripts/plugin-package.test.mjs`：6 项通过；`sync:test` 对应六个脚本：117 项通过；`npm run typecheck`、受影响 Rust 文件 rustfmt 检查、插件 workflow YAML 解析与 `git diff --check` 通过。
+- 本地未运行 Rust/Tauri 编译。指南尚未在宿主执行，HiViewer Git 状态仍为空；提交前没有安装或重启用户的任一应用。远程构建/发布结果在本轮完成后另行核对，不将本条发布准备记录当作已发布证据。

@@ -25,6 +25,7 @@ struct BridgeState {
     last_selection: RwLock<Option<SyncEnvelope>>,
     luxe_connected: std::sync::atomic::AtomicBool,
     snapshot: RwLock<ViewerSnapshot>,
+    update_requested: std::sync::atomic::AtomicBool,
 }
 
 impl Default for BridgeState {
@@ -34,6 +35,7 @@ impl Default for BridgeState {
             last_selection: RwLock::new(None),
             luxe_connected: std::sync::atomic::AtomicBool::new(false),
             snapshot: RwLock::new(ViewerSnapshot::default()),
+            update_requested: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -82,6 +84,7 @@ fn get_bridge_state(state: State<'_, Arc<BridgeState>>) -> Result<Value, String>
         .map_err(|_| "selection state poisoned")?;
     Ok(
         json!({ "snapshot": *snapshot, "connected": is_connected(&state),
+        "updateRequested": state.update_requested.load(std::sync::atomic::Ordering::Acquire),
         "pendingSequence": queue.pending_sequence(), "lastAck": queue.last_ack, "lastSelection": *selection }),
     )
 }
@@ -210,7 +213,10 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": env!("CARGO_PKG_VERSION") }, "capabilities": [] }
                     }),
                 ),
-                Some("view/open") | Some("viewer/update") => {
+                Some("view/open")
+                | Some("updater/open")
+                | Some("viewer/start")
+                | Some("viewer/update") => {
                     let snapshot = message
                         .get("params")
                         .and_then(|params| params.get("viewer"))
@@ -253,9 +259,15 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                     } else {
                         false
                     };
-                    if accepted
-                        && message.get("method").and_then(Value::as_str) == Some("view/open")
-                    {
+                    let method = message.get("method").and_then(Value::as_str);
+                    if accepted && method == Some("updater/open") {
+                        // Recovery state retains the request if the WebView has not registered its listener yet.
+                        state
+                            .update_requested
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        let _ = app.emit("plugin-update-requested", ());
+                    }
+                    if accepted && matches!(method, Some("view/open" | "updater/open")) {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.unminimize();

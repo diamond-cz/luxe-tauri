@@ -3,18 +3,27 @@
   "apiVersion": 1,
   "id": "luxe.image-sync",
   "name": "LUXE 图片联动",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "LUXE",
   "description": "同步 HiViewer 焦点图片到 LUXE，在插件中控制 LUXE，并显示 LUXE 当前选择。",
   "entry": "main.js",
   "permissions": ["native.execute", "selection.read"],
   "commands": [
-    { "id": "sync", "title": "打开 LUXE 图片联动", "handler": "native-view", "method": "view/open" },
+    { "id": "sync", "title": "%command.status%", "handler": "native-view", "method": "view/open" },
+    { "id": "check-update", "title": "%command.checkUpdate%", "handler": "native-view", "method": "updater/open" },
+    { "id": "start", "title": "启动后台图片联动", "handler": "native-view", "method": "viewer/start", "hidden": true },
     { "id": "update", "title": "同步当前图片", "handler": "native-view", "method": "viewer/update", "hidden": true }
   ],
   "contributions": [
-    { "id": "sync", "kind": "image-viewer", "title": "LUXE 图片联动", "command": "sync" }
+    { "id": "sync", "kind": "image-viewer", "title": "%command.status%", "command": "sync" }
   ],
+  "localizations": {
+    "zh-CN": { "command.status": "检查 LUXE 图片联动状态", "command.checkUpdate": "检查插件更新" },
+    "zh-TW": { "command.status": "檢查 LUXE 圖片聯動狀態", "command.checkUpdate": "檢查外掛更新" },
+    "en-US": { "command.status": "Check LUXE image sync status", "command.checkUpdate": "Check plugin updates" },
+    "ja-JP": { "command.status": "LUXE 画像連動の状態を確認", "command.checkUpdate": "プラグインの更新を確認" },
+    "tr-TR": { "command.status": "LUXE görüntü eşitleme durumunu denetle", "command.checkUpdate": "Eklenti güncellemelerini denetle" }
+  },
   "dataVersion": 1,
   "backend": {
     "executable": "bin/luxe-image-sync.exe",

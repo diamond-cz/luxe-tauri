@@ -7,6 +7,7 @@ let labels = {};
 let ready = false;
 let updateBusy = false;
 let updateVersion = null;
+let autoCheckRequested = false;
 const bufferedEvents = [];
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
 const t = (key, args = {}) => (labels[`image_sync.${key}`] || key)
@@ -40,9 +41,8 @@ function render() {
   } else setStatus(t(state.source === 'luxe' ? 'from_luxe' : 'waiting'));
 }
 
-document.querySelector('#update').onclick = async () => {
+async function checkPluginUpdate(download = updateVersion !== null) {
   if (!ready || updateBusy) return;
-  const download = updateVersion !== null;
   updateBusy = true;
   const status = document.querySelector('#update-status');
   status.textContent = t('update_busy');
@@ -56,12 +56,15 @@ document.querySelector('#update').onclick = async () => {
     } else status.textContent = t(result.available ? 'update_available' : 'update_latest', { version: result.version });
   } catch (error) {
     console.warn('plugin update failed', error);
-    status.textContent = t('update_failed', { error: String(error) });
+    const message = String(error);
+    status.textContent = message.includes('catalog-not-published') ? t('update_not_published')
+      : t('update_failed', { error: message });
   } finally {
     updateBusy = false;
     render();
   }
-};
+}
+document.querySelector('#update').onclick = () => checkPluginUpdate();
 
 function move(delta) {
   const index = currentIndex();
@@ -91,6 +94,11 @@ window.addEventListener('keydown', (event) => {
 });
 
 function applyEvent(name, payload) {
+  if (name === 'plugin-update-requested') {
+    autoCheckRequested = true;
+    if (ready) { autoCheckRequested = false; void checkPluginUpdate(false); }
+    return;
+  }
   if (name === 'viewer-updated') {
     if (Number.isSafeInteger(payload.sequence) && payload.sequence < state.hostSequence) return;
     state.hostSequence = Math.max(state.hostSequence, payload.sequence || 0);
@@ -125,7 +133,7 @@ function applyEvent(name, payload) {
 const registrations = [];
 void (async () => {
   try {
-    for (const name of ['viewer-updated', 'luxe-selection', 'luxe-connection', 'luxe-sync-pending', 'luxe-sync-result', 'luxe-sync-cleared']) {
+    for (const name of ['viewer-updated', 'luxe-selection', 'luxe-connection', 'luxe-sync-pending', 'luxe-sync-result', 'luxe-sync-cleared', 'plugin-update-requested']) {
       registrations.push(await window.__TAURI__.event.listen(name, ({ payload }) => {
         if (ready) applyEvent(name, payload);
         else {
@@ -143,6 +151,7 @@ void (async () => {
     document.documentElement.lang = code.replace('_', '-');
     await window.__TAURI__.window.getCurrentWindow().setTitle(t('title'));
     const initial = await invoke('get_bridge_state');
+    autoCheckRequested = initial.updateRequested === true;
     applyEvent('viewer-updated', initial.snapshot);
     if (initial.lastSelection) applyEvent('luxe-selection', initial.lastSelection);
     applyEvent('luxe-connection', initial.connected);
@@ -151,6 +160,7 @@ void (async () => {
     ready = true;
     for (const event of bufferedEvents.splice(0)) applyEvent(...event);
     render();
+    if (autoCheckRequested) { autoCheckRequested = false; void checkPluginUpdate(false); }
   } catch (error) {
     for (const unlisten of registrations.splice(0)) unlisten();
     console.warn('image sync initialization failed', error);

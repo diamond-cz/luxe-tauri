@@ -27,11 +27,21 @@ function fixture(t) {
 
 test('plugin has an invocable open command and declares the hidden refresh method', () => {
   const visible = manifest.commands.filter(command => !command.hidden && command.method !== 'viewer/update');
-  assert.equal(visible.length, 1);
+  assert.equal(visible.length, 2);
   assert.equal(visible[0].method, 'view/open');
   assert.equal(manifest.contributions[0].command, visible[0].id);
+  assert.equal(visible[1].id, 'check-update');
+  assert.equal(visible[1].method, 'updater/open');
+  assert.ok(manifest.commands.some(command => command.method === 'viewer/start' && command.hidden));
   assert.ok(manifest.commands.some(command => command.method === 'viewer/update' && command.hidden));
   assert.equal(manifest.dataVersion, 1);
+  for (const locale of ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'tr-TR']) {
+    for (const command of visible) {
+      assert.ok(manifest.localizations[locale][command.title.slice(1, -1)]?.trim());
+    }
+  }
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'plugins/luxe-image-sync/native/tauri.conf.json'), 'utf8'));
+  assert.equal(config.app.windows[0].visible, false, 'background start must not show a window');
 });
 
 test('package checker rejects the original hidden-only command regression and missing refresh declaration', t => {

@@ -23,6 +23,7 @@
   "tone_lce.recorded_comparison": "EXIF {{key}}: {{value}} · Yeniden hesaplama farkı: {{delta}}",
   "tone_lce.weight_source": "Son hedef ağırlıkları, EXIF içindeki LVProb ve LumaFlatProb kayıtlarını kullanır. Dört özgün değer aşağıdadır.",
   "tone_lce.invalid_weights": "Ağırlıklar kullanılamıyor: LVProb veya LumaFlatProb eksik ya da 0–1000 aralığı dışında.",
+  "image_sync.update_not_published": "Eklenti güncelleme kataloğu henüz yayımlanmadı. Eklenti sürümü yayımlandıktan sonra yeniden deneyin; Actions test çıktısı yayımlanmış bir güncelleme değildir.",
   "image_sync.update_check": "Eklenti güncellemelerini denetle",
   "image_sync.update_download": "v{{version}} indir",
   "image_sync.update_busy": "Eklenti güncellemesi denetleniyor / indiriliyor…",

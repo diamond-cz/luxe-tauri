@@ -23,6 +23,7 @@
   "tone_lce.recorded_comparison": "EXIF {{key}}: {{value}} · 再計算との差: {{delta}}",
   "tone_lce.weight_source": "EXIF に記録された LVProb と LumaFlatProb から最終目標の重みを表示します。元の4項目は以下のとおりです。",
   "tone_lce.invalid_weights": "重みを表示できません：LVProb または LumaFlatProb がないか、0–1000 の範囲外です。",
+  "image_sync.update_not_published": "プラグインの更新カタログが未公開です。リリース公開後に再試行してください。Actions のテスト成果物は公開済み更新ではありません。",
   "image_sync.update_check": "プラグインの更新を確認",
   "image_sync.update_download": "v{{version}} をダウンロード",
   "image_sync.update_busy": "更新を確認／ダウンロード中…",

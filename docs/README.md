@@ -12,6 +12,7 @@
 | 性能 | [CPU 与内存维护](performance/MEMORY_RECOVERY.md) | 缓存预算、异步请求隔离、清理入口及验证方法 |
 | 配置 | [本地工作状态](config/LOCAL_STATE.md) | 状态文件位置、迁移和开发验证 |
 | 工程 | [实现亮点与痛点账本](engineering/IMPLEMENTATION_LESSONS.md) | 可复用方案、实际根因、闭坑条件和验证记录 |
-| 插件 | [LUXE 图片联动插件安装与验收](../plugins/luxe-image-sync/README.md) | 测试机行同步、0.1.4 宿主命令兼容修复、插件内更新下载、稳定目录发布与宿主安装边界 |
+| 插件 | [LUXE 图片联动插件安装与验收](../plugins/luxe-image-sync/README.md) | 0.1.5 卡片更新/状态命令、代理目录查询、main 自动发布、测试机同步及宿主生命周期待接线范围 |
+| 插件 | [HiViewer 后续插件改造指南](engineering/HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md) | 宿主启用即同步、会话复用、代理更新与安装确认的代码证据、接线方案和验收矩阵；本轮不修改宿主 |
 
 新增专题文档放入对应领域目录，并更新本索引。文档中的 `src/`、`src-tauri/` 等代码路径均相对于项目根目录；Markdown 链接相对于当前文档。根目录保留项目入口、工具约定和构建工具要求的配置文件。

@@ -52,14 +52,43 @@ try {
     Assert-Throws { Test-PluginArchive $fixture $artifact } 'SHA-256 mismatch'
     $artifact.sha256 = $correctHash
 
+    Assert-PluginHttpStatus 200
+    Assert-Throws { Assert-PluginHttpStatus 404 } '^plugin-http-404$'
+    Assert-Throws { Assert-PluginHttpStatus 503 } '^plugin-http-503$'
+    $script:catalogRequests = @()
+    $script:catalogTestMode = 'proxy-failure'
+    function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit, [int]$TimeoutSeconds = 180) {
+        $script:catalogRequests += $Address
+        Assert-True ($Limit -eq 1MB -and $TimeoutSeconds -eq 15) 'catalog requests are bounded and responsive'
+        if ($script:catalogTestMode -eq 'missing') { throw 'plugin-http-404' }
+        if ($script:catalogTestMode -eq 'network') { throw 'network-unavailable' }
+        if ($Address.StartsWith('https://gh-proxy.com/')) {
+            [IO.File]::WriteAllText($Destination, 'partial')
+            throw 'proxy-unavailable'
+        }
+        [IO.File]::WriteAllText($Destination, ($catalog | ConvertTo-Json -Depth 8))
+    }
+    $catalogProbe = Join-Path $root 'catalog-probe.json'
+    Receive-PluginCatalog $catalogProbe
+    Assert-True ($script:catalogRequests.Count -eq 2) 'proxy failure falls back to origin once'
+    Assert-True ($script:catalogRequests[0].StartsWith('https://gh-proxy.com/')) 'proxy is preferred'
+    Assert-True (([IO.File]::ReadAllText($catalogProbe) | ConvertFrom-Json).version -eq 1) 'origin replaces incomplete proxy result'
+    [IO.File]::Delete($catalogProbe)
+    $script:catalogTestMode = 'missing'
+    Assert-Throws { Receive-PluginCatalog $catalogProbe } '^catalog-not-published$'
+    $script:catalogTestMode = 'network'
+    Assert-Throws { Receive-PluginCatalog $catalogProbe } '^catalog-unavailable:'
+
     # Exercise the real orchestration with deterministic local transport; no network or installed package writes.
     $script:downloads = 0
-    function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit) {
+    function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit, [int]$TimeoutSeconds = 180) {
         if ($Address.EndsWith('plugins.json')) {
             Assert-True ($Limit -eq 1MB) 'catalog limit'
+            Assert-True ($TimeoutSeconds -eq 15) 'catalog timeout'
             [IO.File]::WriteAllText($Destination, ($catalog | ConvertTo-Json -Depth 8))
         } else {
             Assert-True ($Limit -eq 128MB) 'package limit'
+            Assert-True ($TimeoutSeconds -eq 180) 'package timeout'
             $script:downloads++
             [IO.File]::Copy($fixture, $Destination)
         }

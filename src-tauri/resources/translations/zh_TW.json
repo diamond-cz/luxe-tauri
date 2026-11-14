@@ -23,6 +23,7 @@
   "tone_lce.recorded_comparison": "EXIF {{key}}: {{value}} · 重算差值: {{delta}}",
   "tone_lce.weight_source": "依 EXIF 的 LVProb 與 LumaFlatProb 顯示最終目標權重；四項原始記錄如下。",
   "tone_lce.invalid_weights": "權重無法使用：LVProb 或 LumaFlatProb 缺失，或超出 0–1000。",
+  "image_sync.update_not_published": "外掛更新目錄尚未發佈，暫時無法檢查新版本。請等待外掛發佈完成後重試；Actions 測試套件不等於已發佈更新。",
   "image_sync.update_check": "檢查外掛更新",
   "image_sync.update_download": "下載 v{{version}}",
   "image_sync.update_busy": "正在檢查／下載外掛更新…",

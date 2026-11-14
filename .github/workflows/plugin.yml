@@ -118,6 +118,7 @@ jobs:
           $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $package).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "$package.sha256" -Value "$digest  $(Split-Path $package -Leaf)" -Encoding ascii
           Copy-Item (Join-Path $pluginRoot 'README.md') (Join-Path $artifactDir 'INSTALL-zh-CN.md')
+          Copy-Item 'docs/engineering/HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md' (Join-Path $artifactDir 'HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md')
           "PLUGIN_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
@@ -131,6 +132,7 @@ jobs:
   publish-plugin:
     needs: build-plugin
     if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/luxe-image-sync-v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
@@ -165,7 +167,7 @@ jobs:
             fi
           else
             gh release create "$tag" --target "$RELEASE_COMMIT" --draft --latest=false --title "LUXE image sync $version" --notes-file INSTALL-zh-CN.md
-            gh release upload "$tag" "$package" "$package.sha256" INSTALL-zh-CN.md
+            gh release upload "$tag" "$package" "$package.sha256" INSTALL-zh-CN.md HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md
           fi
           gh release edit "$tag" --draft=false --latest=false
           catalog_tag=luxe-plugin-updates

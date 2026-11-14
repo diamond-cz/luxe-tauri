@@ -212,7 +212,7 @@ test('sync labels have the same keys and placeholders in all five languages with
   }
 });
 
-async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.4', path: null })) {
+async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.5', path: null }), initialUpdateRequested = false) {
   const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next', '#update', '#update-status'].map((key) => [key, {}]));
   const events = {}, windowEvents = {}, commands = [];
   const window = {
@@ -227,6 +227,7 @@ async function pluginUiHarness(update = async () => ({ available: false, version
         if (command === 'get_bridge_state') return {
           snapshot: { files: ['C:/a.jpg', 'C:/b.jpg'], currentPath: 'C:/a.jpg' },
           connected: true, pendingSequence: 1,
+          updateRequested: initialUpdateRequested,
         };
       } },
     },
@@ -317,4 +318,27 @@ test('plugin update failures permit retry and do not change image sync connectio
   assert.match(h.nodes.get('#update-status').textContent, /catalog unavailable/);
   assert.equal(h.nodes.get('#update').disabled, false);
   assert.equal(h.nodes.get('#next').disabled, false);
+});
+
+test('card update command automatically checks after WebView initialization', async () => {
+  const h = await pluginUiHarness(async () => ({ available: false, version: '0.1.5', path: null }), true);
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
+  assert.equal(h.commands.find(([name]) => name === 'update_plugin')[1].download, false);
+  assert.match(h.nodes.get('#update-status').textContent, /0.1.5/);
+});
+
+test('a live card update request checks without downloading or installing', async () => {
+  const h = await pluginUiHarness();
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 0);
+  h.emit('plugin-update-requested', null);
+  await tick();
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
+  assert.equal(h.commands.at(-1)[1].download, false);
+});
+
+test('unpublished catalog explains the publishing requirement instead of exposing an HTTP exception', async () => {
+  const h = await pluginUiHarness(async () => { throw new Error('catalog-not-published'); });
+  await h.nodes.get('#update').onclick();
+  assert.equal(h.nodes.get('#update-status').textContent, bundles.en_US['image_sync.update_not_published']);
+  assert.equal(h.nodes.get('#update').disabled, false);
 });

@@ -37,7 +37,11 @@ function Select-PluginUpdate($Catalog, [string]$CurrentVersion) {
     return $latest
 }
 
-function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit) {
+function Assert-PluginHttpStatus([int]$Status) {
+    if ($Status -lt 200 -or $Status -ge 300) { throw "plugin-http-$Status" }
+}
+
+function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit, [int]$TimeoutSeconds = 180) {
     $uri = [Uri]$Address
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'HTTPS required' }
     Add-Type -AssemblyName System.Net.Http
@@ -46,8 +50,8 @@ function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit)
     # Check each redirect before making another request; never follow an HTTPS-to-HTTP redirect.
     $handler.AllowAutoRedirect = $false
     $client = [Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(180)
-    $cancel = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(180))
+    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+    $cancel = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
     $response = $null
     $inputStream = $null
     $outputStream = $null
@@ -65,7 +69,7 @@ function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit)
                 $response = $null
                 continue
             }
-            $null = $response.EnsureSuccessStatusCode()
+            Assert-PluginHttpStatus ([int]$response.StatusCode)
             break
         }
         if ($response.Content.Headers.ContentLength -gt $Limit) { throw 'Download exceeds size limit' }
@@ -86,6 +90,26 @@ function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit)
         $cancel.Dispose()
         $client.Dispose()
     }
+}
+
+function Receive-PluginCatalog([string]$Destination) {
+    $origin = 'https://github.com/diamond-cz/luxe-tauri/releases/download/luxe-plugin-updates/plugins.json'
+    $addresses = @("https://gh-proxy.com/$origin", $origin)
+    $missing = 0
+    $errors = @()
+    foreach ($address in $addresses) {
+        try {
+            Receive-HttpsFile $address $Destination 1MB 15
+            return
+        } catch {
+            if ($_.Exception.Message -eq 'plugin-http-404') { $missing++ }
+            $errors += $_.Exception.Message
+            # A failed attempt may have created an incomplete file; the next download uses CreateNew.
+            if ([IO.File]::Exists($Destination)) { [IO.File]::Delete($Destination) }
+        }
+    }
+    if ($missing -eq $addresses.Count) { throw 'catalog-not-published' }
+    throw ('catalog-unavailable: ' + ($errors -join '; '))
 }
 
 function Test-PluginArchive([string]$ArchivePath, $Artifact) {
@@ -123,7 +147,7 @@ function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Di
     $catalogPath = Join-Path $Directory ('catalog-' + [Guid]::NewGuid().ToString('N') + '.json')
     $partial = Join-Path $Directory ('package-' + [Guid]::NewGuid().ToString('N') + '.partial')
     try {
-        Receive-HttpsFile 'https://gh-proxy.com/https://github.com/diamond-cz/luxe-tauri/releases/download/luxe-plugin-updates/plugins.json' $catalogPath 1MB
+        Receive-PluginCatalog $catalogPath
         $catalog = [IO.File]::ReadAllText($catalogPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
         $artifact = Select-PluginUpdate $catalog $CurrentVersion
         if ($null -eq $artifact) { return @{ available = $false; version = $CurrentVersion; path = $null } }

@@ -23,6 +23,7 @@
   "tone_lce.recorded_comparison": "EXIF {{key}}: {{value}} · Recalculated difference: {{delta}}",
   "tone_lce.weight_source": "Final target weights use the recorded EXIF LVProb and LumaFlatProb. The four original values are listed below.",
   "tone_lce.invalid_weights": "Weights unavailable: LVProb or LumaFlatProb is missing or outside 0–1000.",
+  "image_sync.update_not_published": "The plugin update catalog has not been published. Retry after the plugin release is published; an Actions test artifact is not a published update.",
   "image_sync.update_check": "Check plugin updates",
   "image_sync.update_download": "Download v{{version}}",
   "image_sync.update_busy": "Checking / downloading plugin update…",
