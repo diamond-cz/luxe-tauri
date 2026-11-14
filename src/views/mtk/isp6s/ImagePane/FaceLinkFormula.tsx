@@ -1,5 +1,6 @@
-import { Link, Tooltip } from "@fluentui/react-components";
+import { Link } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
+import { FormulaHeader } from "./FormulaHeader";
 
 interface FormulaValues {
   faceTarget: number;
@@ -15,6 +16,7 @@ interface FormulaValues {
   lowBoundSource: string;
   highBoundSource: string;
   weightSource: string;
+  faceTargetSource?: string;
   normalTargetSource: string;
 }
 
@@ -91,20 +93,38 @@ export function FaceLinkFormula({ exif, parameter, lowBoundPath, highBoundPath, 
   };
   const rows = [{ key: "exif", label: "EXIF", values: exif },
     { key: "parameter", label: t("face_link_formula.parameter"), values: parameter }];
-  return <div className="w-full min-w-0 text-xs" style={{ color: "var(--colorNeutralForeground2)", fontFamily: "var(--fontFamilyBase, 'Segoe UI', sans-serif)" }}>
-    <p className="mb-2 mt-0 text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{t("face_link_formula.flow")}</p>
+  const sourceRows = [
+    { name: "FLT_Target", key: "faceTarget", sourceKey: "faceTargetSource" },
+    { name: "FDSZ_RA", key: "weight", sourceKey: "weightSource" },
+    { name: "Normal_Target", key: "normalTarget", sourceKey: "normalTargetSource" },
+    { name: "low_bound", key: "lowBound", sourceKey: "lowBoundSource" },
+    { name: "high_bound", key: "highBound", sourceKey: "highBoundSource" },
+  ] as const;
+  return <div className="formula-panel w-full min-w-0 text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
+    <FormulaHeader formulas={[
+      "raw = (FLT_Target × FDSZ_RA + Normal_Target × (1024 − FDSZ_RA)) / 1024",
+      "low/high = AE_Target × low_bound/high_bound / 1024; final = limit(raw, low, high)",
+    ]} sources={[
+      { name: "AE_Target", exif: { value: exif.aeTarget, source: "EXIF · AE_TAG_AE_TARGET" }, parameter: { value: parameter.aeTarget, source: "EXIF · AE_TAG_AE_TARGET" } },
+      ...sourceRows.map(({ name, key, sourceKey }) => ({ name,
+        exif: { value: exif[key], source: exif[sourceKey] ?? "FLT_Target" },
+        parameter: { value: parameter[key], source: parameter[sourceKey] ?? "FLT_Target" },
+      })),
+      ...([
+        { name: "raw", key: "rawTarget", source: "(FLT_Target × FDSZ_RA + Normal_Target × (1024 − FDSZ_RA)) / 1024" },
+        { name: "low", key: "lowLimit", source: "AE_Target × low_bound / 1024" },
+        { name: "high", key: "highLimit", source: "AE_Target × high_bound / 1024" },
+        { name: "final", key: "result", source: "limit(raw, low, high)" },
+      ] as const).map(({ name, key, source }) => ({ name, exif: { value: exif[key], source }, parameter: { value: parameter[key], source } })),
+    ]} details={rows.map(({ key, label, values }) => <section key={key}>
+      <div className="mb-2 text-xs font-semibold">{label}</div>{formulaDetails(values, headings)}
+    </section>)} />
     <table className="w-full table-fixed border-collapse text-left" aria-label={t("face_link_formula.summary")}>
       <colgroup><col style={{ width: "14%" }} /><col style={{ width: "16%" }} /><col style={{ width: "26%" }} /><col style={{ width: "22%" }} /><col style={{ width: "22%" }} /></colgroup>
       <thead><tr style={{ color: "var(--colorNeutralForeground3)" }}>
         {["source", "weighted", "boundaries", "range", "result"].map((key) => <th key={key} scope="col" className="break-words px-1.5 pb-1 font-normal">{t(`face_link_formula.${key}`)}</th>)}
       </tr></thead>
-      <tbody>{rows.map(({ key: sourceKey, label, values }) => <Tooltip key={sourceKey}
-        content={{ children: formulaDetails(values, headings), style: {
-          maxWidth: "min(560px, calc(100vw - 24px))", maxHeight: "calc(100vh - 24px)", overflowY: "auto", padding: "12px 14px",
-          backgroundColor: "var(--colorNeutralBackground1)", color: "var(--colorNeutralForeground1)",
-          border: "1px solid var(--colorNeutralStroke2)", borderRadius: "var(--borderRadiusMedium)",
-        } }} relationship="description" positioning="below-start" showDelay={250}>
-        <tr tabIndex={0} data-tooltip-disabled="true" className="border-t" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+      <tbody>{rows.map(({ key: sourceKey, label, values }) => <tr key={sourceKey} className="border-t" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
           <th scope="row" className="break-words px-1.5 py-1.5 font-medium">{label}</th>
           <td className="break-words px-1.5 py-1.5 tabular-nums">{displayNumber(values.rawTarget)}</td>
           <td className="px-1.5 py-1.5">
@@ -119,7 +139,7 @@ export function FaceLinkFormula({ exif, parameter, lowBoundPath, highBoundPath, 
                   <span className="text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{bound}</span>
                   {sourceKey === "exif" ? <span className="font-medium tabular-nums">{displayNumber(value)}</span>
                     : <Link as="button" disabled={!jump || !Number.isFinite(value)} onClick={Number.isFinite(value) ? jump : undefined}
-                      style={{ fontSize: "inherit" }} className="tabular-nums"
+                      style={{ fontSize: "inherit", fontFamily: "inherit" }} className="tabular-nums"
                       aria-label={t("face_link_formula.jump", { bound, path, value: formulaNumber(value) })}>
                       {displayNumber(value)}
                     </Link>}
@@ -135,8 +155,7 @@ export function FaceLinkFormula({ exif, parameter, lowBoundPath, highBoundPath, 
             <strong className="tabular-nums" style={{ color: "var(--colorNeutralForeground1)" }}>{displayNumber(values.result)}</strong>
             <span className="ml-2 inline-block text-[11px]" style={{ color: "var(--colorNeutralForeground3)" }}>{t(`face_link_formula.${limitStatus(values)}`)}</span>
           </td>
-        </tr>
-      </Tooltip>)}</tbody>
+        </tr>)}</tbody>
     </table>
   </div>;
 }

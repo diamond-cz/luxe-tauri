@@ -3,6 +3,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* CJK monospaced fonts keep a Chinese glyph on two Latin character cells. */
+:root {
+  --font-family-formula: "Sarasa Mono SC", "Noto Sans Mono CJK SC", "NSimSun", "MS Gothic", monospace;
+  --font-family-formula-expression: "Cascadia Code", "Consolas", "Sarasa Mono SC", monospace;
+}
+.formula-panel,
+.formula-panel :where(table, th, td, span, p, code, strong, div, dt, dd, button) {
+  font-family: var(--font-family-formula);
+  font-variant-numeric: tabular-nums;
+}
+.formula-panel .formula-expression,
+.formula-panel .formula-expression > div {
+  font-family: var(--font-family-formula-expression);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.formula-source-surface :where(table, th, td, summary) {
+  font-family: var(--fontFamilyBase, 'Segoe UI', sans-serif);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Flat actions for the Face / Face_FLT target sections. */
 .face-target-header-actions > button {
   border-color: transparent !important;

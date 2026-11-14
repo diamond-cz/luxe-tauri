@@ -252,7 +252,7 @@ test('parameter bound draft changes are projected without mutating the original 
 const bundle = JSON.parse(readFileSync(new URL('../src-tauri/resources/translations/zh_CN.json', import.meta.url), 'utf8'));
 const t = (key, args = {}) => (bundle[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) => String(args[name] ?? ''));
 const { FaceLinkFormula } = loadSelected('../src/views/mtk/isp6s/ImagePane/FaceLinkFormula.tsx', ['FaceLinkFormula'], {
-  Link: 'Link', Tooltip: 'Tooltip', useTranslation: () => ({ t }),
+  Link: 'Link', FormulaHeader: 'FormulaHeader', useTranslation: () => ({ t }),
 });
 function nodesOfType(node, type) {
   if (node == null || typeof node !== 'object') return [];
@@ -261,6 +261,7 @@ function nodesOfType(node, type) {
 }
 const visibleText = node => node == null || typeof node === 'boolean' ? '' : Array.isArray(node) ? node.map(visibleText).join('')
   : typeof node === 'object' ? visibleText(node.props?.children) : String(node);
+const formulaCards = tree => nodesOfType(tree, 'FormulaHeader')[0].props.details.map(section => section.props.children[1]);
 
 function chartFormulaProps(extra = {}) {
   // Evaluate the actual callsite props too, so row order and jump callbacks
@@ -291,10 +292,10 @@ function chartFormulaProps(extra = {}) {
   return module.exports.props;
 }
 
-test('Face Link summary has two compact rows and moves full math into focusable hover hints', () => {
+test('Face Link summary has two compact rows and moves full math into click-only source help', () => {
   const tree = FaceLinkFormula(chartFormulaProps());
   const rows = nodesOfType(tree, 'tr').slice(1);
-  const hints = nodesOfType(tree, 'Tooltip').map(node => visibleText(node.props.content.children));
+  const hints = formulaCards(tree).map(visibleText);
   assert.equal(rows.length, 2);
   assert.equal(nodesOfType(tree, 'th').filter(node => node.props.scope === 'col').map(visibleText).join('|'),
     '来源|加权值|边界显示|限制范围|最终值');
@@ -307,7 +308,8 @@ test('Face Link summary has two compact rows and moves full math into focusable 
   assert.match(hints[1], /limit\(550\.0, 300\.0, 500\.0\) = 500\.0/);
   assert.match(hints[1], /low_bound300\.0AE.cpp · \[0\]\[4\]\[1\]\.19/);
   assert.match(hints[1], /high_bound500\.0AE.cpp · \[0\]\[4\]\[1\]\.20/);
-  assert.ok(rows.every(row => row.props.tabIndex === 0 && row.props['data-tooltip-disabled'] === 'true' && !row.props.title));
+  assert.ok(rows.every(row => row.props.tabIndex === undefined && !row.props.title));
+  assert.equal(nodesOfType(tree, 'Tooltip').length, 0);
   assert.deepEqual(nodesOfType(tree, 'Link').map(link => visibleText(link)), ['300', '500']);
   assert.doesNotMatch(visibleText(tree), /\[0\]\[4\]\[1\]\.19|\[0\]\[4\]\[1\]\.20/);
 });
@@ -330,7 +332,7 @@ test('boundary column displays independent EXIF and parameter coefficients inste
   assert.equal(nodesOfType(tree, 'table').length, 1);
   assert.equal(nodesOfType(table, 'div').filter(node => node.props.role === 'group').length, 2, 'both groups are inside the table');
   assert.equal(nodesOfType(groups[0], 'Link').length, 0, 'EXIF coefficients are read-only, not AE.cpp jump controls');
-  const exifHint = visibleText(nodesOfType(tree, 'Tooltip')[0].props.content.children);
+  const exifHint = visibleText(formulaCards(tree)[0]);
   assert.match(exifHint, /low_bound90\.0EXIF · AE_TAG_FACE_LOW_BOUND/);
   assert.match(exifHint, /high_bound9000\.0EXIF · AE_TAG_FACE_HIGH_BOUND/);
   assert.deepEqual(nodesOfType(groups[1], 'Link').map(node => visibleText(node)), ['100', '8000']);
@@ -359,7 +361,7 @@ test('integer summary and one-decimal hints preserve internal precision and miss
   props.parameter = { ...props.parameter, lowLimit: 500, highLimit: 300, result: 500 };
   const tree = FaceLinkFormula(props);
   const rows = nodesOfType(tree, 'tr').slice(1);
-  const hint = visibleText(nodesOfType(tree, 'Tooltip')[0].props.content.children);
+  const hint = visibleText(formulaCards(tree)[0]);
   assert.match(hint, /limit\(1886\.0, 66\.1, 6609\.4\) = 1886\.0/);
   assert.ok(visibleText(rows[0]).includes('[66, 6609]1886'));
   assert.doesNotMatch(hint, /1886\.049|66\.09375|6609\.375/);
@@ -378,8 +380,8 @@ test('formula cards separate calculations from source columns without changing n
   const props = chartFormulaProps({ useParameterFdszRaForExif: true });
   props.exif = { ...props.exif, rawTarget: 1509.9675516224188, result: 1509.9675516224188, lowLimit: 66.09375, highLimit: 6609.375 };
   const tree = FaceLinkFormula(props), row = nodesOfType(tree, 'tr')[1];
-  const tooltip = nodesOfType(tree, 'Tooltip')[0];
-  const card = tooltip.props.content.children, hint = visibleText(card);
+  const help = nodesOfType(tree, 'FormulaHeader')[0];
+  const card = formulaCards(tree)[0], hint = visibleText(card);
   const sections = nodesOfType(card, 'section');
   assert.equal(sections.length, 4);
   for (const [index, heading] of ['[1] 加权计算', '[2] 极值范围', '[3] 最终结果', '数值来源'].entries()) assert.ok(visibleText(sections[index]).startsWith(heading));
@@ -392,10 +394,11 @@ test('formula cards separate calculations from source columns without changing n
   assert.doesNotMatch(hint, /\d+\.\d{2,}/, 'no long floating-point expansions in the formula hint');
   assert.ok(nodesOfType(row, 'td').every(cell => !/\d+\.\d+/.test(visibleText(cell))), 'all summary cells use integers');
   assert.ok(nodesOfType(tree, 'Link').every(link => /当前值 \d+\.\d）/.test(link.props['aria-label'])));
-  assert.equal(tooltip.props.relationship, 'description');
-  assert.equal(tooltip.props.positioning, 'below-start');
-  assert.equal(tooltip.props.content.style.maxWidth, 'min(560px, calc(100vw - 24px))');
-  assert.equal(tooltip.props.content.style.backgroundColor, 'var(--colorNeutralBackground1)');
+  const comparison = help.props.sources.find(entry => entry.name === 'FDSZ_RA');
+  assert.equal(comparison.exif.value, props.exif.weight);
+  assert.equal(comparison.parameter.value, props.parameter.weight);
+  assert.match(comparison.exif.source, /face_sz/);
+  assert.equal(nodesOfType(tree, 'Tooltip').length, 0);
 });
 
 test('monospaced tooltip styling is opt-in and leaves ordinary tooltips unchanged', () => {

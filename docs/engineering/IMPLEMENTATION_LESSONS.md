@@ -3149,3 +3149,131 @@
 - 新模块/测试的 `rustfmt --check --edition 2021`：通过；受影响既有 Rust 文件用 `rustfmt --emit stdout --config skip_children=true` 做语法静态检查：通过，未重排既有文件。
 - `npm run typecheck`、`npm run version:check`：通过。Rust 编译与六项行为测试未在本地运行，待 Windows CI；未执行 Tauri 编译或桌面加载/编辑/保存验收；未提交或推送。
 - `git diff --check`：通过，仅 LF/CRLF 提示；三个源码读取入口已无 `read_to_string`。
+
+### 2026-11-13：FLT 与 Normal Target 公式栏摘要统一
+
+**亮点**
+
+- 新增 `ImagePane/DerivedTargetFormula.tsx`，参照 Face Link Target 的五列表格、来源双行、整数摘要和行悬浮卡片。FLT/FBT 显示 CWV、阈值、FDY、最终值；Normal 显示 MainT/HS 混合值、NS 概率、NS 目标与最终值，完整表达式移入悬浮详情。
+- `ChartMapMode.tsx::FaceDerivedTargetCard` 复用原标题、结果和折叠入口，以 children 挂载摘要；两种摘要共用表格/Tooltip 展示组件。`calculateNormalTargetFormula` 仅额外返回原已解析的 nsTarget/nsProb，不更改加权、回退或最终计算。
+- 悬浮支持 Tab 聚焦，Normal 两步推导分区展示，公式/代入值使用等宽字体和一位小数；所有颜色使用 Fluent 语义令牌，最终段强调、长公式换行、卡片宽高受视口限制。五语言补齐五个说明/标题 key，并复用原来源/最终值翻译。
+
+**痛点**
+
+- 旧 Normal 栏在两段文本中重复 EXIF/参数公式，长表达式占据较多高度；只删除代入式会丢失排查信息。新摘要保留中间值和最终值，详细两步分别按来源查看。
+- EXIF 阈值取图片 tag，参数阈值取当前草稿推导的 FLT_TH/FBT_TH；不能为了统一列名而混用来源或用整数显示值重新计算。Normal 的 MainT/HS 结果与 NS 最终结果必须分列，不能同名覆盖。
+
+**闭坑**
+
+- 所有展示值直接接收现有计算器结果，非有限值显示 `-`，只在展示边界舍入；原参数侧的缺失值处理沿用既有计算器行为，不借样式调整改算式。
+- 表头和行共用五列宽度；Tooltip 挂在可聚焦行上并禁用全局重复提示，原折叠时应卸载子树。此局部 Tooltip 仅用于固定两行卡片，不迁入大图片列表逐单元格创建。
+- UI 外观仍需 Windows 实际窗口验收，尤其窄卡片、深浅主题和键盘提示；JSX 检查不等同桌面截图验收。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过。
+- Node 22 临时执行实际新组件 JSX：FLT/Normal 两行值、精度不回写、非有限结果、Normal 两段详情、五语言键/插值一致性检查通过；未新增持久化样式单元测试。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未执行本地 Tauri/Rust 编译、实际桌面布局或截图验收；未提交或推送。
+
+### 2026-11-13：FLT Target 常显代入公式与数值来源提示
+
+**亮点**
+
+- `ImagePane/DerivedTargetFormula.tsx::FaceTargetFormula` 对 FLT 分支直接展示 `CWV × (FLT_TH / FDY)` 表头，EXIF/参数行在对应位置填入数值并保留相同运算符；表头及两行共享十个列宽（包括符号列），数字居中，不再需要整行悬浮才能看公式。
+- 各数值使用既有全局 title 提示和可聚焦 span，展示名称、一位小数及来源；两行 CWV/FDY 都明确来自 EXIF，参数侧 FLT_TH 标明当前 AE.cpp 草稿的推导公式，不误标为 EXIF 阈值。`ChartMapMode.tsx` 传递实际选中的 CWV 关键字，以覆盖首选字段/回退字段两种来源。
+- FBT 与 Normal 维持既有摘要/行悬浮详情；FLT 数值、结果和舍入仍只用于展示，不改计算器。五语言同步新增来源提示插值，功能文档更新常显公式契约。
+
+**痛点**
+
+- 五个普通列标题不能直接对应完整表达式，只有在数字与运算符共享列宽时才能确保上下代入位置对齐。FLT 分支移除旧行 Tooltip 与“悬浮查看完整公式”文案，避免常显公式和弹层重复。
+- 参数行仅 FLT_TH 来自参数推导；CWV、FDY 仍为 EXIF，不能把整行都标作 AE.cpp 来源。CWV 存在优先/回退 key，提示必须使用和取值相同的有效性检查。
+- 首次临时 JSX 检查中的非 ASCII 期望值被 PowerShell 管道转为问号，改用资源读取与 Unicode escape 后检查通过；未发生文件内容损坏。
+
+**闭坑**
+
+- 检查表头/两行符号位置一致、数值 Tab 聚焦来源可读、非有限值显示 `-`；保留完整精度计算，不用整数代入展示重新计算最终值。
+- 数值 title 不得放入 `data-tooltip-disabled` 祖先下，避免来源提示被全局委托忽略；不为固定数值单独创建新的监听器或缓存。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 临时执行实际组件 JSX：表头/代入行列对齐、八个数值来源与聚焦属性、缺失值、精度不回写、五语言插值契约检查通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未执行本地 Tauri/Rust 编译或实际桌面布局/截图验收；未提交或推送。
+
+### 2026-11-13：Target 公式等宽字体与点击来源对照
+
+**亮点**
+
+- `DerivedTargetFormula.tsx` 将 FLT 恢复为与 FBT 一致的五列来源摘要，原提示段改为计算公式；FLT/FBT、Normal 与 Face Link 共享新增 `FormulaHeader.tsx` 的问号按钮。点击打开 Fluent Popover 来源表，对照 EXIF/参数值及字段/派生来源，并保留完整代入过程；移除行与数值的悬浮预览。
+- `src/styles/globals.css` 定义 CJK 等宽字体令牌 `--font-family-formula`，以 Sarasa/Noto CJK Mono、Windows NSimSun/MS Gothic 回退；公式栏、表格、按钮、code 与 portal 显式统一字体，数字使用 tabular-nums。`ChartMapMode.tsx` 的 Face 公式行也引用该字体，普通正文不改变。
+- 复用 Fluent 的按钮、问号图标、Popover/焦点约束/Escape/定位，不新增持久化设置、数据请求或自定义监听器；Face Link 参数边界数值仍走既有精确 token 跳转。
+
+**痛点**
+
+- 仅用 Consolas 的 font-mono 不能统一中文字体；Portal 不继承触发区域的字体样式，必须在 PopoverSurface 同样设置令牌。
+- Normal 的 EXIF 输入有 BT/MT/DT 三组 HS，参数侧只有一组聚合 HS；来源对比不能按相同数组下标映射。改为保留各自变量名取并集，无对应项显示 `-`；参数聚合项单列，不伪装为 BT 原始项。
+- 首次临时 JSX 检查将缺失单元格的“数值 - / 来源 -”合并文本与单个 `-` 比较而失败，按实际双字段检查后通过；产品数据与布局未因检查失败修改。
+
+**闭坑**
+
+- 来源表必须分别标明真正输入：参数侧 CWV/FDY 仍为 EXIF，阈值才来自 AE.cpp；Normal 的 NS 回退来源随实际读取 key 显示。只增加来源元数据，不改变计算器的算式、精度或既有缺失值处理。
+- 检查问号可通过点击/键盘触发、Escape 关闭并恢复焦点、窄窗口来源表滚动、深浅主题和 CJK 字体实际选择；不再通过行悬浮打开完整公式。Face Link 边界链接的跳转能力保持有效。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过，原悬浮断言更新为点击帮助数据契约，保留数值精度、双来源边界及精确跳转测试。
+- Node 22 临时执行三个真实 JSX 模块：问号/Popover 焦点契约、FLT 恢复五列、来源字段、HS 三组与一组不等长输入映射、中文等宽令牌、五语言 key/插值一致性检查通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未在本地编译 Tauri/Rust，未做 Windows 字体/弹层点击/截图验收；未提交或推送。
+
+### 2026-11-13：Back Scene Target 摘要与公式横线统一
+
+**亮点**
+
+- `ImagePane/DerivedTargetFormula.tsx` 新增 `BackSceneTargetFormula`，复用已有来源双行、五列表格和 `FormulaHeader`，显示 FBT_Target、FaceProb、Normal_Target、最终值。`ChartMapMode.tsx` 的 FBT 分支替换旧长文本，直接传入未变的 raw EXIF/参数结果。
+- 问号来源对照表保留两侧 FBT Target 推导、FaceProb 来源差异以及两行共同使用的 EXIF Normal Target，完整代入过程放在同一弹层中；继续使用共用中英文等宽字体。
+- `FormulaHeader.tsx` 为所有常显公式段增加上下横线，多行公式内部也用主题细线分隔，统一使用 `--colorNeutralStroke2`；移除不再使用的旧强调样式。
+
+**痛点**
+
+- Back Scene 此前仍在 `ChartMapMode.tsx` 内联展示长文本，未接入派生摘要组件；不能直接复用带极值限制的 Face Link 计算，否则会改变 FBT 行为。本次只替换展示，继续使用 raw 混合结果。
+- 首次类型检查发现旧 `faceFormulaEmphasisStyle` 在移除内联公式后无引用；删除该专用死样式后复查通过。
+
+**闭坑**
+
+- 来源对照不能把参数行 Normal_Target 标为 AE.cpp；它仍使用 EXIF，FaceProb 和 FBT_Target 才区分两条链路。摘要舍入不回写计算值，折叠与问号交互沿用已有入口。
+- 公式横线必须由共享 Header 控制，避免每个卡片重复添加不同颜色或间距的边框；真实 Windows 的窄布局、主题和弹层交互仍需产物验收。
+
+**验证**
+
+- `npm run typecheck`：清理死样式后通过；Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过，包含 FBT 不受 FLT 极值限制影响的回归。
+- Node 22 临时执行真实 JSX：Back Scene 两行结果/精度、来源对照、点击帮助、统一公式上下横线与多行分隔检查通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未执行本地 Tauri/Rust 编译、Windows 实际布局或截图验收；未提交或推送。
+
+### 2026-11-13：来源对照弹层紧凑布局与视口可见性
+
+**亮点**
+
+- `FormulaHeader.tsx` 将问号弹层改为“变量、EXIF、参数计算、差值、来源”五列对照，数值右对齐、常规字重、固定表头和细行线；共用来源只列一次，重复的完整推导默认折叠。`FaceLinkFormula.tsx` 补充 raw/low/high/final 对照行，日常对照无需展开长公式。
+- 定位改为 fixed、窗口边界及 16px 留白，启用 Fluent `autoSize: "height"`、翻转和锚点覆盖位移；保留响应式宽度，避免 autoSize 的宽度重置覆盖已指定尺寸。Surface 纵向 flex，标题/关闭按钮不收缩，正文 `min-height: 0` 并内部滚动，表头 sticky，上限为 `min(60dvh, 520px)`。
+- 常显公式移除顶部横线及内部重复横线，保留底线，使用 Cascadia Code/Consolas 等清晰字体、13px、500 字重与较高对比度；来源表按参考图改为 Fluent/Segoe UI 无衬线正文，数值使用 tabular-nums。五语言新增差值、完整推导和关闭说明。
+
+**痛点**
+
+- 原弹层将来源表和两套完整推导一次性展开，内容重复且高度过长；仅设置 `100vh - 32px` 是按整个窗口限高，未按按钮周围真实可用空间收缩，锚定位置与大弹层高度组合会越出可见范围。不能仅缩小字体或依赖外层滚动掩盖问题。
+- Fluent 的尺寸中间件会清理并重写尺寸内联样式；这里只启用高度 autoSize，宽度继续由响应式 CSS 控制。滚动放在可收缩正文，外框避免溢出，标题保持可见。
+- 加入折叠详情后，若它成为首个可聚焦元素，初始焦点可能将长内容带到底部；顶部新增关闭按钮作为首个焦点目标，并沿用 Fluent 的 Escape/返回焦点行为。实际桌面的 DPI、视口边缘与焦点滚动仍待验收。
+
+**闭坑**
+
+- 检查锚点靠近上下左右边缘、较短窗口、窗口缩放、多行长路径和展开完整推导；所有数据应可在弹层内滚动访问，表头和关闭按钮不能随正文丢失。定位与尺寸观察继续交给 Fluent，不新增自定义循环测量。
+- 差值固定为参数减 EXIF，非有限数据保持 `-`，一位小数舍入仅用于显示，并规范化接近零的负零显示；不能改动内部精度或参数数值跳转。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/face-link-target.test.mjs`：29 项通过，保留精度、来源切换、边界状态和精确 token 跳转覆盖。
+- Node 22 临时执行实际 `FormulaHeader` JSX：五列表格/差值/缺失值、默认折叠详情、fixed/height autoSize/窗口边界/留白、正文滚动与 sticky 表头、打开关闭回调、去掉顶线及五语言契约检查通过。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未执行本地 Tauri/Rust 编译或 Windows 实际定位/滚动/DPI/截图验收；未提交或推送。

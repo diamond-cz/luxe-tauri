@@ -25,6 +25,7 @@ import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import type { FieldEntry } from "@/types/cpp_parser";
 import { FaceLinkFormula } from "./FaceLinkFormula";
+import { BackSceneTargetFormula, FaceTargetFormula, NormalTargetFormula } from "./DerivedTargetFormula";
 
 type ChartTabId = "MainT" | "HS" | "NS" | "ABL" | "Face" | "Face_FLT" | "Touch";
 type StepperDirection = "up" | "down";
@@ -422,6 +423,7 @@ interface NormalTargetFormulaSource {
   hsWeights: Array<string | null>;
   nsTarget: string | null;
   nsProb: string | null;
+  nsTargetSource?: string;
 }
 
 interface NormalTargetParameterValues {
@@ -1198,6 +1200,7 @@ export function ChartMapMode({
       readTomlValue(tomlData, "AE_TAG_HSV6_DT_WET"),
     ],
     nsTarget: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") ?? readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
+    nsTargetSource: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") !== null ? "AE_TAG_NS_FINAL_TARGET" : FACE_NORMAL_TARGET_KEY,
     nsProb: readTomlValue(tomlData, NS_PROB_KEY),
   }), [tomlData]);
   const faceFbtOeSysValue = useMemo(
@@ -2374,6 +2377,7 @@ export function ChartMapMode({
               fltMode={tab === "Face_FLT"}
               bvValue={imageBvValue}
               cwvValue={faceCwvValue}
+              cwvSourceKey={FACE_CWV_KEYS.find((key) => readTomlValue(tomlData, key) !== null)}
               fdyValue={tab === "Face_FLT" ? faceFltFdyValue : faceFbtFdyValue}
               faceProbValue={faceExifProbValue}
               faceStsSizeValue={readTomlValue(tomlData, FACE_STS_SIZE_KEY)}
@@ -6485,6 +6489,18 @@ function calculateNormalTargetFormula(source: NormalTargetFormulaSource) {
   return {
     mtHsTarget,
     finalTarget,
+    nsTarget,
+    nsProb,
+    sourceValues: [
+      { name: "MainT_Tar", value: mainTarget, source: "EXIF · AE_TAG_MTV6_MAINT_TARGET" },
+      { name: "MainT_Wt", value: mainWeight, source: "EXIF · AE_TAG_HSV6_MAINT_WET" },
+      ...hsTargets.flatMap((value, index) => [
+        { name: hsTargets.length === 1 ? "HS_Tar" : `HS_${["BT", "MT", "DT"][index]}_Tar`, value, source: `EXIF · AE_TAG_HSV6_${["BT", "MT", "DT"][index]}_TARGET` },
+        { name: hsTargets.length === 1 ? "HS_Wt" : `HS_${["BT", "MT", "DT"][index]}_Wt`, value: hsWeights[index], source: `EXIF · AE_TAG_HSV6_${["BT", "MT", "DT"][index]}_WET` },
+      ]),
+      { name: "NS_Target", value: nsTarget, source: `EXIF · ${source.nsTargetSource ?? "NS_Target"}` },
+      { name: "NS_Prob", value: nsProb, source: "EXIF · AE_TAG_NS_PROB" },
+    ],
     exifMtHsExpression: `(${formatComputedNumber(mainTarget)}*${formatComputedNumber(mainWeight)} + ${hsTargets.map((value, index) => `${formatComputedNumber(value)}*${formatComputedNumber(hsWeights[index])}`).join(" + ")}) / (${formatComputedNumber(mainWeight)} + ${hsWeights.map(formatComputedNumber).join(" + ")})`,
     exifFinalExpression: `${formatComputedNumber(mtHsTarget)} * (1024 - ${formatComputedNumber(nsProb)}) / 1024 + ${formatComputedNumber(nsTarget)} * ${formatComputedNumber(nsProb)} / 1024`,
   };
@@ -6592,18 +6608,14 @@ function FaceDerivedTargetCard({
   title,
   exifResult,
   parameterResult,
-  exifFormula,
-  parameterFormula,
-  formulaLines,
+  children,
   expanded,
   onExpandedChange,
 }: {
   title: string;
   exifResult: number;
   parameterResult: number;
-  exifFormula?: string;
-  parameterFormula?: string;
-  formulaLines?: string[];
+  children: ReactNode;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
 }) {
@@ -6628,19 +6640,7 @@ function FaceDerivedTargetCard({
           </button>
         </div>
       </div>
-      {expanded && <div style={faceFormulaRowStyle}>
-        <div style={faceFormulaTextStackStyle}>
-          {formulaLines?.map((line) => (
-            <span key={line} style={{ ...faceFormulaSubstitutionStyle, whiteSpace: "pre-wrap" }}>
-              {line}
-            </span>
-          ))}
-          {!formulaLines && <>
-            <span>EXIF计算: {exifFormula} = {formatRoundedNumber(exifResult)}</span>
-            <span>参数插值: {parameterFormula} = {formatRoundedNumber(parameterResult)}</span>
-          </>}
-        </div>
-      </div>}
+      {expanded && <div style={faceFormulaRowStyle}>{children}</div>}
     </section>
   );
 }
@@ -6659,6 +6659,7 @@ function FaceTabContent({
   fltMode,
   bvValue,
   cwvValue,
+  cwvSourceKey,
   fdyValue,
   faceProbValue,
   faceStsSizeValue,
@@ -6705,6 +6706,7 @@ function FaceTabContent({
   fltMode: boolean;
   bvValue: string | null;
   cwvValue: string | null;
+  cwvSourceKey?: string;
   fdyValue: string | null;
   faceProbValue: string | null;
   faceStsSizeValue: string | null;
@@ -6994,6 +6996,7 @@ function FaceTabContent({
           {linkTargetFormulaExpanded && <div id={linkTargetFormulaId} style={faceFormulaRowStyle}>
             {fltMode ? <FaceLinkFormula
               exif={{ faceTarget: exifTarget, weight: exifWeight, normalTarget, aeTarget,
+                faceTargetSource: "CWV(EXIF) × AE_TAG_FLT_TARGET(EXIF) / AE_TAG_FLT_FDY(EXIF)",
                 lowBound: exifCwrLowBound, highBound: exifCwrHighBound,
                 rawTarget: rawExifBackSceneTarget, lowLimit: exifLowLimit, highLimit: exifHighLimit, result: exifBackSceneTarget,
                 lowBoundSource: `EXIF · ${FACE_CWR_LOW_BOUND_KEY}`, highBoundSource: `EXIF · ${FACE_CWR_HIGH_BOUND_KEY}`,
@@ -7001,6 +7004,7 @@ function FaceTabContent({
                 weightSource: useParameterFdszRaForExif ? FACE_FLT_FDSZ_SOURCE : `EXIF · ${FACE_FLT_FDSZ_RA_KEY}`,
               }}
               parameter={{ faceTarget, weight: faceWeight, normalTarget, aeTarget,
+                faceTargetSource: "CWV(EXIF) × FLT_TH(AE.cpp) / AE_TAG_FLT_FDY(EXIF)",
                 lowBound: currentSource?.cwrBounds?.low ?? NaN, highBound: currentSource?.cwrBounds?.high ?? NaN,
                 rawTarget: rawBackSceneTarget, lowLimit, highLimit, result: backSceneTarget,
                 lowBoundSource: `AE.cpp · ${FACE_CWR_LOW_BOUND_PATH}`, highBoundSource: `AE.cpp · ${FACE_CWR_HIGH_BOUND_PATH}`,
@@ -7011,48 +7015,33 @@ function FaceTabContent({
                 ? () => jumpToFaceCwrBoundSource(onSourceJump, currentSource, FACE_CWR_LOW_BOUND_PATH, sourceDraftTextRef.current) : undefined}
               onJumpToHigh={onSourceJump && highBoundField && highBoundField.line > 0
                 ? () => jumpToFaceCwrBoundSource(onSourceJump, currentSource, FACE_CWR_HIGH_BOUND_PATH, sourceDraftTextRef.current) : undefined}
-            /> : <div style={faceFormulaTextStackStyle}>
-              <span>Back Scene Target = (FBT Target * FaceProb + Normal Target * (1024-FaceProb)) / 1024</span>
-              <span style={faceFormulaSubstitutionStyle}>
-                EXIF: (
-                <strong style={faceFormulaEmphasisStyle}>{formatRoundedNumber(exifTarget)}</strong>{" "}
-                * {formatComputedNumber(exifWeight)} + {" "}
-                <strong style={faceFormulaEmphasisStyle}>{formatRoundedNumber(normalTarget)}</strong>{" "}
-                * (1024 - {formatComputedNumber(exifWeight)})
-                ) / 1024 = {" "}
-                <strong style={faceFormulaCalculationResultStyle}>{formatRoundedNumber(rawExifBackSceneTarget)}</strong>
-              </span>
-              <span style={faceFormulaSubstitutionStyle}>
-                Calculation: (
-                <strong style={faceFormulaEmphasisStyle}>{formatOneDecimalNumber(faceTarget)}</strong>{" "}
-                * {formatComputedNumber(faceWeight)} +{" "}
-                <strong style={faceFormulaEmphasisStyle}>{formatComputedNumber(normalTarget)}</strong>{" "}
-                * (1024 - {formatComputedNumber(faceWeight)})
-                ) / 1024 ={" "}
-                <strong style={faceFormulaCalculationResultStyle}>{formatOneDecimalNumber(rawBackSceneTarget)}</strong>
-              </span>
-            </div>}
+            /> : <BackSceneTargetFormula
+              exifTarget={exifTarget} parameterTarget={faceTarget}
+              exifWeight={exifWeight} parameterWeight={faceWeight} normalTarget={normalTarget}
+              exifResult={rawExifBackSceneTarget} parameterResult={rawBackSceneTarget}
+              normalTargetSource={`EXIF · ${FACE_NORMAL_TARGET_KEY}`} />}
           </div>}
           <FaceDerivedTargetCard
             title={fltMode ? "FLT Target" : "FBT Target"}
             exifResult={exifFaceTarget}
             parameterResult={faceTarget}
-            exifFormula={`CWV * (${targetKey} / FDY) = ${formatComputedNumber(cwv)} * (${formatComputedNumber(exifThreshold)} / ${formatComputedNumber(fdy)})`}
-            parameterFormula={`CWV * (${thresholdTitle} / FDY) = ${formatComputedNumber(cwv)} * (${formatComputedNumber(thresholdValue)} / ${formatComputedNumber(fdy)})`}
             expanded={fbtTargetExpanded}
             onExpandedChange={(expanded) => setCardExpanded("fbtTarget", expanded)}
-          />
+          >
+            <FaceTargetFormula title={fltMode ? "FLT Target" : "FBT Target"}
+              cwv={cwv} fdy={fdy} exifThreshold={exifThreshold} parameterThreshold={thresholdValue}
+              exifResult={exifFaceTarget} parameterResult={faceTarget} targetKey={targetKey} thresholdTitle={thresholdTitle}
+              cwvSourceKey={cwvSourceKey} />
+          </FaceDerivedTargetCard>
           <FaceDerivedTargetCard
             title="Normal Target"
             exifResult={normalFormula.finalTarget}
             parameterResult={parameterNormalFormula.finalTarget}
-            formulaLines={[
-              `Cal_mt+hs_tar = (MainT_Tar*MainT_Wt + HS_Tar*HS_Wt) / (MainT_Wt + HS_Wt)\nEXIF计算: ${normalFormula.exifMtHsExpression} = ${formatRoundedNumber(normalFormula.mtHsTarget)}\n参数插值: ${parameterNormalFormula.exifMtHsExpression} = ${formatRoundedNumber(parameterNormalFormula.mtHsTarget)}`,
-              `Cal_final_tar = Cal_mt+hs_tar * (1024 - NS_Prob) / 1024 + NS_Tar * NS_Prob / 1024\nEXIF计算: ${normalFormula.exifFinalExpression} = ${formatRoundedNumber(normalFormula.finalTarget)}\n参数插值: ${parameterNormalFormula.exifFinalExpression} = ${formatRoundedNumber(parameterNormalFormula.finalTarget)}`,
-            ]}
             expanded={normalTargetExpanded}
             onExpandedChange={(expanded) => setCardExpanded("normalTarget", expanded)}
-          />
+          >
+            <NormalTargetFormula exif={normalFormula} parameter={parameterNormalFormula} />
+          </FaceDerivedTargetCard>
           <div style={faceProbMetricGridStyle}>
             {fltMode && (
               <FaceFdszTableCard
@@ -16136,6 +16125,7 @@ const faceFormulaRowStyle: CSSProperties = {
   alignItems: "center",
   fontSize: 13,
   fontWeight: 850,
+  fontFamily: "var(--font-family-formula)",
 };
 
 const faceMetricBlendFormulaStyle: CSSProperties = {
@@ -16211,11 +16201,6 @@ const faceFormulaSubstitutionStyle: CSSProperties = {
 const faceMetricBlendSubstitutionStyle: CSSProperties = {
   ...faceFormulaSubstitutionStyle,
   ...faceMetricBlendTermStyle,
-};
-
-const faceFormulaEmphasisStyle: CSSProperties = {
-  color: "var(--colorNeutralForeground1)",
-  fontWeight: 950,
 };
 
 const faceFormulaCalculationResultStyle: CSSProperties = {
