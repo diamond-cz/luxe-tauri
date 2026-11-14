@@ -3431,3 +3431,30 @@
 - `npm run typecheck`、三个受影响 Rust 文件的 `rustfmt --check --edition 2021`、更新 JS 的 `node --check` 均通过；Python PyYAML `6.0.3` 解析两个改动 workflow 成功。`git diff --check` 通过，仅 LF/CRLF 提示。
 - 未本地运行 Rust/Tauri 编译或 Rust 测试，新增用例交给插件 workflow 的 Windows Rust `1.95.0` job；CI 仍使用 Node 22。本地没有编译后的 `bin/luxe-image-sync.exe`，真实插件 `check/pack` 由 CI 构建后执行，本地包测试使用不执行的 EXE 夹具。
 - 实现验证阶段未提交/推送、未运行远程工作流或发布 Release；未实测互联网下载、从 `.hvp` 安装、Windows 插件窗口/跨应用联动与截图。上述自动化测试不代表这些桌面或发布场景已验收。
+
+### 2026-11-14：插件 CI 的 PowerShell 模块路径继承失败
+
+**亮点**
+
+- `plugins/luxe-image-sync/native/update.ps1` 在 Windows PowerShell Desktop 启动时，将更新子进程的 `PSModulePath` 限定为 `[IO.Path]::Combine($PSHOME, 'Modules')`。使用系统内置 Utility 等模块，避免从 PowerShell 7 / Node / 原生宿主继承不兼容模块目录；插件运行时与 CI 测试共用此修复，不修改宿主源码、系统环境或工作流 shell。
+- `scripts/plugin-package.test.mjs` 新增故意提供不兼容 Utility 模块的回归：先确认未初始化脚本的 Windows PowerShell 无法运行 `Get-FileHash`，再在相同环境执行完整 ZIP/版本/摘要/下载/清理测试，验证模块隔离后的真实行为，未跳过或弱化摘要验证。
+
+**痛点**
+
+- 用户截图对应 Actions run `43583829715` / job `132413995071`，公开 job 元数据确认源提交为 `8c6cdc3`；完整日志下载接口返回权限不足，截图可确认失败发生在 `plugin:test`，Rust 编译尚未开始。
+- 本机 Windows PowerShell 5.1 直接运行时，Node 24 和 Node 22 均通过原 5 项测试；改用 `PowerShell 7.4.22 → Node 22.23.5 → Windows PowerShell 5.1` 启动链，稳定复现第 5 项失败、4 通过/1 失败，实际异常为 `Get-FileHash : The term 'Get-FileHash' is not recognized`。父进程的 PowerShell 7 模块路径被原生中间进程继承，导致 5.1 的命令发现失败。上一轮仅检查 Node 版本与 Windows PowerShell 直接启动，没有覆盖 CI 的父 shell。
+- 临时 PowerShell 7.7 在本机因 CET 系统支持不足不能启动，改用兼容的 7.4 LTS 完成复现；该错误发生于临时诊断工具，不属于插件 CI。临时工具位于已忽略的 `.tmp-plugin-ci/`，不进入提交或插件包。
+
+**闭坑**
+
+- 不能仅通过设置工作流 `shell: powershell`、删除失败测试或单独替换 `Get-FileHash` 掩盖运行时问题；启动 Windows PowerShell 子进程的模块搜索路径也属于行为契约。
+- 模块隔离只作用于更新子进程；不修改注册表、用户模块、宿主文件或 Tauri 安装摘要。后续新增依赖模块须确认属于系统内置模块，不能依赖继承的 PowerShell 7 模块。
+- 回归夹具不能只把 `PowerShellVersion` 标为 7.0，否则 5.1 可能忽略它并回退到内置模块。夹具按实际 Core 模块声明较低的 PowerShellVersion、Core edition 和无法加载的 NestedModules，且先验证隔离前确实无法执行 `Get-FileHash`，防止测试空通过。
+- 远端旧任务重新运行仍使用旧提交，需要推送包含此修复的新提交后构建。插件 0.1.4 此前在测试阶段失败、尚无该轮发布产物，本次保持四处插件版本一致，不改变主应用版本。
+
+**验证**
+
+- 修复前：Windows PowerShell 5.1 直接运行 `npm run plugin:test` 为 5 项通过；官方 SHA-256 校验后下载的 Node `22.23.5` 直接运行同样 5 项通过；PowerShell `7.4.22` 父 shell 下为 4 项通过、1 项失败，复现模块发现错误。
+- 修复后：Node `22.23.5` 分别从 Windows PowerShell 5.1 与 PowerShell `7.4.22` 启动，`--test scripts/plugin-package.test.mjs` 均为 6 项通过，包括不兼容模块回归；`--test scripts/image-sync.test.mjs` 13 项通过。
+- Node 22 的 `--check scripts/plugin-package.test.mjs`、`node_modules/typescript/bin/tsc --noEmit` 通过；`git diff --check` 通过，仅 LF/CRLF 提示。
+- 未运行本地 Rust/Tauri 编译、未重新触发远程 workflow，也未实测互联网插件更新下载或桌面安装；不将本地脚本修复通过描述为远程完整插件构建已通过。

@@ -27,6 +27,8 @@ LUXE 必须运行且图片目录已被扫描。路径必须命中唯一的已索
 
 更新需要 Windows 自带的 Windows PowerShell 5.1；下载在隐藏进程中进行，流式读写、限时与限额，失败后可重试。包保存在宿主授权的 `HIVIEWER_PLUGIN_DATA_DIR/updates/`，只复用同一版本且摘要一致的文件，不覆盖已有文件。该目录保留已下载版本用于手动安装；不存入已安装包目录。
 
+Windows PowerShell 5.1 启动时将 `PSModulePath` 限定为自身 `$PSHOME/Modules`，仅影响更新子进程；避免从 PowerShell 7 经 Node 或宿主继承不兼容模块路径，导致 `Get-FileHash` 无法使用。`npm run plugin:test` 包含带不兼容模块路径的完整校验测试；CI 仍使用 Node 22，不能通过跳过更新脚本测试解决此问题。
+
 **边界：现有 HiViewer v1 未开放插件安装回调。仅修改本插件无法实现点击一次便直接安装到宿主；当前实现自动检查、下载、校验和定位，最后的安装由宿主确认。插件不会覆盖正在运行的 EXE 或改写宿主安装记录，否则会触发 `plugins/installed-package-modified`。`D:\Image_process\hiviewer_rs` 代码不需要改动。**
 
 HiViewer 已有在线目录输入框也可填写以下地址并刷新，然后点击对应包的“下载安装”，复用宿主的检查和确认流程：

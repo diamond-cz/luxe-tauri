@@ -78,10 +78,40 @@ test('catalog identifies the exact packed archive by immutable version, platform
   assert.throws(() => releaseIdentity({ ...manifest, version: 'v1.0.0' }), /identity/);
 });
 
-test('Windows updater validates versions and actual archives and stages only verified downloads', { skip: process.platform !== 'win32' }, () => {
+function runWindowsUpdaterTest(env = process.env) {
   const shell = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const result = spawnSync(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(root, 'scripts/plugin-update.test.ps1')], { encoding: 'utf8', timeout: 30000 });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    path.join(root, 'scripts/plugin-update.test.ps1')], { encoding: 'utf8', timeout: 30000, env });
+  assert.equal(result.status, 0, `Windows PowerShell updater test failed (${result.error?.message ?? result.status}):\n${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /assertions passed/);
+}
+
+test('Windows updater validates versions and actual archives and stages only verified downloads', { skip: process.platform !== 'win32' }, () => {
+  runWindowsUpdaterTest();
+});
+
+test('Windows updater isolates inherited PowerShell 7 modules without weakening archive checks', { skip: process.platform !== 'win32' }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'luxe-psmodules-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const utility = path.join(dir, 'Microsoft.PowerShell.Utility');
+  fs.mkdirSync(utility);
+  fs.writeFileSync(path.join(utility, 'Microsoft.PowerShell.Utility.psd1'), `@{
+    ModuleVersion = '99.0.0'
+    PowerShellVersion = '3.0'
+    CompatiblePSEditions = @('Core')
+    NestedModules = @('Unavailable.Core.Utility.dll')
+    CmdletsToExport = @('Get-FileHash')
+  }`);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== 'psmodulepath'));
+  env.PSModulePath = [dir, process.env.PSModulePath].filter(Boolean).join(path.delimiter);
+  env.LUXE_UPDATE_TEST_HASH_TARGET = tool;
+  const shell = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const before = spawnSync(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    '$ErrorActionPreference = "Stop"; Get-FileHash -LiteralPath $env:LUXE_UPDATE_TEST_HASH_TARGET -Algorithm SHA256'],
+    { encoding: 'utf8', timeout: 30000, env });
+  assert.ifError(before.error);
+  assert.notEqual(before.status, 0, 'The incompatible module must reproduce the Get-FileHash failure');
+  assert.match(before.stderr, /Get-FileHash/);
+  // Run the full real ZIP/digest/download suite through the poisoned environment.
+  runWindowsUpdaterTest(env);
 });

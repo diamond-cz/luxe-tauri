@@ -2,6 +2,12 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
+# A native parent (Node or HiViewer) can carry PowerShell 7's module paths into
+# Windows PowerShell 5.1. Use this process's built-in modules for all cmdlets.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+}
+
 function Get-VersionParts([string]$Version) {
     if ($Version -notmatch '^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$') { throw 'Invalid plugin version' }
     return @($Version.Split('.') | ForEach-Object { [int]$_ })
