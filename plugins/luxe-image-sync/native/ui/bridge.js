@@ -5,6 +5,8 @@ const state = {
 };
 let labels = {};
 let ready = false;
+let updateBusy = false;
+let updateVersion = null;
 const bufferedEvents = [];
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
 const t = (key, args = {}) => (labels[`image_sync.${key}`] || key)
@@ -17,6 +19,9 @@ const setStatus = (text) => { document.querySelector('#status').textContent = te
 function render() {
   document.querySelector('h1').textContent = t('title');
   document.title = t('title');
+  const updateButton = document.querySelector('#update');
+  updateButton.textContent = t(updateBusy ? 'update_busy' : updateVersion ? 'update_download' : 'update_check', { version: updateVersion });
+  updateButton.disabled = !ready || updateBusy;
   document.querySelector('#path').textContent = state.currentPath || t('no_image');
   for (const [id, key] of [['previous', 'previous'], ['next', 'next']]) {
     const button = document.querySelector(`#${id}`);
@@ -34,6 +39,29 @@ function render() {
     }));
   } else setStatus(t(state.source === 'luxe' ? 'from_luxe' : 'waiting'));
 }
+
+document.querySelector('#update').onclick = async () => {
+  if (!ready || updateBusy) return;
+  const download = updateVersion !== null;
+  updateBusy = true;
+  const status = document.querySelector('#update-status');
+  status.textContent = t('update_busy');
+  render();
+  try {
+    const result = await invoke('update_plugin', { download });
+    updateVersion = result.available ? result.version : null;
+    if (result.path) {
+      status.textContent = t('update_install', { version: result.version, path: result.path });
+      updateVersion = null;
+    } else status.textContent = t(result.available ? 'update_available' : 'update_latest', { version: result.version });
+  } catch (error) {
+    console.warn('plugin update failed', error);
+    status.textContent = t('update_failed', { error: String(error) });
+  } finally {
+    updateBusy = false;
+    render();
+  }
+};
 
 function move(delta) {
   const index = currentIndex();
@@ -111,6 +139,7 @@ void (async () => {
     const code = Object.keys(bundles).find((code) => code.toLowerCase() === locale.toLowerCase())
       || Object.keys(bundles).find((code) => code.split('_')[0] === locale.split('_')[0]) || 'zh_CN';
     labels = bundles[code] || bundles.zh_CN || {};
+    document.querySelector('#update-status').textContent = t('update_hint');
     document.documentElement.lang = code.replace('_', '-');
     await window.__TAURI__.window.getCurrentWindow().setTitle(t('title'));
     const initial = await invoke('get_bridge_state');

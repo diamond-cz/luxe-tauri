@@ -3401,3 +3401,33 @@
 - `npm run typecheck`、`npm run version:check`：通过；Node 22 执行 `sync:test` 对应六个脚本：111 项通过。
 - `git check-ignore -v`：临时目录/脚本和四类分析产物及缓存命中预期规则；`git ls-files --others --exclude-standard` 仅保留新增曲线代码、分析摘要和两张正式截图。
 - `git diff --check`：通过，仅 LF/CRLF 提示；正文已无指向忽略文件的 Markdown 链接。此次未执行 Rust/Tauri 编译或新增桌面验收。
+
+### 2026-11-14：HiViewer 插件命令兼容、测试机行同步与插件更新下载
+
+**亮点**
+
+- 只读对照 `D:/Image_process/hiviewer_rs` 的 `registry.ts`、`native_view.rs`、`testMachineViewer.ts`、`catalog.rs` 与 `store.rs`；该仓库最终 `git status --short` 为空。修改仅落在 LUXE 项目，曾准备的宿主更新按钮草稿未写入宿主且已清理。
+- 插件 `0.1.3 → 0.1.4`，保留 `sync` 命令 ID 和贡献点，将方法改为 `view/open`，另声明隐藏 `viewer/update`。`scripts/plugin-package.mjs` 检查可见打开命令、刷新方法、贡献点与 Manifest/Cargo/锁文件/Tauri 版本一致性，可用于后续插件发布校验。
+- `native/src/viewer_snapshot.rs` 集中处理活动图片列表与测试机路径。宿主已负责同一行映射，插件只消费路径，LUXE 仍映射到自己的唯一已索引图片，不假设两个应用 index 相同。新增 Rust 用例覆盖参考机焦点、测试机缺图、清除测试机设置、路径大小写与长度/数量限制；原生 JSON 帧由 1 MiB 对齐宿主 8 MiB，补充超限/截断测试。
+- 插件窗口增加检查/下载更新按钮；`native/update.ps1` 使用 Windows PowerShell 5.1 和系统 HTTPS 流式下载，核对 SHA-256 及 ZIP 内 ID/版本/平台，只写私有 `updates/`，再定位 `.hvp` 供宿主确认安装。更新命令使用隐藏进程、原子 busy 标记，失败可重试；五种语言补齐更新状态文案。
+- `scripts/plugin-release.mjs` 从真实 `.hvp` 生成宿主可识别的目录；`.github/workflows/plugin.yml` 在匹配版本 tag 或 main 手动发布时先发布版本包，再更新固定目录，限制同版换字节及目录降级，不占用应用 latest Release。普通 main 推送仍只生成 artifact。
+
+**痛点**
+
+- 新宿主隐藏 `viewer/update`；旧插件仅声明这一命令，导致无法从插件界面打开持续快照会话。只检查 JSON 合法、二进制存在或 Named Pipe 能连接不能发现此入口兼容问题。
+- 宿主 v1 的 sidecar 不开放安装回调，自动化接口的插件功能也只有 list/formats；宿主会校验已安装包摘要。仅修改插件无法在宿主插件卡片增加按钮或直接提交安装；覆盖运行中 EXE 会破坏摘要，改写宿主安装记录也不属于插件 API。本次交付为插件内检查/下载/验证/定位，安装仍需用户在宿主确认，不能描述为一键安装已完成。
+- 原工作流仅提供 30 天 Actions artifact，不能作为持久更新源。新增固定 Release 目录需实际执行发布后才能访问；本次尚未上传，404 应按失败处理。Windows PowerShell/网络策略阻止更新时仍可从包或宿主已有在线目录安装。
+
+**闭坑**
+
+- 每次变更宿主 API，先核对“用户可调用命令”和内部刷新白名单；`view/open` / `viewer/update` 分开声明，贡献点必须引用前者。保持 dataVersion 1，升级保留存储并由宿主重新授权启用。
+- 测试机快照显式为 null 表示该行缺图，不得回退到首图或参考机。路径不匹配/歧义仍交由现有 LUXE 接收器拒绝，不触发扫描；快照和管道帧有各自上限。
+- 只将已校验包放入插件私有下载目录；摘要不符的既有文件不覆盖。下载成功不等于安装完成，宿主安装必须保留确认、旧 revision 检查、会话撤销及启用授权。
+- 后续发布必须增加插件四处版本并核对 tag，先保证版本包可获取再修改目录；插件目录不是应用 updater 清单。发布权限仅授予发布 job，PR 不发布。
+
+**验证**
+
+- 本机实际 Node.js 为 `24.14.1`、npm `11.12.1`；`npm run sync:test` 最终 114 项通过，`npm run plugin:test` 5 项通过。其中 Windows PowerShell 5.1 实际执行本地 ZIP/模拟传输测试，包含版本、ID/平台、摘要失败、包身份不符、下载/复用和临时文件清理；新 UI 测试覆盖检查后下载、重复点击拦截、失败后可重试及缺测试机行/取消设置。
+- `npm run typecheck`、三个受影响 Rust 文件的 `rustfmt --check --edition 2021`、更新 JS 的 `node --check` 均通过；Python PyYAML `6.0.3` 解析两个改动 workflow 成功。`git diff --check` 通过，仅 LF/CRLF 提示。
+- 未本地运行 Rust/Tauri 编译或 Rust 测试，新增用例交给插件 workflow 的 Windows Rust `1.95.0` job；CI 仍使用 Node 22。本地没有编译后的 `bin/luxe-image-sync.exe`，真实插件 `check/pack` 由 CI 构建后执行，本地包测试使用不执行的 EXE 夹具。
+- 实现验证阶段未提交/推送、未运行远程工作流或发布 Release；未实测互联网下载、从 `.hvp` 安装、Windows 插件窗口/跨应用联动与截图。上述自动化测试不代表这些桌面或发布场景已验收。

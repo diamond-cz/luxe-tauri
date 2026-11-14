@@ -17,6 +17,9 @@
       button { flex: 1; min-width: 100px; padding: 8px 12px; cursor: pointer; }
       button:disabled { cursor: default; opacity: .55; }
       .muted { opacity: .7; }
+      .updates { margin-top: 12px; border-top: 1px solid var(--sync-border); padding-top: 10px; }
+      .updates button { min-width: 0; flex: none; }
+      #update-status { margin-top: 6px; overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
@@ -26,6 +29,10 @@
     <div class="row">
       <button id="previous" type="button" disabled>A</button>
       <button id="next" type="button" disabled>D</button>
+    </div>
+    <div class="updates">
+      <button id="update" type="button" disabled>…</button>
+      <div role="status" aria-live="polite" id="update-status" class="muted">…</div>
     </div>
     <script src="bridge.js"></script>
   </body>

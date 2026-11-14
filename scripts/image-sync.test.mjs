@@ -212,8 +212,8 @@ test('sync labels have the same keys and placeholders in all five languages with
   }
 });
 
-async function pluginUiHarness() {
-  const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next'].map((key) => [key, {}]));
+async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.4', path: null })) {
+  const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next', '#update', '#update-status'].map((key) => [key, {}]));
   const events = {}, windowEvents = {}, commands = [];
   const window = {
     addEventListener: (name, callback) => { windowEvents[name] = callback; },
@@ -223,6 +223,7 @@ async function pluginUiHarness() {
       core: { invoke: async (command, args) => {
         commands.push([command, args]);
         if (command === 'get_all_locale_bundles') return bundles;
+        if (command === 'update_plugin') return update(args);
         if (command === 'get_bridge_state') return {
           snapshot: { files: ['C:/a.jpg', 'C:/b.jpg'], currentPath: 'C:/a.jpg' },
           connected: true, pendingSequence: 1,
@@ -272,4 +273,48 @@ test('plugin routes only the active test-machine column and honors keyboard focu
   assert.equal(h.commands.at(-1)[1].imagePath, 'D:/test/b.jpg');
   h.emit('luxe-connection', false);
   assert.equal(h.nodes.get('#previous').disabled, true);
+});
+
+test('plugin checks then downloads updates, blocks double clicks and explains host installation', async () => {
+  const pending = deferred();
+  const h = await pluginUiHarness(({ download }) => download
+    ? Promise.resolve({ available: true, version: '0.1.5', path: 'C:/data/updates/plugin.hvp' })
+    : pending.promise);
+  const button = h.nodes.get('#update');
+  const first = button.onclick();
+  assert.equal(button.disabled, true);
+  await button.onclick();
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
+  pending.resolve({ available: true, version: '0.1.5', path: null });
+  await first;
+  assert.match(button.textContent, /0.1.5/);
+  assert.equal(button.disabled, false);
+  await button.onclick();
+  assert.equal(h.commands.at(-1)[1].download, true);
+  assert.match(h.nodes.get('#update-status').textContent, /C:\/data\/updates\/plugin.hvp/);
+  assert.match(h.nodes.get('#update-status').textContent, /HiViewer/);
+});
+
+test('missing test-machine row clears navigation and clearing the device restores host focus', async () => {
+  const h = await pluginUiHarness();
+  h.emit('viewer-updated', {
+    sequence: 4, files: ['C:/reference.jpg'], currentPath: 'C:/reference.jpg', testMachineColumnPath: 'D:/device',
+    testMachineFiles: ['D:/device/first.jpg'], testMachineCurrentPath: null,
+  });
+  assert.equal(h.nodes.get('#next').disabled, true);
+  assert.equal(h.nodes.get('#path').textContent, bundles.en_US['image_sync.no_image']);
+  h.emit('viewer-updated', {
+    sequence: 5, files: ['C:/reference.jpg'], currentPath: 'C:/reference.jpg', testMachineColumnPath: null,
+    testMachineFiles: [], testMachineCurrentPath: null,
+  });
+  assert.equal(h.nodes.get('#next').disabled, false);
+  assert.equal(h.nodes.get('#path').textContent, 'C:/reference.jpg');
+});
+
+test('plugin update failures permit retry and do not change image sync connection', async () => {
+  const h = await pluginUiHarness(async () => { throw new Error('catalog unavailable'); });
+  await h.nodes.get('#update').onclick();
+  assert.match(h.nodes.get('#update-status').textContent, /catalog unavailable/);
+  assert.equal(h.nodes.get('#update').disabled, false);
+  assert.equal(h.nodes.get('#next').disabled, false);
 });

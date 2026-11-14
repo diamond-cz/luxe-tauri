@@ -3,6 +3,7 @@ name: Build HiViewer plugin
 on:
   push:
     branches: [main]
+    tags: ["luxe-image-sync-v*"]
     paths:
       - "plugins/luxe-image-sync/**"
       - "src-tauri/src/image_sync/protocol.rs"
@@ -10,6 +11,9 @@ on:
       - "src/services/imageSync*.ts"
       - "scripts/image-sync.test.mjs"
       - "scripts/plugin-package.mjs"
+      - "scripts/plugin-package.test.mjs"
+      - "scripts/plugin-release.mjs"
+      - "scripts/plugin-update.test.ps1"
       - "package.json"
       - ".github/workflows/plugin.yml"
   pull_request:
@@ -20,16 +24,24 @@ on:
       - "src/services/imageSync*.ts"
       - "scripts/image-sync.test.mjs"
       - "scripts/plugin-package.mjs"
+      - "scripts/plugin-package.test.mjs"
+      - "scripts/plugin-release.mjs"
+      - "scripts/plugin-update.test.ps1"
       - "package.json"
       - ".github/workflows/plugin.yml"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the versioned plugin and update the stable HiViewer catalog"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
   group: hiviewer-plugin-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-plugin:
@@ -47,6 +59,7 @@ jobs:
 
       - run: npm ci
       - run: npm run sync:test
+      - run: npm run plugin:test
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -71,8 +84,14 @@ jobs:
           $artifactDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-artifact'
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
           $pluginVersion = (Get-Content -LiteralPath (Join-Path $pluginRoot 'manifest.json') -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "luxe-image-sync-v$pluginVersion") {
+            throw 'plugin release tag must match manifest.version'
+          }
           $package = Join-Path $artifactDir "luxe-image-sync-$pluginVersion-windows-x86_64.hvp"
           npm run plugin -- pack $pluginRoot $package
+          if ($LASTEXITCODE -ne 0) { throw 'plugin packaging failed' }
+          node scripts/plugin-release.mjs $package (Join-Path $artifactDir 'plugins.json')
+          if ($LASTEXITCODE -ne 0) { throw 'plugin catalog generation failed' }
           $zipProbe = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe.zip'
           $probeDir = Join-Path $env:RUNNER_TEMP 'luxe-image-sync-zip-probe'
           Copy-Item -LiteralPath $package -Destination $zipProbe
@@ -108,3 +127,59 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+  publish-plugin:
+    needs: build-plugin
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/luxe-image-sync-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: luxe-plugin-catalog-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: luxe-image-sync-windows-x86_64
+          path: plugin-artifact
+      - name: Publish immutable plugin package and stable catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd plugin-artifact
+          version="$(node -p 'JSON.parse(require("node:fs").readFileSync("plugins.json", "utf8")).plugins[0].version')"
+          tag="luxe-image-sync-v$version"
+          package="luxe-image-sync-$version-windows-x86_64.hvp"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            mkdir existing
+            gh release download "$tag" --pattern "$package" --dir existing
+            if ! cmp -s "$package" "existing/$package"; then
+              echo "Published plugin versions are immutable. Bump the plugin version before publishing changed bytes." >&2
+              exit 1
+            fi
+          else
+            gh release create "$tag" --target "$RELEASE_COMMIT" --draft --latest=false --title "LUXE image sync $version" --notes-file INSTALL-zh-CN.md
+            gh release upload "$tag" "$package" "$package.sha256" INSTALL-zh-CN.md
+          fi
+          gh release edit "$tag" --draft=false --latest=false
+          catalog_tag=luxe-plugin-updates
+          if gh release view "$catalog_tag" >/dev/null 2>&1; then
+            mkdir current
+            gh release download "$catalog_tag" --pattern plugins.json --dir current
+            node --input-type=module -e '
+              import fs from "node:fs";
+              const read = p => JSON.parse(fs.readFileSync(p, "utf8")).plugins[0].version.split(".").map(Number);
+              const current = read("current/plugins.json"), next = read("plugins.json");
+              const index = current.findIndex((part, i) => part !== next[i]);
+              if (index >= 0 && current[index] > next[index]) throw new Error("Refusing to downgrade published plugin catalog");
+            '
+          else
+            gh release create "$catalog_tag" --target "$RELEASE_COMMIT" --latest=false --title 'LUXE HiViewer plugin updates' --notes 'Stable plugin catalog for the HiViewer plugin center. Application updates use their own release channel.'
+          fi
+          gh release upload "$catalog_tag" plugins.json --clobber

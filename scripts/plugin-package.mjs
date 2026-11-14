@@ -68,6 +68,31 @@ async function readManifest(root) {
       fail(`invalid native-view method for ${command.id}`);
     }
   }
+  if (manifest.commands.some((command) => command.handler === "native-view")) {
+    const visible = manifest.commands.filter((command) => !command.hidden && command.method !== "viewer/update");
+    if (!visible.some((command) => command.handler === "native-view" && command.method === "view/open")) {
+      fail("native-view requires a visible view/open command; HiViewer hides viewer/update");
+    }
+    if (!manifest.commands.some((command) => command.handler === "native-view" && command.method === "viewer/update")) {
+      fail("native-view requires a viewer/update command");
+    }
+    if (!manifest.permissions.includes("selection.read")) fail("native-view requires selection.read permission");
+    for (const contribution of manifest.contributions ?? []) {
+      if (!visible.some((command) => command.id === contribution.command)) {
+        fail(`contribution ${contribution.id} must reference a visible command`);
+      }
+    }
+  }
+  if (manifest.id === "luxe.image-sync" && await exists(path.join(root, "native/Cargo.toml"))) {
+    const cargo = await fs.readFile(path.join(root, "native/Cargo.toml"), "utf8");
+    const config = JSON.parse(await fs.readFile(path.join(root, "native/tauri.conf.json"), "utf8"));
+    const lock = await fs.readFile(path.join(root, "native/Cargo.lock"), "utf8");
+    const packageVersion = cargo.match(/\[package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/)?.[1];
+    const lockedVersion = lock.match(/\[\[package\]\]\s*\nname = "luxe-image-sync"\s*\nversion = "([^"]+)"/)?.[1];
+    if ([packageVersion, config.version, lockedVersion].some((version) => version !== manifest.version)) {
+      fail("plugin manifest, Cargo.toml, Cargo.lock and tauri.conf.json versions must match");
+    }
+  }
   if (manifest.backend) {
     const backend = manifest.backend;
     if (typeof backend.executable !== "string" || !backend.executable.startsWith("bin/") || backend.executable.includes("..")) fail("backend.executable must be inside bin/");

@@ -4,34 +4,21 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::watch;
 
+mod plugin_update;
 #[path = "../../../../src-tauri/src/image_sync/protocol.rs"]
 mod protocol;
 mod selection_queue;
+mod viewer_snapshot;
 use protocol::{
     is_absolute_windows_path, parse_message, read_bounded_line, SyncEnvelope, PIPE_NAME,
 };
 use selection_queue::SelectionQueue;
+use viewer_snapshot::{normalize_windows_path, ViewerSnapshot};
 const PLUGIN_ID: &str = "luxe.image-sync";
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ViewerSnapshot {
-    source: String,
-    sequence: u64,
-    test_machine_column_path: Option<String>,
-    #[serde(default)]
-    files: Vec<String>,
-    current_path: Option<String>,
-    #[serde(default)]
-    test_machine_files: Vec<String>,
-    #[serde(default)]
-    test_machine_current_path: Option<String>,
-}
 
 struct BridgeState {
     queue: Mutex<SelectionQueue>,
@@ -65,12 +52,8 @@ fn select_image(
         .snapshot
         .read()
         .map_err(|_| "snapshot state poisoned")?;
-    let active_files = if snapshot.test_machine_column_path.is_some() {
-        &snapshot.test_machine_files
-    } else {
-        &snapshot.files
-    };
-    if !active_files
+    if !snapshot
+        .active_files()
         .iter()
         .any(|path| normalize_windows_path(path) == normalized)
     {
@@ -162,12 +145,6 @@ fn queue_image_selection(
     Ok(())
 }
 
-fn normalize_windows_path(path: &str) -> String {
-    path.replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_ascii_lowercase()
-}
-
 fn send_host_message(stdout: &Arc<Mutex<std::io::Stdout>>, message: Value) {
     if let Ok(mut bytes) = serde_json::to_vec(&message) {
         bytes.push(b'\n');
@@ -179,7 +156,8 @@ fn send_host_message(stdout: &Arc<Mutex<std::io::Stdout>>, message: Value) {
 }
 
 fn read_host_line<R: std::io::BufRead>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>> {
-    const MAX_HOST_MESSAGE_BYTES: usize = 1024 * 1024;
+    // HiViewer permits an 8 MiB native JSON frame (two lists of up to 1000 paths).
+    const MAX_HOST_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
     let mut line = Vec::with_capacity(4096);
     loop {
         let chunk = reader.fill_buf()?;
@@ -239,38 +217,10 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         .cloned()
                         .and_then(|value| serde_json::from_value::<ViewerSnapshot>(value).ok());
                     let accepted = if let Some(snapshot) = snapshot {
-                        if snapshot.files.len() <= 1000
-                            && snapshot.test_machine_files.len() <= 1000
-                            && snapshot
-                                .files
-                                .iter()
-                                .all(|path| is_absolute_windows_path(path))
-                            && snapshot
-                                .test_machine_files
-                                .iter()
-                                .all(|path| is_absolute_windows_path(path))
-                            && snapshot.current_path.as_deref().is_none_or(|current| {
-                                snapshot.files.iter().any(|path| {
-                                    normalize_windows_path(path) == normalize_windows_path(current)
-                                })
-                            })
-                            && snapshot
-                                .test_machine_current_path
-                                .as_deref()
-                                .is_none_or(|current| {
-                                    snapshot.test_machine_files.iter().any(|path| {
-                                        normalize_windows_path(path)
-                                            == normalize_windows_path(current)
-                                    })
-                                })
-                        {
+                        if snapshot.validate().is_ok() {
                             if let Ok(mut current) = state.snapshot.write() {
                                 if snapshot.sequence >= current.sequence {
-                                    let sync_path = if snapshot.test_machine_column_path.is_some() {
-                                        snapshot.test_machine_current_path.clone()
-                                    } else {
-                                        snapshot.current_path.clone()
-                                    };
+                                    let sync_path = snapshot.sync_path().map(str::to_owned);
                                     *current = snapshot.clone();
                                     if let Ok(mut selection) = state.last_selection.write() {
                                         *selection = None;
@@ -332,6 +282,35 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
         }
         std::process::exit(0);
     });
+}
+
+#[cfg(test)]
+mod host_frame_tests {
+    use super::read_host_line;
+    use std::io::Cursor;
+
+    #[test]
+    fn host_frames_above_the_old_one_mib_limit_are_preserved() {
+        let mut frame = vec![b' '; 1024 * 1024 + 1];
+        frame.push(b'\n');
+        let mut input = Cursor::new(frame.clone());
+        assert_eq!(read_host_line(&mut input).unwrap(), Some(frame));
+        assert!(read_host_line(&mut input).unwrap().is_none());
+    }
+
+    #[test]
+    fn oversized_and_truncated_host_frames_are_rejected() {
+        let mut oversized = Cursor::new(vec![b' '; 8 * 1024 * 1024 + 2]);
+        assert_eq!(
+            read_host_line(&mut oversized).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let mut truncated = Cursor::new(b"{\"sequence\":1}".to_vec());
+        assert_eq!(
+            read_host_line(&mut truncated).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -436,7 +415,8 @@ fn main() {
             select_image,
             is_luxe_connected,
             get_bridge_state,
-            get_all_locale_bundles
+            get_all_locale_bundles,
+            plugin_update::update_plugin
         ])
         .setup(move |app| {
             start_host_protocol(app.handle().clone(), protocol_state.clone());
