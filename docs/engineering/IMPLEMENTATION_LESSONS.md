@@ -3509,3 +3509,27 @@
 
 - Node 22 执行 `scripts/plugin-package.test.mjs`：6 项通过；`sync:test` 对应六个脚本：117 项通过；`npm run typecheck`、受影响 Rust 文件 rustfmt 检查、插件 workflow YAML 解析与 `git diff --check` 通过。
 - 本地未运行 Rust/Tauri 编译。指南尚未在宿主执行，HiViewer Git 状态仍为空；提交前没有安装或重启用户的任一应用。远程构建/发布结果在本轮完成后另行核对，不将本条发布准备记录当作已发布证据。
+
+### 2026-11-15：插件 0.1.5 发布与实际更新下载验证
+
+**亮点**
+
+- 已推送实现提交 `cc667ab`，GitHub Actions 插件运行 `43613666522` 的 build-plugin 与 publish-plugin 均成功；同步/插件脚本测试、Rust 插件测试、release 编译、真实 `.hvp` 打包校验、artifact 与版本 Release 上传全部完成。
+- Release `luxe-image-sync-v0.1.5` 包含 `.hvp`、`.sha256`、安装说明和 `HIVIEWER_PLUGIN_INTEGRATION_GUIDE.md`；固定 Release `luxe-plugin-updates` 包含 `plugins.json`。GitHub 原目录和 gh-proxy.com 代理目录实测可读取，目录均指向 0.1.5 的代理包地址。
+- 实际执行当前生产 `update.ps1`：以 0.1.5 检查返回 available=false，以 0.1.4 检查返回 available=true/version=0.1.5，并成功下载和验证真实 0.1.5 包。包为 9,419,201 字节，SHA-256 为 `4c4333b509642742feb0c05eed158a11bfba6f6c2a1f0d54913794c5e3113e3d`；另用 Python 核对包内 manifest 与当前源码相等、全部 3 个载荷文件与 checksums.json 相符。
+
+**痛点**
+
+- 生产 HTTPS 验证在受限沙箱内请求失败，按权限流程批准联网后通过；未修改系统网络设置或削弱 HTTPS/摘要校验。下载包保存在本地忽略的 `.tmp-plugin-release-verify/packages/`，可供用户手动安装，本轮未替用户安装或重启应用。
+- 独立插件发布成功不代表主应用全量 CI 通过：同提交 Validate changes `43613666450` 的 `cargo test --locked --manifest-path src-tauri/Cargo.toml` 失败。本轮未修改主应用测试，尚未定位该单独失败的根因，不宣称其与插件无关或已修复。
+
+**闭坑**
+
+- 本次由生产脚本完成真实版本查询、下载和 SHA-256/包身份验证；仍未验收原生窗口命令按钮、跨应用图片同步或宿主安装。启用即同步与宿主内直接安装仍留给指南所述后续宿主改造。
+- 发布前后 GitHub `/releases/latest` 均为应用 `v0.2.16`，插件与目录 Release 没有替换应用更新入口；后续改发布选项仍需检查此断言。
+
+**验证**
+
+- GitHub API 查询确认插件 workflow 两个 job 成功、artifact 存在；版本 Release 四个附件与目录 Release 的 plugins.json 均存在。Windows PowerShell 5.1 实际运行生产更新函数的 current/old/download 三种操作通过；Python zipfile/hashlib 校验真实包通过。
+- `git status --short --branch` 显示实现提交已与 origin/main 同步；HiViewer 工作区 Git 状态为空。此次验证未改动宿主代码、安装记录或用户图片。
+- 项目主应用全量测试失败明确保留；Windows 桌面安装与功能验收待用户执行，不以构建及下载成功替代。
