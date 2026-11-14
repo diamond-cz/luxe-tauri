@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Code24Regular, DataHistogram24Regular, Save24Regular } from "@fluentui/react-icons";
-import { Panel, PanelGroup } from "react-resizable-panels";
 import { useTranslation } from "react-i18next";
 
 import { parseCppFile, type CardSourceSpec } from "@/ipc/cppParser";
 import { loadImageTomlFieldsBatchShared, type ImageEntry } from "@/ipc/imageScan";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
-import { ResizeHandle } from "@/components/common/ResizeHandle";
 import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { calculateLceTarget, type LceTargetCalculation } from "./toneLceTarget";
 import { ToneLceTargetWeight } from "./ToneLceTargetWeight";
+import { ToneLceCurve } from "./ToneLceCurve";
 
 const TONE_TABS = ["LTM", "LCE", "GMA", "DCE", "CA-LTM"] as const;
 type ToneTab = (typeof TONE_TABS)[number];
@@ -731,23 +730,19 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
     <section style={lceCardStyle}>
       <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
-        <PanelGroup direction="horizontal" autoSaveId="isp6s-tone-lce-ratio-cal" className="flex w-full min-w-0 items-stretch">
-          <Panel defaultSize={50} minSize={25} className="flex min-w-0 flex-col">
-            <ToneLceValueGrid tableId="ratio" title="Ratio" labels={ratioLabels} rows={tables.ratio} bracket={ratioBracket} controls={props} fillHeight />
-          </Panel>
-          <ResizeHandle direction="horizontal" size={8} />
-          <Panel defaultSize={50} minSize={25} className="min-w-0">
-            <ToneLceCalCard calculation={calculation} />
-          </Panel>
-        </PanelGroup>
-        <ToneLceValueGrid tableId="target" title="Target" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props} />
-        <ToneLceTargetWeight calculation={calculation} />
+        <div className="tone-lce-chart-pair">
+            <ToneLceCurve tomlData={props.tomlData} />
+            <ToneLceTargetWeight calculation={calculation} />
+        </div>
+        <ToneLceValueGrid tableId="ratio" title="Ratio" labels={ratioLabels} rows={tables.ratio} bracket={ratioBracket} controls={props} />
+        <ToneLceValueGrid tableId="target" title="Target" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props}
+          formula={<ToneLceCalCard calculation={calculation} embedded />} />
       </div>
     </section>
   );
 }
 
-function ToneLceCalCard({ calculation }: { calculation: LceTargetCalculation }) {
+function ToneLceCalCard({ calculation, embedded = false }: { calculation: LceTargetCalculation; embedded?: boolean }) {
   const { t } = useTranslation();
   const { lvTarget, lvProb, lumaTarget, lumaProb, flatProb, flatTarget, lumaFlatProb, lumaFlatTarget,
     finalTarget, parameterFinalTarget, recordedLumaFlatProb, recordedLumaFlatTarget, recordedFinalTarget } = calculation;
@@ -757,7 +752,7 @@ function ToneLceCalCard({ calculation }: { calculation: LceTargetCalculation }) 
     {t("tone_lce.recorded_comparison", { key, value: value(recorded), delta: value(computed - recorded) })}
   </div>;
 
-  return <section className="flex h-full min-w-0 flex-col" style={lceCardStyle}>
+  return <section className="formula-panel flex min-w-0 flex-col" style={embedded ? undefined : lceCardStyle}>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 border-b px-2 text-xs font-semibold"
       style={lceHeaderStyle}>
       <span>Cal <span className="font-mono font-normal">{t("tone_lce.recalculated")}: {value(finalTarget)}</span></span>
@@ -883,7 +878,7 @@ function ToneLceStrengthCard(props: ToneTableProps & { position: LceImagePositio
   );
 }
 
-function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, showResult = true, fillHeight = false, embedded = false, controls }: {
+function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, showResult = true, fillHeight = false, embedded = false, formula, controls }: {
   tableId: ToneLceTableId;
   title: string;
   labels: string[];
@@ -893,6 +888,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   showResult?: boolean;
   fillHeight?: boolean;
   embedded?: boolean;
+  formula?: ReactNode;
   controls: ToneTableProps;
 }) {
   const count = Math.max(1, ...rows.map((fields) => fields.length));
@@ -906,6 +902,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
     .join(" | ") : "";
   return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} style={embedded ? undefined : lceCardStyle}>
     {!embedded && <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />}
+    {formula && <div className="border-b" style={{ borderColor: "var(--colorNeutralStroke2)" }}>{formula}</div>}
     <div className={`${fillHeight ? "min-h-0 flex-1 " : ""}min-w-0 overflow-x-auto`}>
       <div style={{ display: "grid", gridTemplateColumns: `128px repeat(${count}, minmax(0, 1fr))`,
         gridTemplateRows: fillHeight ? `40px repeat(${labels.length}, minmax(26px, 1fr))` : "40px",

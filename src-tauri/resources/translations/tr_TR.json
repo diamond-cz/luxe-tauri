@@ -1,4 +1,9 @@
 {
+  "tone_lce.curve_legend": "LCE eğrisi göstergesi",
+  "tone_lce.curve_face_bounds": "Yüz sınırları",
+  "tone_lce.curve_axes": "LCE eğrisi: yatay eksen P, dikey eksen O",
+  "tone_lce.curve_unavailable": "Geçerli LCE eğri düğümü yok",
+  "tone_lce.curve_nodes": "LCE eğri düğümleri ve Gain (O−P)",
   "target_formula.close": "Veri karşılaştırmasını kapat",
   "target_formula.difference": "Fark",
   "target_formula.expand_details": "Tüm hesaplamayı göster (fark = parametre − EXIF)",

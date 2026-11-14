@@ -1,4 +1,9 @@
 {
+  "tone_lce.curve_legend": "LCE 曲线图例",
+  "tone_lce.curve_face_bounds": "人脸上下界",
+  "tone_lce.curve_axes": "LCE 曲线：横轴为 P，纵轴为 O",
+  "tone_lce.curve_unavailable": "缺少有效的 LCE 曲线节点",
+  "tone_lce.curve_nodes": "LCE 曲线节点与 Gain（O−P）",
   "target_formula.close": "关闭数据对比",
   "target_formula.difference": "差值",
   "target_formula.expand_details": "展开完整推导（差值 = 参数计算 − EXIF）",

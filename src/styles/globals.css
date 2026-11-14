@@ -3,6 +3,80 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Paired ToneMap charts share header, plot and four-row footer geometry. */
+.tone-lce-chart-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.tone-lce-chart-card {
+  display: grid;
+  grid-template-rows: 40px auto 120px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px 8px 0 0;
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--colorNeutralForeground1) 6%, transparent);
+}
+.tone-lce-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2));
+}
+.tone-lce-chart-body {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 1.6;
+  overflow: hidden;
+  background: var(--colorNeutralBackground1);
+}
+.tone-lce-chart-body > svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+.tone-lce-chart-footer {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 0;
+  border-top: 1px solid var(--colorNeutralStroke2);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--colorBrandBackground2) 6%, var(--colorNeutralBackground1));
+}
+.tone-lce-chart-footer table {
+  height: 100%;
+  font-size: 11px;
+  line-height: 18px;
+}
+.tone-lce-chart-footer tr {
+  height: 25%;
+}
+.tone-lce-chart-footer :where(th, td) {
+  border-color: var(--colorNeutralStroke2);
+}
+.tone-lce-chart-footer tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--colorNeutralBackground2) 35%, transparent);
+}
+
 /* CJK monospaced fonts keep a Chinese glyph on two Latin character cells. */
 :root {
   --font-family-formula: "Sarasa Mono SC", "Noto Sans Mono CJK SC", "NSimSun", "MS Gothic", monospace;

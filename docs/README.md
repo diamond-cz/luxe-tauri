@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 功能 | [Face 表格与热力图](features/FACE_TABLE_HEATMAP.md) | 表格数据、编辑、轴命中和热力图接入约定 |
 | 功能 | [ToneMap LCE Target](features/TONE_LCE_TARGET.md) | 原始字段计算链、EXIF 差值对照、三分量目标权重环形图与验证 |
+| 工程 | [ToneTool LCE 曲线分析](engineering/TONE_TOOL_CURVE_ANALYSIS.md) | REA 归档证据、Python 3.5 静态字节码、P/O/Gain、对数上下界和项目实现边界 |
 | 功能 | [参数源码编码兼容](features/SOURCE_ENCODING.md) | AE/Tone/CA-LTM 的 GBK/Unicode 加载、统一坐标、保留编码保存及回归验证 |
 | 功能 | [MTK JPEG 私有 EXIF](features/MTK_NATIVE_EXIF.md) | TOML优先复用、JPEG补缺合并/DP权威覆盖、单一来源、SIMD/有界并发与验证 |
 | 性能 | [CPU 与内存维护](performance/MEMORY_RECOVERY.md) | 缓存预算、异步请求隔离、清理入口及验证方法 |

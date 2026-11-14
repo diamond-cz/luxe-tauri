@@ -3277,3 +3277,127 @@
 - Node 22 临时执行实际 `FormulaHeader` JSX：五列表格/差值/缺失值、默认折叠详情、fixed/height autoSize/窗口边界/留白、正文滚动与 sticky 表头、打开关闭回调、去掉顶线及五语言契约检查通过。
 - `git diff --check`：通过，仅 LF/CRLF 提示。
 - 未执行本地 Tauri/Rust 编译或 Windows 实际定位/滚动/DPI/截图验收；未提交或推送。
+
+### 2026-11-14：ToneMap 权重图移至 Ratio 右侧与 Target 内嵌公式栏
+
+**亮点**
+
+- `ToneChartMapMode.tsx::ToneLceTargetCard` 将 `ToneLceTargetWeight` 移到 Ratio 右侧，替换原 Cal 卡片位置，保留既有 PanelGroup 分隔条与比例保存标识。下方 Target 参数卡片通过 `ToneLceValueGrid.formula` 槽在标题后、参数网格前挂载原 Cal 内容，使用 embedded 模式避免重复卡片边框。
+- `ToneLceTargetWeight.tsx` 使用响应式 SVG、外侧引线和框内百分比标签，仍用 Fluent 蓝/绿/红语义令牌；各侧标签排序避让并限制在画布内，零分量保留文字而不绘制扇区。四项 EXIF 概率改为图下紧凑两列，来源说明放在图标题提示。
+- 原计算器和三步 Cal 重算/记录/差值内容保持复用，未新增请求、缓存、观察器、图表依赖或持久化字段；功能文档同步当前位置和几何约束。
+
+**痛点**
+
+- 权重图原先占用整个 Target 参数表下方区域，Cal 长公式又挤在 Ratio 右侧，空间分配与参考布局不一致。通过交换挂载位置并给参数表增加通用公式槽解决，不复制计算内容。
+- 环形图的小权重/零权重位于相邻边界时外侧标签可能重叠，必须分侧排序保持间距；不能为了模仿参考图的蓝色细块而给真实 0% 权重添加虚构扇区。
+- 首次新增几何断言把 SVG 字符串高度与数值 y 直接相加，触发字符串拼接而误报越界；显式转为 Number 后复查通过，绘图数据无需更改。
+
+**闭坑**
+
+- 检查 Ratio 右侧只有一份权重图，Cal 仅在 Target 参数卡片第二栏出现；原表格保存/源码跳转/热力图入口及参数编辑反馈仍保留。
+- 引线标签测试要覆盖 0/100% 与相邻小分量，并区分真实数据和标签显示舍入；颜色继续使用主题令牌，实际 Windows 窄布局与高 DPI 仍需桌面验收。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/tone-lce-target.test.mjs`：8 项通过，包含新增的零值/端点/相邻小分量标签边界和避让断言。
+- Node 22 执行真实 `ToneLceTargetCard` JSX：Ratio/权重图左右位置、权重图仅挂载一次、Cal 位于 Target 公式槽且共享同一计算结果检查通过；`git diff --check`：通过，仅 LF/CRLF 提示。
+- 未执行本地 Rust/Tauri 编译或 Windows 实际截图/布局/分隔条交互验收；未提交或推送。
+
+### 2026-11-14：参考 ToneTool 静态分析与 Final LCE Curve
+
+**亮点**
+
+- 使用 REA 6.9.0 CLI（Node 22.23.5）确认指定 `ToneToolLib.pyc` 为 31 文件 ZIP，保存完整 Evidence；通过只读 CPython 3.5 marshal/字节码检查定位绘图、节点改名、软件 EXIF 回退和 Gain 公式，结论/哈希/方法/限制记录在 `docs/engineering/TONE_TOOL_CURVE_ANALYSIS.md` 及 evidence 文件夹。
+- 新增 `ImagePane/toneLceCurveModel.ts` 与 `ToneLceCurve.tsx`，以实际 P 为横轴、O 为纵轴绘制 8 节点折线，附 O=P 虚线、对数人脸边界、节点悬浮/键盘聚焦和 P/O/Gain 表格。截图 P/O 数值直接复现 Gain `[0,158,156,157,159,159,15,0]`，边界 523/1910 映射到 2784/3360。
+- `ToneChartMapMode.tsx` 用曲线替换上排左侧 Ratio，右侧权重图保留，Ratio 表在下方独立全宽展示；原 Ratio 保存/编辑/热力图/源码跳转和 Target 公式栏保持复用。无新 IPC、缓存、观察器、图表库或持久化字段。
+
+**痛点**
+
+- 原本左下 LCE 小图是节点后缀/序号对 P、O 的两条曲线，参考图是 P→O 二维映射，不能只复制小图。参考工具还区分 LCE O 与最终 GCE O：新图有 GCEO 时全族选择并 `%10000`，无 GCEO 才明确回退 SW_LCE_O，不把部分缺失 GCEO 点拿普通 O 填补。
+- REA 的字节码检查支持 3.7–3.13，而工具 magic 3350 对应 3.5；归档识别由 REA 完成，后续函数语义由普通工具静态检查，不声称 REA 反编译或运行了目标。现有 REA 启动器缺少入口，下载 CLI 后用已有 Node 22 运行；未修改参考工具文件。
+- 曾尝试取得 xdis 辅助，下载未完成后停止；最终使用保留的无依赖静态辅助脚本，不 import/执行目标字节码。首次 TS 检查发现 Windows 下同名不同大小写的模型/组件路径冲突，模型改为 `toneLceCurveModel.ts` 后通过。
+
+**闭坑**
+
+- P/O 已在曲线域，不能再对节点取 log；只对线性 `SW_LCE_FaceLoBound / FaceHiBound` 取 `floor(log10(x)×1024+0.5)`。Gain 是 O−P，不能改为 O/P。缺失、越界、逆序或重复 P 不跨段连线，零值合法。
+- 参考工具的红色 NewResult 和模拟上下界来自独立的 `LceDbgInfo`，当前项目没有运行模拟 DLL，不展示虚构的参数重算曲线。实际 P/O 输出来源显示在图标题与单元格提示；参数编辑不冒充模拟结果变化。
+- 证据区分 REA ZIP 清单与辅助工具语义观察；独立函数代码行号来自 code object 元数据，不能描述为恢复了完整原始源码。真正桌面运行、模拟算法行为和高 DPI 布局仍未验收。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/tone-lce-target.test.mjs`：12 项通过，新增实际曲线模型/JSX行为断言。
+- Node 22 执行 `sync:test` 对应六个脚本：111 项通过；实际 Target JSX 布局检查确认曲线在左、权重在右、Ratio 独立全宽且 Cal 仍在 Target 公式槽。`git diff --check` 及新增文件 UTF-8/尾随空白检查通过。
+- REA 单次 CLI 已结束，无保留的原生分析/运行会话；现场工具只读，未执行本地 Rust/Tauri 编译或 Windows 曲线交互/截图验收；未提交或推送。
+
+### 2026-11-14：LCE 双图卡片对称与轴标/图例位置
+
+**亮点**
+
+- `ToneLceCurve.tsx` 卡片标题改为 LCE Curve，曲线 SVG 扩为 620×380 逻辑画布，取消旧 330px 最大高度，图例移入绘图区左上角三行纵向显示。O 放在纵轴上端，P 放在横轴右端，图例不再占用图外高度。
+- `ToneChartMapMode.tsx` 用等宽双列 CSS Grid 替换旧可保存比例的 PanelGroup；`src/styles/globals.css` 提供共享 `.tone-lce-chart-*` 样式，标题 40px、图体宽高比 1.6、底部 120px，保证两卡标题和底部边界一致，不新增尺寸观察器或监听器。
+- `ToneLceTargetWeight.tsx` 的底部 EXIF 改为四行键/值表，顺序固定 LVProb、LumaFlatProb、LumaProb、FlatProb，与左侧表头/P/O/Gain 四行共用高度和边框样式。环形图引线/零权重逻辑、曲线数据来源及 Target/Ratio 参数内容保留。
+
+**痛点**
+
+- 原曲线卡片外置图例和更高的四行表、权重卡片的两行列表及 justify-center 导致标题/图体/底部边界不一致；仅调整 SVG 高度无法解决整张卡片的对称性。
+- 旧分隔条会恢复此前保存的不等宽比例，不能保证等宽双图；改为固定等宽网格，同时保留应用外层布局调整入口。
+
+**闭坑**
+
+- 两张卡片必须共用标题、图体及底部尺寸定义，避免一边修改行高另一边遗漏；窄窗口节点表允许横向滚动，权重关键字可换行。
+- 轴标移位不改变 P/O 实际坐标、上下界变换或 Gain 算法；图例必须在 SVG 内且只标示实际存在的数据，不引入虚构模拟曲线。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/tone-lce-target.test.mjs`：12 项通过，包含新增图例位置、轴标位置、权重底表顺序/四行和五语言契约检查。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未运行本地 Rust/Tauri 编译，未做 Windows 双图布局/缩放/高 DPI 截图验收；未提交或推送。
+
+### 2026-11-14：分割器缩窄后的 LCE 图体越界与贴底样式
+
+**亮点**
+
+- 在浏览器中以真实组件、项目 CSS/Tailwind 和 Fluent tokens 复现问题。容器 720px 时卡片内宽 346px，但图体/SVG 均为 384px；继续缩窄仍维持 384px，确认 `min-height: 240px` 与 `aspect-ratio: 1.6` 的尺寸传递为根因。
+- `globals.css` 图体显式设置 width/max-width 100%、min-height 0，卡片使用 auto 图体行高；SVG 明确 `xMidYMid meet` 等比缩放，卡片/图体/SVG 各自保留越界保护。无需新增 ResizeObserver 或高频 React 状态，容器变化直接由 CSS 跟随。
+- 卡片统一沿用项目标题背景、语义边框、正文背景与轻阴影，底部圆角归零；底栏 padding 清零、表格 height 100% 贴合四边，窄表横向滚动仍限制在底栏内。LCE Curve 标题移除 EXIF 来源后缀，字段来源保留在数据提示，不更改选源及计算。
+
+**痛点**
+
+- 上轮只用 Node JSX 和类型检查没有发现 CSS intrinsic sizing：grid 子元素带最小高度和宽高比，会按高度推导出超出列宽的宽度，简单添加卡片 overflow-hidden 只会把越界内容剪掉，不能解决缩放。此次同时移除最小尺寸约束并限定图体实际宽度。
+- 原底栏 4px/8px 内边距与 110px 表格固定高度留下缝隙，卡片 rounded-lg 使底角仍为圆形；改为共用直角底部和铺满表格后，保留两卡底部的同一水平边界。
+
+**闭坑**
+
+- 宽高比容器必须检查最小尺寸传递，不能用固定 min-height 让 auto 宽度膨胀。验证应连续缩窄再放宽，测量图体/SVG bounding rect，不能只检查 DOM class 或单一默认宽度。
+- 组件缩放时 P/O 数据、Gain、人脸上下界、概率权重和 EXIF 底表顺序保持不变；底表可以横向滚动，但不能撑宽卡片或纵向截断最后一行。
+- 深浅主题及高 DPI 应验证实际布局；本次 Chromium 隔离页提供截图和测量证据，仍未启动 Tauri 整应用验收分割器/跨窗口行为。
+
+**验证**
+
+- `npm run typecheck`：通过；Node 22 的 `scripts/tone-lce-target.test.mjs`：12 项通过，更新标题无来源后缀、实际字段提示仍可用的断言。
+- `node .tmp-tone-layout/render.cjs` + `python .tmp-tone-layout/check.py`：使用实际 TSX/项目样式生成临时隔离页；Chromium 两主题、DPR 1/1.5、6 次连续容器宽度变化共 24 场景通过，包含图体约束/不重叠/底栏贴底直角/纵向可见性断言。临时工具清理，测量和浅/深截图保存在 `docs/engineering/evidence/TONE_LCE_RESIZE_*`。
+- `git diff --check`：通过，仅 LF/CRLF 提示。
+- 未运行本地 Rust/Tauri 编译或整应用分割器桌面验收；未提交或推送。
+
+### 2026-11-14：提交范围整理与本地分析产物忽略
+
+**亮点**
+
+- `.gitignore` 新增根目录 `/.tmp-*`，避免临时浏览器夹具、分析目录和一次性脚本进入提交；精确排除本地 ToneTool REA 原始导出、反汇编文本/辅助脚本、详细布局测量 JSON 和该目录的 Python 缓存。
+- 保留产品代码、五语言资源、实际行为测试、分析摘要和深浅主题验证截图；原始分析文件留在本地，未删除。专题文档移除指向未入库产物的 Markdown 链接，改为标注本地路径及忽略边界，便于仓库读者区分可随代码获取的材料。
+- `TONE_TOOL_CURVE_ANALYSIS.md` 同步最终标题行为：来源信息在节点/单元格提示中，标题栏不再显示字段后缀，避免提交过时说明。
+
+**痛点**
+
+- 分析证据和正式截图原先同处未跟踪目录，直接整目录暂存会把一次性脚本与原始导出一起提交；不能简单忽略整个目录，否则会丢失文档引用的界面截图。
+
+**闭坑**
+
+- 原始导出使用精确路径忽略，不泛化屏蔽业务 JSON、Python 源码或所有文档截图。新增本地分析类型后检查 `git check-ignore -v`，正式说明引用的图片仍应可跟踪。
+- 提交前检查 staged 文件列表、未跟踪文件及空白；忽略规则不追溯已跟踪文件，此次原始分析材料均未跟踪，不需要删除历史记录。
+
+**验证**
+
+- `npm run typecheck`、`npm run version:check`：通过；Node 22 执行 `sync:test` 对应六个脚本：111 项通过。
+- `git check-ignore -v`：临时目录/脚本和四类分析产物及缓存命中预期规则；`git ls-files --others --exclude-standard` 仅保留新增曲线代码、分析摘要和两张正式截图。
+- `git diff --check`：通过，仅 LF/CRLF 提示；正文已无指向忽略文件的 Markdown 链接。此次未执行 Rust/Tauri 编译或新增桌面验收。

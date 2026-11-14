@@ -1,4 +1,9 @@
 {
+  "tone_lce.curve_legend": "LCE 曲線圖例",
+  "tone_lce.curve_face_bounds": "人臉上下界",
+  "tone_lce.curve_axes": "LCE 曲線：橫軸為 P，縱軸為 O",
+  "tone_lce.curve_unavailable": "缺少有效的 LCE 曲線節點",
+  "tone_lce.curve_nodes": "LCE 曲線節點與 Gain（O−P）",
   "target_formula.close": "關閉資料對比",
   "target_formula.difference": "差值",
   "target_formula.expand_details": "展開完整推導（差值 = 參數計算 − EXIF）",

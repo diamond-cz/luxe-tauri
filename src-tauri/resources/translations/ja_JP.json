@@ -1,4 +1,9 @@
 {
+  "tone_lce.curve_legend": "LCE 曲線の凡例",
+  "tone_lce.curve_face_bounds": "顔の上下限",
+  "tone_lce.curve_axes": "LCE 曲線：横軸は P、縦軸は O",
+  "tone_lce.curve_unavailable": "有効な LCE 曲線ノードがありません",
+  "tone_lce.curve_nodes": "LCE 曲線ノードと Gain（O−P）",
   "target_formula.close": "データ比較を閉じる",
   "target_formula.difference": "差分",
   "target_formula.expand_details": "計算過程を展開（差分 = パラメータ計算 − EXIF）",

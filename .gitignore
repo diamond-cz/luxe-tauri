@@ -35,3 +35,13 @@ Thumbs.db
 # Claude model workspace
 /.claude/
 /.archify/
+
+# Local analysis, browser fixtures and scratch files (workspace root only)
+/.tmp-*
+
+# Local ToneTool analysis exports; keep the reviewed report and UI screenshots
+/docs/engineering/evidence/TONE_TOOL_CURVE_REA.json
+/docs/engineering/evidence/TONE_TOOL_CURVE_DISASSEMBLY.txt
+/docs/engineering/evidence/inspect_tonetool_pyc.py
+/docs/engineering/evidence/TONE_LCE_RESIZE_VALIDATION.json
+/docs/engineering/evidence/__pycache__/

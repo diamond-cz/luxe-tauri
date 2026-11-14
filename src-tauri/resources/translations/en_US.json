@@ -1,4 +1,9 @@
 {
+  "tone_lce.curve_legend": "LCE curve legend",
+  "tone_lce.curve_face_bounds": "Face bounds",
+  "tone_lce.curve_axes": "LCE curve: P on the horizontal axis, O on the vertical axis",
+  "tone_lce.curve_unavailable": "No valid LCE curve nodes",
+  "tone_lce.curve_nodes": "LCE curve nodes and Gain (O−P)",
   "target_formula.close": "Close data comparison",
   "target_formula.difference": "Difference",
   "target_formula.expand_details": "Show full calculation (difference = parameter − EXIF)",

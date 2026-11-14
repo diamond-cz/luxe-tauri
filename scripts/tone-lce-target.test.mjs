@@ -19,6 +19,8 @@ function load(relative, globals = {}, onlyFunction) {
   new Function('require', 'module', 'exports', ...Object.keys(globals), outputText)(id => {
     if (id === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (id === 'react-i18next') return { useTranslation: () => ({ t }) };
+    if (id === 'react') return { useState: initial => [initial, () => {}] };
+    if (id === './toneLceCurveModel') return curveModel;
     throw new Error(`Unexpected import: ${id}`);
   }, module, module.exports, ...Object.values(globals));
   return module.exports;
@@ -27,6 +29,8 @@ const locales = ['zh_CN', 'zh_TW', 'en_US', 'ja_JP', 'tr_TR'];
 const bundles = locales.map(locale => JSON.parse(readFileSync(new URL(`../src-tauri/resources/translations/${locale}.json`, import.meta.url), 'utf8')));
 const t = (key, args = {}) => bundles[0][key].replace(/\{\{(\w+)\}\}/g, (_, name) => String(args[name] ?? ''));
 const { calculateLceTarget, lceTargetWeights } = load('../src/views/mtk/isp6s/ImagePane/toneLceTarget.ts');
+const curveModel = load('../src/views/mtk/isp6s/ImagePane/toneLceCurveModel.ts');
+const { ToneLceCurve } = load('../src/views/mtk/isp6s/ImagePane/ToneLceCurve.tsx');
 const { ToneLceTargetWeight } = load('../src/views/mtk/isp6s/ImagePane/ToneLceTargetWeight.tsx');
 const text = node => node == null ? '' : Array.isArray(node) ? node.map(text).join('')
   : typeof node === 'object' ? text(node.props.children) : String(node);
@@ -106,6 +110,22 @@ test('ring renders the four EXIF keys, three proportions and semantic colors; mi
   assert.equal(circles.length, 3);
   assert.ok(circles.every(node => node.props.stroke.startsWith('var(--colorPalette')));
   assert.match(nodes(tree, 'svg')[0].props['aria-label'], /LV 71.5%, Luma 21.3%, Flat 7.2%/);
+  assert.deepEqual(nodes(nodes(tree, 'table')[0], 'th').map(node => text(node)), [
+    'SW_LCE_LVProb', 'SW_LCE_LumaFlatProb', 'SW_LCE_LumaProb', 'SW_LCE_FlatProb',
+  ]);
+  assert.equal(nodes(tree, 'tr').length, 4, 'weight footer has four rows matching the curve footer');
+  assert.equal(nodes(tree, 'polyline').length, 3, 'each weight has an outside leader label');
+  for (const [lv, flat] of [[0, 680], [1000, 0], [0, 1000], [1, 999]]) {
+    const sample = ToneLceTargetWeight({ calculation: calculateLceTarget({ ...fixture, SW_LCE_LVProb: String(lv), SW_LCE_LumaFlatProb: String(flat) }, 2000) });
+    assert.equal(nodes(sample, 'text').length, 3, 'zero weights keep their labels without a fake wedge');
+    for (const rect of nodes(sample, 'rect')) {
+      assert.ok(rect.props.y >= 0 && rect.props.y + Number(rect.props.height) <= 230, 'labels stay inside the SVG');
+    }
+    const rects = nodes(sample, 'rect');
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      if (rects[i].props.x === rects[j].props.x) assert.ok(Math.abs(rects[i].props.y - rects[j].props.y) >= 24, 'same-side labels do not overlap');
+    }
+  }
   const missing = ToneLceTargetWeight({ calculation: calculateLceTarget({}, NaN) });
   assert.equal(nodes(missing, 'circle').filter(node => node.props.pathLength === '100').length, 0);
   assert.equal(nodes(missing, 'p').find(node => node.props.role === 'status').props.children, t('tone_lce.invalid_weights'));
@@ -131,6 +151,76 @@ test('all five locales provide complete calculation and chart text with matching
     assert.doesNotMatch(value, /\?/, 'translations must not contain encoding replacements');
     return [key, [...value.matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]).sort()];
   }).sort());
-  assert.equal(shape[0].length, 6);
+  assert.equal(shape[0].length, 11);
   shape.slice(1).forEach(value => assert.deepEqual(value, shape[0]));
+});
+
+const curveInput = () => {
+  const input = { SW_LCE_FaceLoBound: '523', SW_LCE_FaceHiBound: '1910' };
+  const p = [0, 2279, 2426, 2510, 2784, 3360, 3576, 3699];
+  const o = [0, 2437, 2582, 2667, 2943, 3519, 3591, 3699];
+  curveModel.LCE_CURVE_PIVOTS.forEach((suffix, index) => {
+    input[`SW_LCE_P${suffix}`] = String(p[index]);
+    input[`SW_LCE_O${suffix}`] = String(o[index]);
+  });
+  return input;
+};
+
+test('recorded curve pairs actual P with O, reproduces reference Gain and log face bounds', () => {
+  const model = curveModel.buildLceCurve(curveInput());
+  assert.equal(model.outputPrefix, 'SW_LCE_O');
+  assert.deepEqual(model.nodes.map(node => node.gain), [0, 158, 156, 157, 159, 159, 15, 0]);
+  assert.deepEqual(model.nodes.slice(1, 3).map(node => node.p), [2279, 2426], 'percentile suffix is not a chart coordinate');
+  assert.deepEqual(model.bounds.map(bound => bound.log), [2784, 3360]);
+  assert.equal(model.segments.length, 1);
+  assert.equal(model.segments[0].length, 8);
+  assert.equal(curveModel.lceLinearBoundToLog(0), 0);
+  assert.ok(Number.isNaN(curveModel.lceLinearBoundToLog(-1)));
+});
+
+test('final GCE outputs apply documented packed-value modulo and never mix missing nodes with raw O', () => {
+  const input = { ...curveInput(), SW_LCE_GCEO1: '12437' };
+  const model = curveModel.buildLceCurve(input);
+  assert.equal(model.outputPrefix, 'SW_LCE_GCEO');
+  assert.equal(model.nodes[1].o, 2437);
+  assert.equal(model.nodes[1].oKey, 'SW_LCE_GCEO1');
+  assert.ok(Number.isNaN(model.nodes[2].o));
+  assert.equal(model.nodes[2].valid, false);
+  const lower = Object.fromEntries(Object.entries(curveInput()).map(([key, value]) => [key.toLowerCase(), value]));
+  assert.deepEqual(curveModel.buildLceCurve(lower).nodes.map(node => node.gain), [0, 158, 156, 157, 159, 159, 15, 0]);
+});
+
+test('curve gaps, out-of-order pivots and invalid coordinates cannot create a fabricated connecting line', () => {
+  const input = { ...curveInput(), SW_LCE_P250: '-', SW_LCE_O750: '5000' };
+  const model = curveModel.buildLceCurve(input);
+  assert.deepEqual(model.segments.map(segment => segment.map(node => node.index)), [[0, 1, 2], [4], [6, 7]]);
+  const reversed = curveModel.buildLceCurve({ ...curveInput(), SW_LCE_P250: '2000' });
+  assert.equal(reversed.segments.length, 2);
+  assert.equal(curveModel.buildLceCurve({}).available, false);
+});
+
+test('curve JSX renders P/O coordinates, identity line, log face bounds and all eight table columns', () => {
+  const tree = ToneLceCurve({ tomlData: curveInput() });
+  assert.equal(tree.props['aria-label'], 'LCE Curve');
+  assert.equal(nodes(tree, 'div').find(node => node.props.className === 'tone-lce-chart-header').props.children.type, 'strong', 'title contains no EXIF source suffix');
+  assert.equal(nodes(tree, 'circle').length, 8);
+  assert.equal(nodes(tree, 'polyline').length, 1);
+  const legend = nodes(tree, 'g').find(node => node.props['aria-label'] === t('tone_lce.curve_legend'));
+  assert.ok(legend, 'legend is inside the SVG plot');
+  assert.equal(nodes(legend, 'text').length, 3);
+  const axisNames = nodes(tree, 'text');
+  const pAxis = axisNames.find(node => node.props.children === 'P');
+  const oAxis = axisNames.find(node => node.props.children === 'O');
+  assert.ok(pAxis.props.x > 596 && pAxis.props.y >= 347, 'P sits at the bottom-right axis end');
+  assert.ok(oAxis.props.x === 42 && oAxis.props.y < 23, 'O sits above the vertical axis');
+  assert.equal(nodes(tree, 'line').filter(node => node.props.children?.type === 'title').length, 2);
+  const rows = nodes(tree, 'tr');
+  assert.equal(rows.length, 4);
+  assert.ok(nodes(rows[2], 'td').every(node => node.props.title.startsWith('SW_LCE_O')), 'actual output source remains accessible on data cells');
+  assert.equal(nodes(rows[0], 'th').length, 9);
+  assert.deepEqual(nodes(rows[3], 'td').map(node => text(node)), ['0', '158', '156', '157', '159', '159', '15', '0']);
+  const missing = ToneLceCurve({ tomlData: {} });
+  assert.equal(nodes(missing, 'polyline').length, 0);
+  assert.equal(nodes(missing, 'circle').length, 0);
+  assert.ok(text(missing).includes(t('tone_lce.curve_unavailable')));
 });
