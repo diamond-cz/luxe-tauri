@@ -1,4 +1,6 @@
 {
+  "tone_lce.hide_formula": "{{title}} formül satırını gizle",
+  "tone_lce.show_formula": "{{title}} formül satırını göster",
   "tone_lce.curve_legend": "LCE eğrisi göstergesi",
   "tone_lce.curve_face_bounds": "Yüz sınırları",
   "tone_lce.curve_axes": "LCE eğrisi: yatay eksen P, dikey eksen O",

@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import ts from 'typescript';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 // Execute production TypeScript/JSX without loading unrelated Tauri UI modules.
 function load(relative, globals = {}, onlyFunction) {
@@ -19,8 +22,13 @@ function load(relative, globals = {}, onlyFunction) {
   new Function('require', 'module', 'exports', ...Object.keys(globals), outputText)(id => {
     if (id === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (id === 'react-i18next') return { useTranslation: () => ({ t }) };
-    if (id === 'react') return { useState: initial => [initial, () => {}] };
+    if (id === 'react') return { useState: initial => [initial, () => {}], useId: () => 'formula-test-id', useRef: value => ({ current: value }), useEffect: () => {} };
     if (id === './toneLceCurveModel') return curveModel;
+    if (id === '@/components/common/HoverTooltip') return { HoverTooltip: 'HoverTooltip' };
+    if (id === './ToneLceChartHeader') return { ToneLceChartHeader: 'ToneLceChartHeader' };
+    if (id === '@fluentui/react-components') return { Button: 'Button' };
+    if (id === '@fluentui/react-icons') return { ChevronUp20Regular: 'ChevronUp', ChevronDown20Regular: 'ChevronDown' };
+    if (id === 'zustand' || id === 'zustand/middleware/immer') return require(id);
     throw new Error(`Unexpected import: ${id}`);
   }, module, module.exports, ...Object.values(globals));
   return module.exports;
@@ -113,8 +121,14 @@ test('ring renders the four EXIF keys, three proportions and semantic colors; mi
   assert.deepEqual(nodes(nodes(tree, 'table')[0], 'th').map(node => text(node)), [
     'SW_LCE_LVProb', 'SW_LCE_LumaFlatProb', 'SW_LCE_LumaProb', 'SW_LCE_FlatProb',
   ]);
-  assert.equal(nodes(tree, 'tr').length, 4, 'weight footer has four rows matching the curve footer');
+  assert.equal(nodes(tree, 'tr').length, 4, 'weight formula table has four data rows');
   assert.equal(nodes(tree, 'polyline').length, 3, 'each weight has an outside leader label');
+  const tips = nodes(tree, 'HoverTooltip');
+  assert.equal(tips.length, 6, 'arcs and percentage labels share the project tooltip');
+  assert.equal(nodes(tree, 'title').length, 0, 'no native SVG tooltip can duplicate the custom preview');
+  assert.ok(tips.every(node => node.props.svg && node.props.wrap));
+  assert.ok(tips.some(node => node.props.content === 'LV: 71.5%\nLVProb / 1000'));
+  assert.ok(tips.some(node => node.props.content.includes('Flat: 7.2%\n(1 − LVProb / 1000) × LumaFlatProb / 1000')));
   for (const [lv, flat] of [[0, 680], [1000, 0], [0, 1000], [1, 999]]) {
     const sample = ToneLceTargetWeight({ calculation: calculateLceTarget({ ...fixture, SW_LCE_LVProb: String(lv), SW_LCE_LumaFlatProb: String(flat) }, 2000) });
     assert.equal(nodes(sample, 'text').length, 3, 'zero weights keep their labels without a fake wedge');
@@ -151,7 +165,7 @@ test('all five locales provide complete calculation and chart text with matching
     assert.doesNotMatch(value, /\?/, 'translations must not contain encoding replacements');
     return [key, [...value.matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]).sort()];
   }).sort());
-  assert.equal(shape[0].length, 11);
+  assert.equal(shape[0].length, 13);
   shape.slice(1).forEach(value => assert.deepEqual(value, shape[0]));
 });
 
@@ -202,8 +216,13 @@ test('curve gaps, out-of-order pivots and invalid coordinates cannot create a fa
 test('curve JSX renders P/O coordinates, identity line, log face bounds and all eight table columns', () => {
   const tree = ToneLceCurve({ tomlData: curveInput() });
   assert.equal(tree.props['aria-label'], 'LCE Curve');
-  assert.equal(nodes(tree, 'div').find(node => node.props.className === 'tone-lce-chart-header').props.children.type, 'strong', 'title contains no EXIF source suffix');
+  assert.equal(nodes(tree, 'ToneLceChartHeader')[0].props.title, 'LCE Curve', 'title contains no EXIF source suffix');
   assert.equal(nodes(tree, 'circle').length, 8);
+  const tooltips = nodes(tree, 'HoverTooltip');
+  assert.equal(tooltips.length, 8, 'one shared project tooltip per curve point');
+  assert.ok(tooltips.every(node => node.props.svg && node.props.wrap));
+  assert.equal(tooltips[1].props.content, 'SW_LCE_P1: 2279\nSW_LCE_O1: 2437\nGain (O − P): 158');
+  assert.ok(nodes(tree, 'circle').every(node => !node.props.children && !node.props.title), 'curve points have no native title tooltip');
   assert.equal(nodes(tree, 'polyline').length, 1);
   const legend = nodes(tree, 'g').find(node => node.props['aria-label'] === t('tone_lce.curve_legend'));
   assert.ok(legend, 'legend is inside the SVG plot');
@@ -223,4 +242,91 @@ test('curve JSX renders P/O coordinates, identity line, log face bounds and all 
   assert.equal(nodes(missing, 'polyline').length, 0);
   assert.equal(nodes(missing, 'circle').length, 0);
   assert.ok(text(missing).includes(t('tone_lce.curve_unavailable')));
+});
+
+test('weight formula table pairs each recorded probability with its recorded EXIF target in four columns', () => {
+  const input = { ...fixture, SW_LCE_LVProb: '887', SW_LCE_LVTarget: '2032', SW_LCE_LumaFlatProb: '643',
+    SW_LCE_LumaFlatTarget: '1292', SW_LCE_LumaProb: '1000', SW_LCE_LumaTarget: '2109', SW_LCE_FlatProb: '643', SW_LCE_FlatTarget: '897' };
+  const tree = ToneLceTargetWeight({ calculation: calculateLceTarget(input, 1800) });
+  const rows = nodes(tree, 'tr');
+  const cells = row => [text(nodes(row, 'th')[0]), ...nodes(row, 'td').map(text)];
+  assert.deepEqual(rows.map(cells), [
+    ['SW_LCE_LVProb', '887', '2032', 'SW_LCE_LVTarget'],
+    ['SW_LCE_LumaFlatProb', '643', '1292', 'SW_LCE_LumaFlatTarget'],
+    ['SW_LCE_LumaProb', '1000', '2109', 'SW_LCE_LumaTarget'],
+    ['SW_LCE_FlatProb', '643', '897', 'SW_LCE_FlatTarget'],
+  ]);
+  assert.notEqual(calculateLceTarget(input, 1800).lumaFlatTarget, 1292, 'formula table deliberately shows recorded EXIF instead of recomputed blend');
+  const missing = ToneLceTargetWeight({ calculation: calculateLceTarget({ ...input, SW_LCE_LumaFlatTarget: '-' }, NaN) });
+  assert.equal(nodes(nodes(missing, 'tr')[1], 'td')[1].props.children, '-');
+  const zeros = ToneLceTargetWeight({ calculation: calculateLceTarget({ ...input, SW_LCE_LVTarget: '0' }, NaN) });
+  assert.equal(nodes(nodes(zeros, 'tr')[0], 'td')[1].props.children, '0');
+});
+
+test('chart headers expose independent formula-row toggles and place data before the plot', () => {
+  const { ToneLceChartHeader } = load('../src/views/mtk/isp6s/ImagePane/ToneLceChartHeader.tsx');
+  let toggled = false;
+  for (const expanded of [true, false]) {
+    const tree = ToneLceChartHeader({ title: 'LCE Curve', expanded, controls: 'curve-formula', onToggle: () => { toggled = true; } });
+    const button = nodes(tree, 'Button')[0];
+    assert.equal(button.props['aria-expanded'], expanded);
+    assert.equal(button.props['aria-controls'], 'curve-formula');
+    assert.equal(button.props['aria-label'], t(expanded ? 'tone_lce.hide_formula' : 'tone_lce.show_formula', { title: 'LCE Curve' }));
+    button.props.onClick();
+    assert.equal(toggled, true);
+  }
+  for (const tree of [ToneLceCurve({ tomlData: curveInput() }), ToneLceTargetWeight({ calculation: calculateLceTarget(fixture, 2000) })]) {
+    const children = tree.props.children;
+    assert.equal(children[0].type, 'ToneLceChartHeader');
+    assert.equal(children[1].props.className, 'tone-lce-chart-formula formula-panel');
+    assert.equal(children[1].props.hidden, false);
+    assert.equal(children[2].props.className, 'tone-lce-chart-body');
+    assert.equal(nodes(children[1], 'tr').length, 4);
+  }
+});
+
+test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting Cal in LVTarget', () => {
+  const { ToneLceTargetCard } = load('../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx', {
+    axisBracket: () => ({ low: 0, high: 0, ratio: 0 }), indexedBracket: () => ({ low: 0, high: 0, ratio: 0 }),
+    calculateLceTarget, interpolateFields: () => 1800, lceCardStyle: {}, lceHeaderStyle: {},
+    ToneLceValueGrid: 'ToneLceValueGrid', ToneLceCalCard: 'ToneLceCalCard', ToneLceProbCard: 'ToneLceProbCard',
+  }, 'ToneLceTargetCard');
+  const tables = { ratio: [[], [], []], target: [[], [], []] };
+  const tree = ToneLceTargetCard({ tables, position: { lv: 70, lvLow: 7, lvHigh: 8 }, tomlData: fixture });
+  assert.equal(tree.props['aria-label'], 'Tone LCE Target');
+  assert.equal(tree.props.children[0].props.children, 'Target');
+  assert.equal(tree.props.children[1].props['data-tone-lce-target-formula'], 'true');
+  assert.equal(nodes(tree.props.children[1], 'ToneLceCalCard').length, 1);
+  const grids = nodes(tree, 'ToneLceValueGrid');
+  assert.deepEqual(grids.map(node => [node.props.tableId, node.props.title]), [['ratio', 'Ratio'], ['target', 'LVTarget']]);
+  assert.ok(grids.every(node => node.props.formula === undefined));
+  assert.equal(nodes(tree, 'ToneLceProbCard').length, 1);
+});
+
+test('LCE chart divider restores, validates and remembers proportions in the visual store', () => {
+  const { useIsp6sVisualStore: store, DEFAULT_VISUAL } = load('../src/stores/isp6sVisualStore.ts');
+  const render = () => load('../src/views/mtk/isp6s/ImagePane/ToneLceCharts.tsx', {
+    useCallback: callback => callback,
+    useIsp6sVisualStore: selector => selector(store.getState()),
+    Panel: 'Panel', PanelGroup: 'PanelGroup', ResizeHandle: 'ResizeHandle',
+    ToneLceCurve: 'ToneLceCurve', ToneLceTargetWeight: 'ToneLceTargetWeight', calculateLceTarget,
+  }, 'ToneLceCharts').ToneLceCharts({ tomlData: fixture });
+  store.setState({ visual: DEFAULT_VISUAL });
+  let tree = render();
+  assert.deepEqual(nodes(tree, 'Panel').map(node => node.props.defaultSize), [50, 50]);
+  const layout = nodes(tree, 'PanelGroup')[0].props.onLayout;
+  layout([63.5, 36.5]);
+  assert.equal(store.getState().visual.tone_lce_curve_ratio, 63.5);
+  tree = render(); // Represents the chart remounting after another tab was opened.
+  assert.deepEqual(nodes(tree, 'Panel').map(node => node.props.defaultSize), [63.5, 36.5]);
+  for (const invalid of [[], [0, 100], [80, 20], [NaN, NaN], [50, 75], [50]]) layout(invalid);
+  assert.equal(store.getState().visual.tone_lce_curve_ratio, 63.5);
+  assert.notEqual(nodes(tree, 'ResizeHandle')[0].props.alwaysVisible, true);
+  store.getState().setVisual({ ...DEFAULT_VISUAL, tone_lce_curve_ratio: undefined });
+  assert.equal(store.getState().visual.tone_lce_curve_ratio, 50);
+  for (const [saved, expected] of [[NaN, 50], [Infinity, 50], [0, 25], [100, 75], [42.25, 42.25]]) {
+    store.getState().setVisual({ ...DEFAULT_VISUAL, tone_lce_curve_ratio: saved });
+    assert.equal(store.getState().visual.tone_lce_curve_ratio, expected);
+  }
+  assert.deepEqual(store.getState().visual.workspace_column_ratios, [67, 33]);
 });

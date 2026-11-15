@@ -31,6 +31,7 @@ const DEFAULT: Isp6sAeVisual = {
   chart_main_t_mid_readout_mode: "value",
   chart_map_tab:              "MainT",
   tone_chart_map_tab:         "LTM",
+  tone_lce_curve_ratio:       50,
   image_table_kind_filter:    "all",
   tone_image_table_kind_filter: "all",
 };
@@ -40,9 +41,12 @@ function withoutRemovedImageInfo(next: Isp6sAeVisual): Isp6sAeVisual {
   const sourceRatio = oldRatios.at(-1);
   const sourceSize = sourceRatio !== undefined && Number.isFinite(sourceRatio)
     ? Math.min(70, Math.max(24, sourceRatio)) : 33;
+  const curveRatio = next.tone_lce_curve_ratio;
   return {
     ...next,
     workspace_column_ratios: [100 - sourceSize, sourceSize],
+    tone_lce_curve_ratio: typeof curveRatio === "number" && Number.isFinite(curveRatio)
+      ? Math.min(75, Math.max(25, curveRatio)) : 50,
   };
 }
 

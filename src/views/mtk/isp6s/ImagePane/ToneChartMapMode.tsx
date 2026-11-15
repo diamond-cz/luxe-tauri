@@ -8,8 +8,8 @@ import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { calculateLceTarget, type LceTargetCalculation } from "./toneLceTarget";
-import { ToneLceTargetWeight } from "./ToneLceTargetWeight";
-import { ToneLceCurve } from "./ToneLceCurve";
+import { ToneLceCharts } from "./ToneLceCharts";
+import { tabButtonStyle, tabStripWrapStyle } from "./chartMapTabStyles";
 
 const TONE_TABS = ["LTM", "LCE", "GMA", "DCE", "CA-LTM"] as const;
 type ToneTab = (typeof TONE_TABS)[number];
@@ -495,18 +495,15 @@ export function ToneChartMapMode({
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col" style={{ background: "var(--colorNeutralBackground1)" }}>
-      <div className="flex h-8 shrink-0 items-stretch overflow-x-auto border-b px-2"
-           style={{ borderColor: "var(--colorNeutralStroke2)", background: "var(--colorNeutralBackground2)" }} role="tablist">
-        {TONE_TABS.map((item) => (
-          <button key={item} type="button" role="tab" aria-selected={tab === item}
-                  onClick={() => setTab(item)}
-                  className="shrink-0 border-b-2 px-3 text-xs"
-                  style={{
-                    borderColor: tab === item ? "var(--colorBrandStroke1)" : "transparent",
-                    color: tab === item ? "var(--colorNeutralForeground1)" : "var(--colorNeutralForeground3)",
-                    fontWeight: tab === item ? 600 : 400,
-                  }}>{item}</button>
-        ))}
+      <div className="chart-map-tab-strip h-8 shrink-0 overflow-x-auto overflow-y-hidden px-3"
+           style={tabStripWrapStyle} role="tablist">
+        <div className="flex h-full min-w-max items-center gap-0.5">
+          {TONE_TABS.map((item) => (
+            <button key={item} type="button" role="tab" aria-selected={tab === item}
+                    onClick={() => setTab(item)}
+                    style={tabButtonStyle(tab === item)}>{item}</button>
+          ))}
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3" role="tabpanel" data-isp6s-chart-scroll="true">
         {tab !== "CA-LTM" && error && <div className="mb-2 text-xs" style={{ color: "var(--colorPaletteRedForeground1)" }}>{error}</div>}
@@ -515,8 +512,8 @@ export function ToneChartMapMode({
         )}
         {tab === "LCE" && result ? (
           <div className="flex flex-col gap-3">
+            <ToneLceCharts tomlData={tomlData} />
             <ToneLceTargetCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
-            <ToneLceProbCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
             <ToneLceStrengthCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
             <ToneLceFaceCard position={currentPosition} {...tableProps} onSourceJump={onSourceJump} />
           </div>
@@ -727,16 +724,15 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
   const targetBracket = indexedBracket(position.lv / 10, position.lvLow, position.lvHigh, targetWidth);
   const calculation = calculateLceTarget(props.tomlData, interpolateFields(tables.target[0] ?? [], targetBracket));
   return (
-    <section style={lceCardStyle}>
+    <section style={lceCardStyle} aria-label="Tone LCE Target">
       <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
+      <div className="border-b" data-tone-lce-target-formula="true" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+        <ToneLceCalCard calculation={calculation} embedded />
+      </div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
-        <div className="tone-lce-chart-pair">
-            <ToneLceCurve tomlData={props.tomlData} />
-            <ToneLceTargetWeight calculation={calculation} />
-        </div>
         <ToneLceValueGrid tableId="ratio" title="Ratio" labels={ratioLabels} rows={tables.ratio} bracket={ratioBracket} controls={props} />
-        <ToneLceValueGrid tableId="target" title="Target" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props}
-          formula={<ToneLceCalCard calculation={calculation} embedded />} />
+        <ToneLceValueGrid tableId="target" title="LVTarget" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props} />
+        <ToneLceProbCard {...props} />
       </div>
     </section>
   );
@@ -900,7 +896,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
   const result = showResult ? labels.slice(tableId === "ratio" ? 1 : 0)
     .map((label, index) => `${label}: ${formatInterpolation(interpolateFields(rows[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
     .join(" | ") : "";
-  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} style={embedded ? undefined : lceCardStyle}>
+  return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} data-tone-lce-table={tableId} style={embedded ? undefined : lceCardStyle}>
     {!embedded && <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />}
     {formula && <div className="border-b" style={{ borderColor: "var(--colorNeutralStroke2)" }}>{formula}</div>}
     <div className={`${fillHeight ? "min-h-0 flex-1 " : ""}min-w-0 overflow-x-auto`}>

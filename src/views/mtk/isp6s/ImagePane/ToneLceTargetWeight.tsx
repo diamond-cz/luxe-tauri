@@ -1,5 +1,8 @@
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 import type { LceTargetCalculation } from "./toneLceTarget";
+import { ToneLceChartHeader } from "./ToneLceChartHeader";
 
 const segments = [
   { key: "lv", label: "LV", color: "var(--colorPaletteBlueForeground2)", formula: "LVProb / 1000" },
@@ -12,10 +15,15 @@ const numberText = (value: number) => Number.isFinite(value) ? String(value) : "
 /** Fixed, three-segment SVG; no image decoding, observers, chart library or persistent state. */
 export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCalculation }) {
   const { t } = useTranslation();
-  const { weights, lumaProb, flatProb, recordedLumaFlatProb, lvProb } = calculation;
+  const [expanded, setExpanded] = useState(true);
+  const formulaId = useId();
+  const { weights, lumaProb, flatProb, recordedLumaFlatProb, lvProb,
+    lvTarget, recordedLumaFlatTarget, lumaTarget, flatTarget } = calculation;
   const values = [
-    ["SW_LCE_LVProb", lvProb], ["SW_LCE_LumaFlatProb", recordedLumaFlatProb],
-    ["SW_LCE_LumaProb", lumaProb], ["SW_LCE_FlatProb", flatProb],
+    ["SW_LCE_LVProb", lvProb, lvTarget, "SW_LCE_LVTarget"],
+    ["SW_LCE_LumaFlatProb", recordedLumaFlatProb, recordedLumaFlatTarget, "SW_LCE_LumaFlatTarget"],
+    ["SW_LCE_LumaProb", lumaProb, lumaTarget, "SW_LCE_LumaTarget"],
+    ["SW_LCE_FlatProb", flatProb, flatTarget, "SW_LCE_FlatTarget"],
   ] as const;
   let offset = 0;
   const slices = segments.map((segment) => {
@@ -43,20 +51,34 @@ export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCal
   }
 
   return <section className="tone-lce-chart-card" aria-label="LCE Target Weight">
-    <div className="tone-lce-chart-header font-semibold" title={t("tone_lce.weight_source")}
-      style={{ borderColor: "var(--colorNeutralStroke2)" }}>LCE Target Weight</div>
+    <ToneLceChartHeader title="LCE Target Weight" source={t("tone_lce.weight_source")} expanded={expanded}
+      controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
+    <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
+      <div className="formula-expression">Target = (LVTarget × LVProb + LumaFlatTarget × (1000 − LVProb)) / 1000</div>
+      <table className="w-full table-auto border-collapse text-left tabular-nums" aria-label="LCE Target Weight · EXIF">
+        <tbody>{values.map(([key, value, target, targetKey]) => <tr key={key}>
+          <th scope="row" className="font-normal">{key}</th>
+          <td className="text-center">{numberText(value)}</td>
+          <td className="text-center">{numberText(target)}</td>
+          <td className="tone-lce-target-key text-right">{targetKey}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
     <div className="tone-lce-chart-body">
       <svg viewBox="0 0 420 230" preserveAspectRatio="xMidYMid meet" role="img" aria-label={`LCE Target Weight: ${description}`}
         style={{ fontFamily: "var(--fontFamilyBase, 'Segoe UI', sans-serif)" }}>
         <circle cx="210" cy="115" r="68" fill="none" stroke="var(--colorNeutralBackground3)" strokeWidth="30" />
-        {weights && slices.filter(({ weight }) => weight > 0).map(({ key, label, color, weight, offset: start }) => (
-          <circle key={key} cx="210" cy="115" r="68" fill="none" stroke={color} strokeWidth="30" pathLength="100"
-            strokeDasharray={`${weight * 100} ${100 - weight * 100}`} strokeDashoffset={-start * 100} transform="rotate(45 210 115)">
-            <title>{`${label}: ${(weight * 100).toFixed(1)}%`}</title>
-          </circle>
+        {weights && slices.filter(({ weight }) => weight > 0).map(({ key, label, color, weight, offset: start, formula }) => (
+          <HoverTooltip key={key} svg wrap positioning="above-center" maxWidth={360}
+            content={`${label}: ${(weight * 100).toFixed(1)}%\n${formula}`}>
+            <circle cx="210" cy="115" r="68" fill="none" stroke={color} strokeWidth="30" pathLength="100"
+              tabIndex={0} role="img" aria-label={`${label}: ${(weight * 100).toFixed(1)}%`}
+              strokeDasharray={`${weight * 100} ${100 - weight * 100}`} strokeDashoffset={-start * 100} transform="rotate(45 210 115)" />
+          </HoverTooltip>
         ))}
-        {weights && labels.map(({ key, label, weight, right, x, y, labelY, formula }) => <g key={key}>
-          <title>{formula}</title>
+        {weights && labels.map(({ key, label, weight, right, x, y, labelY, formula }) => <HoverTooltip key={key} svg wrap positioning="above-center" maxWidth={360}
+          content={`${label}: ${(weight * 100).toFixed(1)}%\n${formula}`}>
+          <g tabIndex={0} role="img" aria-label={`${label}: ${(weight * 100).toFixed(1)}%`}>
           <polyline points={`${x},${y} ${right ? 310 : 110},${labelY} ${right ? 330 : 90},${labelY}`}
             fill="none" stroke="var(--colorNeutralForeground3)" strokeWidth="1" />
           <rect x={right ? 330 : 5} y={labelY - 9} width="85" height="18" rx="1"
@@ -64,18 +86,10 @@ export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCal
           <text x={right ? 372.5 : 47.5} y={labelY} dominantBaseline="central" textAnchor="middle" fontSize="11" fill="var(--colorNeutralForeground1)">
             {`${label} ${(weight * 100).toFixed(1)}%`}
           </text>
-        </g>)}
+          </g>
+        </HoverTooltip>)}
       </svg>
       {!weights && <p role="status" className="absolute bottom-1 left-2 right-2 m-0 text-center text-[11px]" style={{ color: "var(--colorNeutralForeground2)" }}>{t("tone_lce.invalid_weights")}</p>}
-    </div>
-    <div className="tone-lce-chart-footer">
-      <table className="w-full table-fixed border-collapse text-left tabular-nums" aria-label="LCE Target Weight · EXIF">
-        <colgroup><col style={{ width: "76%" }} /><col style={{ width: "24%" }} /></colgroup>
-        <tbody>{values.map(([key, value]) => <tr key={key}>
-          <th scope="row" className="break-all border px-2 font-normal" style={{ borderColor: "var(--colorNeutralStroke2)", color: "var(--colorNeutralForeground2)" }}>{key}</th>
-          <td className="border px-2 text-right" style={{ borderColor: "var(--colorNeutralStroke2)", color: "var(--colorNeutralForeground1)" }}>{numberText(value)}</td>
-        </tr>)}</tbody>
-      </table>
     </div>
   </section>;
 }

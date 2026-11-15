@@ -131,6 +131,7 @@ export interface Isp6sAeVisual {
   chart_main_t_mid_readout_mode: string;
   chart_map_tab:              string;
   tone_chart_map_tab:         string;
+  tone_lce_curve_ratio?:      number;
   image_table_kind_filter:    "all" | "scene" | "portrait";
   tone_image_table_kind_filter: "all" | "scene" | "portrait";
 }

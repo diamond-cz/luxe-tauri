@@ -3,16 +3,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Paired ToneMap charts share header, plot and four-row footer geometry. */
+/* Paired ToneMap charts share a header, optional formula row and plot geometry. */
 .tone-lce-chart-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  --tone-lce-formula-height: 0px;
+  --tone-lce-plot-height: clamp(220px, 32vh, 340px);
+  container-type: inline-size;
   min-width: 0;
+}
+.tone-lce-chart-pair:has(.tone-lce-chart-formula:not([hidden])) {
+  --tone-lce-formula-height: 144px;
+}
+.tone-lce-chart-pair .tone-lce-chart-card {
+  height: 100%;
+}
+.tone-lce-chart-pair .tone-lce-chart-body {
+  aspect-ratio: auto;
 }
 .tone-lce-chart-card {
   display: grid;
-  grid-template-rows: 40px auto 120px;
+  grid-template-rows: 40px auto minmax(0, 1fr);
   min-width: 0;
   width: 100%;
   overflow: hidden;
@@ -23,6 +32,7 @@
   box-shadow: 0 1px 2px color-mix(in srgb, var(--colorNeutralForeground1) 6%, transparent);
 }
 .tone-lce-chart-header {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -34,6 +44,7 @@
   background: color-mix(in srgb, var(--colorBrandBackground2) 18%, var(--colorNeutralBackground2));
 }
 .tone-lce-chart-body {
+  grid-row: 3;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -52,29 +63,58 @@
   max-width: 100%;
   overflow: hidden;
 }
-.tone-lce-chart-footer {
+.tone-lce-chart-formula {
+  grid-row: 2;
+  container-type: inline-size;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 4px;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-  padding: 0;
-  border-top: 1px solid var(--colorNeutralStroke2);
-  border-radius: 0;
-  background: color-mix(in srgb, var(--colorBrandBackground2) 6%, var(--colorNeutralBackground1));
+  min-height: 144px;
+  overflow: hidden;
+  padding: 6px 1.5%;
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  line-height: 1.3;
 }
-.tone-lce-chart-footer table {
-  height: 100%;
+.tone-lce-chart-formula[hidden] {
+  display: none;
+}
+.tone-lce-chart-formula .formula-expression {
+  min-width: 0;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid var(--colorNeutralStroke2);
   font-size: 11px;
-  line-height: 18px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
-.tone-lce-chart-footer tr {
-  height: 25%;
+.tone-lce-chart-formula table {
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
 }
-.tone-lce-chart-footer :where(th, td) {
-  border-color: var(--colorNeutralStroke2);
+.tone-lce-chart-formula tr {
+  height: 26px;
 }
-.tone-lce-chart-footer tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--colorNeutralBackground2) 35%, transparent);
+.tone-lce-chart-formula :where(th, td) {
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  padding: 2px clamp(1px, 0.6cqw, 6px);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.tone-lce-chart-formula tbody tr:last-child > :where(th, td) {
+  border-bottom: 0;
+}
+.tone-lce-chart-formula.formula-panel th,
+.tone-lce-chart-formula.formula-panel .tone-lce-target-key {
+  font-family: var(--fontFamilyBase, "Segoe UI", sans-serif);
+  font-weight: 600;
+  color: var(--colorNeutralForeground2);
+}
+.tone-lce-chart-formula td:not(.tone-lce-target-key) {
+  font-weight: 700;
 }
 
 /* CJK monospaced fonts keep a Chinese glyph on two Latin character cells. */

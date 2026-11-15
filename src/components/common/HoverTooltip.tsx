@@ -21,6 +21,8 @@ interface Props {
   wrap?: boolean;
   maxWidth?: number;
   inline?: boolean;
+  /** Use an SVG group as the anchor when the trigger lives inside a chart. */
+  svg?: boolean;
 }
 
 interface TooltipCoords {
@@ -52,16 +54,17 @@ export function HoverTooltip({
   wrap = false,
   maxWidth,
   inline = false,
+  svg = false,
 }: Props) {
   const [show, setShow] = useState(false);
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
   const [theme, setTheme] = useState<TooltipTheme>(fallbackTooltipTheme());
-  const wrapperRef = useRef<HTMLElement | null>(null);
+  const wrapperRef = useRef<HTMLElement | SVGGElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const effectiveMaxWidth = effectiveTooltipMaxWidth(maxWidth);
 
-  const setWrapperNode = (node: HTMLElement | null) => {
+  const setWrapperNode = (node: HTMLElement | SVGGElement | null) => {
     wrapperRef.current = node;
   };
 
@@ -133,8 +136,8 @@ export function HoverTooltip({
     />
   ) : null;
 
-  const Wrapper = inline ? "span" : "div";
-  const wrapperClassName = inline ? "inline-flex" : undefined;
+  const Wrapper = svg ? "g" : inline ? "span" : "div";
+  const wrapperClassName = inline && !svg ? "inline-flex" : undefined;
 
   return (
     <Wrapper
@@ -143,6 +146,8 @@ export function HoverTooltip({
       data-tooltip-disabled="true"
       onMouseEnter={onEnter}
       onMouseLeave={(event) => scheduleClose(event.relatedTarget)}
+      onFocus={svg ? onEnter : undefined}
+      onBlur={svg ? (event) => scheduleClose(event.relatedTarget) : undefined}
     >
       {children}
       {tip}
@@ -351,6 +356,7 @@ function TooltipPortal({
   return createPortal(
     <span
       ref={refNode}
+      role="tooltip"
       className={`fixed z-[9999] rounded-md border ${monospace ? "px-3 py-2 text-xs leading-5" : "px-2 py-1 text-[11px] leading-4"}`}
       style={{
         ...tooltipSurfaceStyle(theme),
@@ -375,7 +381,7 @@ function TooltipPortal({
 }
 
 function measureTooltip(
-  anchor: HTMLElement,
+  anchor: Element,
   tooltip: HTMLElement | null,
   positioning: TooltipPositioning,
   maxWidth: number,
@@ -537,7 +543,7 @@ const tooltipTriangleBaseStyle: CSSProperties = {
   pointerEvents: "none",
 };
 
-function readTooltipTheme(anchor: HTMLElement): TooltipTheme {
+function readTooltipTheme(anchor: Element): TooltipTheme {
   const styles = getComputedStyle(anchor);
   const isLight = document.documentElement.classList.contains("light");
   const neutralBackground1 = cssVar(styles, "--colorNeutralBackground1");

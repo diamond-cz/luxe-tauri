@@ -1,4 +1,6 @@
 {
+  "tone_lce.hide_formula": "Hide {{title}} formula row",
+  "tone_lce.show_formula": "Show {{title}} formula row",
   "tone_lce.curve_legend": "LCE curve legend",
   "tone_lce.curve_face_bounds": "Face bounds",
   "tone_lce.curve_axes": "LCE curve: P on the horizontal axis, O on the vertical axis",

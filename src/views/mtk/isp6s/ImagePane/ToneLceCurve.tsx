@@ -1,27 +1,60 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HoverTooltip } from "@/components/common/HoverTooltip";
 import { buildLceCurve, LCE_CURVE_MAX } from "./toneLceCurveModel";
+import { ToneLceChartHeader } from "./ToneLceChartHeader";
 
 const formatValue = (value: number) => Number.isFinite(value) ? String(Number(value.toFixed(2))) : "-";
 const ticks = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500];
-const plot = { left: 42, top: 23, width: 554, height: 324 };
-const xAt = (value: number) => plot.left + value / LCE_CURVE_MAX * plot.width;
-const yAt = (value: number) => plot.top + (1 - value / LCE_CURVE_MAX) * plot.height;
 
 export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> }) {
   const { t } = useTranslation();
   const curve = buildLceCurve(tomlData);
   const [hover, setHover] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(true);
+  const formulaId = useId();
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [viewport, setViewport] = useState({ width: 620, height: 380 });
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const update = () => {
+      const width = Math.round(svg.clientWidth);
+      const height = Math.round(svg.clientHeight);
+      if (width <= 0 || height <= 0) return;
+      setViewport((previous) => previous.width === width && previous.height === height ? previous : { width, height });
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(svg);
+    update();
+    return () => observer.disconnect();
+  }, []);
+  const plot = { left: 42, top: 23, width: Math.max(1, viewport.width - 66), height: Math.max(1, viewport.height - 56) };
+  const xAt = (value: number) => plot.left + value / LCE_CURVE_MAX * plot.width;
+  const yAt = (value: number) => plot.top + (1 - value / LCE_CURVE_MAX) * plot.height;
+  const visibleTicks = viewport.width < 360 ? ticks.filter((value) => value % 1000 === 0) : ticks;
   const active = hover === null ? null : curve.nodes[hover];
   return <section className="tone-lce-chart-card" aria-label="LCE Curve">
-    <div className="tone-lce-chart-header">
-      <strong>LCE Curve</strong>
+    <ToneLceChartHeader title="LCE Curve" expanded={expanded} controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
+    <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
+      <div className="formula-expression">Gain = O − P</div>
+      <table className="w-full table-fixed border-collapse text-center tabular-nums" aria-label={t("tone_lce.curve_nodes")}>
+        <thead><tr>
+          <th className="font-normal" scope="col">EXIF</th>
+          {curve.nodes.map((node) => <th key={node.index} scope="col" className="font-normal">{node.index}</th>)}
+        </tr></thead>
+        <tbody>{(["p", "o", "gain"] as const).map((key) => <tr key={key}>
+          <th className="font-normal" scope="row" title={key === "gain" ? "O − P" : undefined}>{key === "gain" ? "Gain" : key.toUpperCase()}</th>
+          {curve.nodes.map((node) => <td key={node.index}
+            title={key === "p" ? node.pKey : key === "o" ? node.oKey : `${node.oKey} − ${node.pKey}`}>{formatValue(node[key])}</td>)}
+        </tr>)}</tbody>
+      </table>
     </div>
     <div className="tone-lce-chart-body">
-    <svg viewBox="0 0 620 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label={t("tone_lce.curve_axes")}
+    <svg ref={svgRef} viewBox={`0 0 ${viewport.width} ${viewport.height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={t("tone_lce.curve_axes")}
       style={{ fontFamily: "var(--fontFamilyBase, 'Segoe UI', sans-serif)" }}
       onMouseLeave={() => setHover(null)}>
-      {ticks.map((value) => <g key={value}>
+      {visibleTicks.map((value) => <g key={value}>
         <line x1={xAt(value)} y1={plot.top} x2={xAt(value)} y2={plot.top + plot.height} stroke="var(--colorNeutralStroke2)" />
         <line x1={plot.left} y1={yAt(value)} x2={plot.left + plot.width} y2={yAt(value)} stroke="var(--colorNeutralStroke2)" />
         <text x={xAt(value)} y={plot.top + plot.height + 17} fontSize="10" textAnchor="middle" fill="var(--colorNeutralForeground3)">{value}</text>
@@ -35,17 +68,15 @@ export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> })
       ))}
       {curve.segments.filter((segment) => segment.length > 1).map((segment, index) => <polyline key={index}
         points={segment.map((node) => `${xAt(node.p)},${yAt(node.o)}`).join(" ")} fill="none" stroke="var(--colorPaletteBlueForeground2)" strokeWidth="1.7" />)}
-      {curve.nodes.filter((node) => node.valid).map((node) => <circle key={node.index} cx={xAt(node.p)} cy={yAt(node.o)} r={hover === node.index ? 5 : 3}
+      {curve.nodes.filter((node) => node.valid).map((node) => <HoverTooltip key={node.index} svg wrap positioning="above-center" maxWidth={360}
+        content={`${node.pKey}: ${formatValue(node.p)}\n${node.oKey}: ${formatValue(node.o)}\nGain (O − P): ${formatValue(node.gain)}`}>
+        <circle cx={xAt(node.p)} cy={yAt(node.o)} r={hover === node.index ? 5 : 3}
         tabIndex={0} role="img" aria-label={`P: ${node.p}, O: ${node.o}, O − P: ${node.gain}`}
-        fill="var(--colorPaletteBlueForeground2)" onMouseEnter={() => setHover(node.index)} onFocus={() => setHover(node.index)} onBlur={() => setHover(null)}>
-        <title>{`${node.pKey}: ${node.p}; ${node.oKey}: ${node.o}; O − P: ${node.gain}`}</title>
-      </circle>)}
+        fill="var(--colorPaletteBlueForeground2)" onMouseEnter={() => setHover(node.index)} onMouseLeave={() => setHover(null)}
+        onFocus={() => setHover(node.index)} onBlur={() => setHover(null)} />
+      </HoverTooltip>)}
       {active?.valid && <g pointerEvents="none">
         <line x1={xAt(active.p)} x2={xAt(active.p)} y1={plot.top} y2={plot.top + plot.height} stroke="var(--colorBrandStroke1)" strokeDasharray="3 3" />
-        <rect x={Math.min(xAt(active.p) + 8, plot.left + plot.width - 162)} y={Math.max(plot.top + 4, yAt(active.o) - 36)}
-          width="154" height="28" rx="3" fill="var(--colorNeutralBackground1)" stroke="var(--colorNeutralStroke1)" />
-        <text x={Math.min(xAt(active.p) + 15, plot.left + plot.width - 155)} y={Math.max(plot.top + 21, yAt(active.o) - 19)}
-          fontSize="11" fill="var(--colorNeutralForeground1)">{`P ${active.p} · O ${active.o}`}</text>
       </g>}
       <text x={plot.left + plot.width + 11} y={plot.top + plot.height + 4} textAnchor="middle" fontSize="12" fill="var(--colorNeutralForeground2)">P</text>
       <text x={plot.left} y={plot.top - 9} textAnchor="middle" fontSize="12" fill="var(--colorNeutralForeground2)">O</text>
@@ -60,21 +91,8 @@ export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> })
           <text x="26" y="3" fontSize="11" fill="var(--colorNeutralForeground2)">{label}</text>
         </g>)}
       </g>
-      {!curve.available && <text x="300" y="140" textAnchor="middle" fontSize="12" fill="var(--colorNeutralForeground2)">{t("tone_lce.curve_unavailable")}</text>}
+      {!curve.available && <text x={viewport.width / 2} y={viewport.height / 2} textAnchor="middle" fontSize="12" fill="var(--colorNeutralForeground2)">{t("tone_lce.curve_unavailable")}</text>}
     </svg>
-    </div>
-    <div className="tone-lce-chart-footer">
-      <table className="w-full table-fixed border-collapse text-center tabular-nums" style={{ minWidth: 380 }} aria-label={t("tone_lce.curve_nodes")}>
-        <thead><tr style={{ background: "var(--colorNeutralBackground2)" }}>
-          <th className="border px-1 font-normal" style={{ borderColor: "var(--colorNeutralStroke2)" }} scope="col">EXIF</th>
-          {curve.nodes.map((node) => <th key={node.index} scope="col" className="border px-1 font-normal" style={{ borderColor: "var(--colorNeutralStroke2)" }}>{node.index}</th>)}
-        </tr></thead>
-        <tbody>{(["p", "o", "gain"] as const).map((key) => <tr key={key}>
-          <th className="border px-1 font-medium" style={{ borderColor: "var(--colorNeutralStroke2)" }} scope="row" title={key === "gain" ? "O − P" : undefined}>{key === "gain" ? "Gain" : key.toUpperCase()}</th>
-          {curve.nodes.map((node) => <td key={node.index} className="border px-1" style={{ borderColor: "var(--colorNeutralStroke2)" }}
-            title={key === "p" ? node.pKey : key === "o" ? node.oKey : `${node.oKey} − ${node.pKey}`}>{formatValue(node[key])}</td>)}
-        </tr>)}</tbody>
-      </table>
     </div>
   </section>;
 }

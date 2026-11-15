@@ -300,6 +300,8 @@ pub struct Isp6sAeVisual {
     pub chart_map_tab:                                 String,
     #[serde(default = "default_tone_chart_map_tab")]
     pub tone_chart_map_tab:                            String,
+    #[serde(default = "default_tone_lce_curve_ratio")]
+    pub tone_lce_curve_ratio:                          f32,
     #[serde(default = "default_image_table_kind_filter")]
     pub image_table_kind_filter:                        String,
     #[serde(default = "default_image_table_kind_filter")]
@@ -329,6 +331,11 @@ fn default_chart_main_t_mid_chart_source() -> String { "mid".into() }
 fn default_chart_main_t_mid_readout_mode() -> String { "value".into() }
 fn default_chart_map_tab() -> String { "MainT".into() }
 fn default_tone_chart_map_tab() -> String { "LTM".into() }
+fn default_tone_lce_curve_ratio() -> f32 { 50.0 }
+
+#[cfg(test)]
+#[path = "tone_lce_layout_tests.rs"]
+mod tone_lce_layout_tests;
 
 impl Default for Isp6sAeVisual {
     fn default() -> Self {
@@ -361,6 +368,7 @@ impl Default for Isp6sAeVisual {
             chart_main_t_mid_readout_mode: default_chart_main_t_mid_readout_mode(),
             chart_map_tab: default_chart_map_tab(),
             tone_chart_map_tab: default_tone_chart_map_tab(),
+            tone_lce_curve_ratio: default_tone_lce_curve_ratio(),
             image_table_kind_filter: default_image_table_kind_filter(),
             tone_image_table_kind_filter: default_image_table_kind_filter(),
         }

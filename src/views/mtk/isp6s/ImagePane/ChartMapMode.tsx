@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { tabButtonStyle, tabStripWrapStyle } from "./chartMapTabStyles";
 import {
   DndContext, closestCenter, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -12991,13 +12992,6 @@ const canvasStyle: CSSProperties = {
   color: "var(--colorNeutralForeground1)",
 };
 
-const tabStripWrapStyle: CSSProperties = {
-  height: 32,
-  borderBottom: "1px solid var(--colorNeutralStroke2)",
-  scrollbarWidth: "none",
-  msOverflowStyle: "none",
-};
-
 const innerCanvasStyle: CSSProperties = {
   minWidth: 0,
   background: "transparent",
@@ -13005,25 +12999,6 @@ const innerCanvasStyle: CSSProperties = {
   borderRadius: 0,
   padding: 0,
 };
-
-function tabButtonStyle(active: boolean): CSSProperties {
-  return {
-    minWidth: 88,
-    height: 30,
-    padding: "0 14px",
-    border: active ? "1px solid var(--colorBrandStroke1)" : "1px solid var(--colorNeutralStroke2)",
-    borderBottomColor: active ? "var(--colorBrandStroke1)" : "var(--colorNeutralStroke2)",
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-    background: active ? "var(--colorBrandBackground)" : "var(--colorNeutralBackground3)",
-    color: active ? "var(--colorNeutralForegroundOnBrand)" : "var(--colorNeutralForeground2)",
-    fontSize: 12,
-    fontWeight: active ? 600 : 500,
-    cursor: "pointer",
-    transform: active ? "translateY(1px)" : "none",
-    boxShadow: active ? "0 2px 6px color-mix(in srgb, var(--colorBrandBackground) 28%, transparent)" : "none",
-  };
-}
 
 const thresholdCardStyle: CSSProperties = {
   position: "relative",
