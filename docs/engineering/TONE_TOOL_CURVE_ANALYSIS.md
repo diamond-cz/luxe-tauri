@@ -33,7 +33,7 @@ REA 6.9.0 CLI 在 Node 22.23.5 下分析 `Common/ToneToolLib.pyc`，确认它实
 
 `inspect_python_pyc` 对同目录 PETRUS 主模块返回 `unsupported_target`：magic 3350 为 CPython 3.5，不在当前 REA 固定支持的 3.7–3.13 范围。后续函数语义来自普通 Python 工具的只读 marshal/字节码检查，**不是 REA 已完成反编译的结果**。
 
-本地 `docs/engineering/evidence/inspect_tonetool_pyc.py` 是此次固定目标使用的静态检查辅助脚本，未加载任何第三方依赖，也不执行目标代码；聚焦反汇编记录为同目录 `TONE_TOOL_CURVE_DISASSEMBLY.txt`。两者属于本地分析材料，不随代码提交；可复查的函数、行号、数据映射和成员身份汇总如下：
+分析时曾使用一次性静态检查辅助脚本 `inspect_tonetool_pyc.py`，只读取固定目标的CPython 3.5 marshal/字节码，不执行目标代码；该脚本硬编码外部ToneTool路径，已于2026-11-15清理，不是运行或构建依赖。聚焦反汇编记录仍保留在本地 `docs/engineering/evidence/TONE_TOOL_CURVE_DISASSEMBLY.txt`，属于已忽略的分析材料，不随代码提交；可复查的函数、行号、数据映射和成员身份汇总如下：
 
 | 成员 | SHA-256 | 作用 |
 | --- | --- | --- |

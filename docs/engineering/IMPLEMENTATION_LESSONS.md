@@ -3533,3 +3533,219 @@
 - GitHub API 查询确认插件 workflow 两个 job 成功、artifact 存在；版本 Release 四个附件与目录 Release 的 plugins.json 均存在。Windows PowerShell 5.1 实际运行生产更新函数的 current/old/download 三种操作通过；Python zipfile/hashlib 校验真实包通过。
 - `git status --short --branch` 显示实现提交已与 origin/main 同步；HiViewer 工作区 Git 状态为空。此次验证未改动宿主代码、安装记录或用户图片。
 - 项目主应用全量测试失败明确保留；Windows 桌面安装与功能验收待用户执行，不以构建及下载成功替代。
+
+### 2026-11-15：ToneMap 参数标签统一与顶部 LCE 双图分割记忆
+
+**亮点**
+
+- `ImagePane/chartMapTabStyles.ts` 从 AE Basic 的 ChartMapMode 提取原有 tab 样式，ToneChartMapMode 同源复用；LTM/LCE/GMA/DCE/CA-LTM 使用品牌实心激活项、中性未选项、圆角上边和原有高度/横向滚动。AE Basic 仅更换样式导入，保持其行为和外观。
+- `ToneLceCharts.tsx` 将 LCE Curve 与 LCE Target Weight 移出 Target，独立放到 LCE 首行。复用 react-resizable-panels 和公共 ResizeHandle，常显拖动轨道、支持键盘，各侧 25..75%，默认等宽；下方 Target 保留参数 Ratio/Target/Cal、编辑、热力图和源码跳转。
+- `tone_lce_curve_ratio` 写入已有 `isp6s_ae_visual` 契约，TypeScript、Zustand 默认/规范化与 Rust serde/default 同步；沿用 Isp6sAeVisual 的 200ms 保存和 stateIo 串行写入，独立于工作区列宽，不另用 localStorage。旧配置默认 50%，异常值前端归一化，状态切换/组件重挂载恢复比例。
+- 双图共用标题40px、底表120px和容器宽度单位推导的图体高度，拖宽某一卡不会让底部表格错位。SVG 保持等比缩放与边界限制，无新增 Observer/图片缓存。深浅实际组件截图保留在 `docs/engineering/evidence/TONE_LCE_SPLIT_LIGHT.png` 与 `TONE_LCE_SPLIT_DARK.png`。
+
+**痛点**
+
+- 原 ToneMap 标签仅下划线，与 AE Basic 的实心标签不一致；只复制 CSS 会形成两份可漂移定义，本次改为抽取同一份样式。
+- 原双图在 Target 内固定等宽网格；若直接添加横向面板并分别按宽度计算图高，拖动后两图和底表会高低错位。本次由双图容器宽度确定共用高度，内部覆盖 aspect-ratio 为 auto，避免此前 min-height/宽高比导致窄卡越界的问题。
+- 重启记忆需要 Rust TOML 字段，单用 PanelGroup autoSaveId 默认 localStorage 不符合项目持久化规则；配置字段和旧数据默认一起补齐。state_schema.rs 存在历史紧凑格式，本次保持其既有风格、用 rustfmt emit 做语法解析，不对整文件做无关格式化。
+
+**闭坑**
+
+- 图表是当前图片 EXIF 展示，Weight 调用独立 EXIF 计算，不因移出 Target 而把 Tone.cpp 插值混入记录概率。Target 内 Cal 仍按参数表的实际插值计算，坐标/权重算法未改变。
+- 分割回调拒绝数量错误、NaN、超界和总和不为100的布局，忽略小于0.05%的抖动；不能让隐藏/卸载回调覆盖最后有效比例。Zustand 恢复时校验历史数值，旧 TOML 缺字段使用 serde 默认值。
+- 切图/切标签不得新建持久索引或重新解码图片。真实 Tauri 启动和 TOML 落盘恢复需使用 CI 产物验收，本地浏览器模拟状态恢复不能替代桌面重启。
+
+**验证**
+
+- `npm run typecheck` 通过；`npm run sync:test` 118 项通过，另用 Node `22.23.5` 执行相同六个测试脚本和 TypeScript 检查均通过。包含新增真实 store/分割组件测试，覆盖拖动回调保存、重挂载恢复、旧字段缺失与异常值归一化、无效布局拒绝、工作区布局不受覆盖。
+- `python .tmp-tone-split/check.py` 使用真实 ToneChartMapMode、图表、PanelGroup/ResizeHandle、项目 CSS 与 Fluent 主题，在 Edge/Chromium 中 22 场景通过：鼠标拖动、键盘、标签往返、重挂载、模拟启动 hydration，以及1100/900/720/560/420px容器变化；断言卡片/底表水平对齐、不越界和比例恢复。临时夹具和测量保存在忽略目录，正式深浅截图入库。
+- `rustfmt --check --edition 2021 src-tauri/src/config/tone_lce_layout_tests.rs` 通过；`rustfmt --emit stdout --config skip_children=true --edition 2021 src-tauri/src/config/state_schema.rs` 语法解析通过。新增两项 Rust 测试覆盖旧 TOML 默认和比例往返/与工作区配置隔离，未本地编译执行，交由 CI。
+- 本轮未提交/推送，未运行本地 Rust/Tauri 编译或真实 Windows 应用重启、TOML落盘和多显示器验收；浏览器截图不代表整应用桌面验收。
+
+### 2026-11-15：LCE 双图分割线按悬停显示
+
+**亮点**
+
+- `ToneLceCharts.tsx` 移除 ResizeHandle 的 `alwaysVisible`，复用公共分割器默认行为：竖线平时透明，悬停或拖动时显示品牌高亮，移开且不拖动时隐藏；8px 抓取区域与比例记忆继续使用原入口。
+
+**痛点**
+
+- 上轮传入 `alwaysVisible` 使竖线持续高亮；用户要求仅悬停显示，无需更改全局 ResizeHandle 或重写拖拽事件。
+
+**闭坑**
+
+- 只取消此实例常显属性，不隐藏真实拖拽区域，不改变分割比例、键盘调整和持久化逻辑。深浅截图更新为鼠标离开后的默认状态。
+
+**验证**
+
+- `npm run typecheck`、`node --test scripts/tone-lce-target.test.mjs`（13 项）、`git diff --check` 通过。
+- `python .tmp-tone-split/check.py` 浏览器两主题验证默认透明、悬停高亮和移开恢复透明；原有 22 项拖动/键盘/比例恢复/宽度场景继续通过，更新实际组件截图。
+- 未运行本地 Rust/Tauri 编译或整应用桌面验收，未提交/推送。
+
+### 2026-11-15：LCE 曲线统一悬浮提示与权重底栏目标值
+
+**亮点**
+
+- `ToneLceCurve.tsx` 移除节点原生 SVG title 和图内自绘提示框，使用公共 `HoverTooltip` 的新 svg 锚点模式，单个浮层合并 P/O 实际字段名、数值和 Gain。保留节点聚焦/高亮及竖向虚线，提示使用同一 Portal、圆角/阴影/箭头、主题令牌和视口定位。
+- `HoverTooltip.tsx` 的 svg 模式以 g 包裹触发节点、支持焦点冒泡；布局与主题读取接受 Element，HTML 默认包装方式不变。给共用浮层增加 role=tooltip，不引入第二套 Tooltip 样式或监听器实现。
+- `ToneLceTargetWeight.tsx` 底栏扩展为四列，依次“概率关键字/概率值/目标值/目标关键字”；四行分别配对 LV、LumaFlat、Luma、Flat 的真实 EXIF 记录。缺失显示 -、零不丢失，520px 最小表宽通过底栏横向滚动处理窄卡，四行底栏高度保持不变。
+
+**痛点**
+
+- 旧节点同时有原生 title 和自绘 P/O 提示，停留后会出现两个文字浮层，且内容/样式不一致。不能只修改自绘配色而保留 title；在 SVG 中也不能把 HTML div 包装器直接塞进 circle 外层。
+- EXIF 的 SW_LCE_LumaFlatTarget 与 Cal 重算值可能不同。本次底栏明确使用 recordedLumaFlatTarget，与 EXIF 详情表一致，不改变环形权重或参数插值计算。
+
+**闭坑**
+
+- Tooltip 的 SVG 模式使用合法 g 锚点，Portal 渲染至 body；不保留节点 title 或自绘文字框，不缩放 Tooltip 字体。HTML 调用默认行为继续验证，避免公共组件改动影响既有提示。
+- 节点悬停/聚焦时只有一个 Tooltip；移开、失焦和标签切换卸载后消失；边缘节点提示不能超出视口。底栏目标值不可用其他字段/计算结果兜底，右侧关键字保持完整、窄卡在卡内滚动。
+
+**验证**
+
+- `npm run typecheck` 通过；Tone LCE 定向 Node 测试 14 项通过，新增四列实际值/缺失/零值/记录值与重算隔离断言，并检查节点只声明公共 Tooltip、无原生 title。
+- 最终使用 Node `22.23.5` 执行 `sync:test` 对应六个脚本119项通过，TypeScript 检查与 `git diff --check` 通过。
+- `python .tmp-tone-split/check-tooltip.py` 两主题验证真实公共 Tooltip：单一浮层、三行来源和值、7px 圆角与阴影、鼠标离开关闭、键盘聚焦、边缘视口限制、切换标签卸载清理及既有 HTML 提示回归；900/720/560/420px 验证四列表格横向滚动且无纵向截断。
+- `python .tmp-tone-split/check.py` 原有22场景通过。截图 `TONE_LCE_TOOLTIP_LIGHT.png` / `TONE_LCE_TOOLTIP_DARK.png` 展示实际浏览器组件效果；本地未编译 Rust/Tauri或执行真实桌面交互验收，未提交/推送。
+
+### 2026-11-15：LCE 双图底栏自适应列宽与字号
+
+**亮点**
+
+- `ToneLceTargetWeight.tsx` 取消520px最小表宽与固定百分比 colgroup，使用 table-layout:auto；左侧关键字左对齐、中间两列数值居中、最右目标关键字右对齐。`ToneLceCurve.tsx` 取消380px最小表宽，保留九列等宽布局与完整节点值。
+- `globals.css` 为每个底栏设 inline-size container，字体和横向 padding 分别使用 clamp(6px,2.2cqw,11px) 与 clamp(1px,0.6cqw,6px)，按实际卡片宽度变化；极窄允许单元格内容换行。底栏不提供滚动区域，不新增测量监听器或改动数值来源。
+
+**痛点**
+
+- 上轮 minWidth 强制表格宽于窄卡片，产生横向滚动；固定px单元格内边距和 nowrap 也会维持过大的最小内容宽度。只隐藏 scrollbar 会裁掉右侧字段，本次同时移除这些宽度约束并测量文字实际边界。
+
+**闭坑**
+
+- 不能用 overflow hidden 代替内容自适应验证；断言底栏的 scrollWidth/scrollHeight 不超 clientWidth/clientHeight，并检查每个文本 Range 没有越过所在单元格，确保第四行和最右字段真实可见。
+- 不将字号缩放放在 SVG或整体UI上，不更改图表坐标、环形比例、EXIF关键字/数值、分割比例记忆。两卡仍共用120px底栏及四行高度，只有底栏文字按各自卡宽变化。
+
+**验证**
+
+- `python .tmp-tone-split/check-adaptive.py`：72场景通过，包含两主题、DPR 1/1.5、三种分割比例和六种容器宽度；检查全部文字边界、无横纵溢出及center/center/right对齐。保留 `TONE_LCE_ADAPTIVE_LIGHT.png` / `TONE_LCE_ADAPTIVE_DARK.png` 实际组件截图。
+- Node `22.23.5` 执行 `sync:test` 对应六个脚本119项通过；`npm run typecheck` 与 Node22直接执行TypeScript检查通过；`git diff --check` 通过，仅LF/CRLF提示。
+- 未本地运行 Rust/Tauri 编译或整应用桌面验收，未提交/推送。旧的横向滚动测试和截图属于上轮行为，本轮无滚动要求以本节与最新自适应截图为准。
+
+### 2026-11-15：LCE 双图数据移到可折叠第二栏
+
+**亮点**
+
+- `ToneLceCurve.tsx` 与 `ToneLceTargetWeight.tsx` 将原底部表格移到标题下方144px的公式栏，依次呈现标题、公式说明/数据表、图形；Curve 说明 Gain=O−P，Weight 说明 LVTarget 与 LumaFlatTarget 的概率混合结构，不新增计算或回写记录值。
+- 新增 `ToneLceChartHeader.tsx` 复用 Fluent Button 与上/下箭头，提供每卡独立的显示/隐藏控制。aria-controls 使用 React useId，aria-expanded 与五语言标签同步；默认展开，隐藏第二栏后图形占用释放的空间，不改变左右分割比例或另一张卡片状态。
+- `globals.css` 的公式栏复用 formula-panel 字体与语义主题，参考 Back Scene Target：只保留横向细分隔线、弱化关键字、加粗数值，移除纵向边框/交替底色。保持数据完整、自适应字号及无滚动布局。
+
+**痛点**
+
+- 原网格底表放在图形下方，与用户要求的第二栏公式区不一致；移动 DOM 后必须明确 grid-row，避免隐藏公式栏时图形被自动排到错误行或留下空白。
+- 独立折叠要求两张图自身管理展开状态，不能用一个开关同时隐藏两表；卡片外边界仍共用高度，本卡隐藏时只增加自己的图体高度。公式文字属于可换行内容，需要同时验证极窄卡片表格不被压到越界。
+
+**闭坑**
+
+- 不更改 EXIF数值来源、O/GCEO选择、权重算法、表格四列顺序与已有对齐规则。折叠数据区不卸载图形，悬浮提示与分割器不能失效；按钮必须支持鼠标和键盘，并保留明确状态/控制目标。
+- 字号容器单位必须应用于容器内的表达式和表格，不能在容器本身解析成外层双图宽度；两主题/极窄比例均检查单元格实际文本Range边界。
+
+**验证**
+
+- Node `22.23.5` 执行 `sync:test` 对应六个脚本120项通过；`npm run typecheck` 及 Node22直接执行TypeScript检查通过，`git diff --check` 通过。
+- `python .tmp-tone-split/check-formula.py`：两主题、DPR1/1.5、3种比例、6种宽度共72布局场景通过，检查第二栏表格无溢出/文字完整/无纵边框/数值加粗。另覆盖两卡独立折叠、鼠标/Enter键、图体扩展、比例不变、恢复后单一Tooltip继续可用；无浏览器异常。
+- 保留 `TONE_LCE_FORMULA_LIGHT.png` 与 `TONE_LCE_FORMULA_DARK.png` 实际组件截图。只运行浏览器夹具与静态/Node检查，未本地编译Rust/Tauri、未进行整应用桌面验收，未提交/推送。此前底栏截图仅为历史行为记录。
+
+### 2026-11-15：权重百分比提示统一、单分隔线与折叠高度自适应
+
+**亮点**
+
+- `ToneLceTargetWeight.tsx` 的百分比标签与非零扇区均使用公共 `HoverTooltip` SVG锚点，内容合并名称/百分比和权重公式，移除原生title；可键盘聚焦，不再出现浏览器默认提示样式。
+- 公式表最后一行取消底边，只保留公式栏的单一外边界，消除公式区与图体间相邻的重复横线；其他行分隔、字号与数值来源保持不变。
+- `ToneLceCharts.tsx` 按左右比例与SVG原生比例计算图体高度；CSS :has检测是否还有展开公式栏。至少一栏展开时保留144px公式空间，两栏都隐藏时切换为0，双卡总高度真实缩短144px，下方Target随之上移。无需新增Observer或测量状态。
+
+**痛点**
+
+- 上轮固定总高度在两栏折叠后未缩减，公式空间被图体吸收，SVG等比居中后形成大块留白。仅修改SVG preserveAspectRatio不能解决容器仍保留高度的根因。
+- 百分比标签和圆弧仍保留原生SVG title，而曲线已经使用项目浮层，导致同屏提示风格不一致；两类触发元素一起替换，避免只修标签却遗漏圆弧。
+
+**闭坑**
+
+- 单侧折叠保持左右外框对齐；两侧折叠必须测量容器真实高度减少，不能只用overflow裁掉内容。宽度比例变化时用两图所需原生高度中的较大值，既减少留白又保持图形等比。
+- 验证提示需悬停百分比text而不是被其覆盖的rect；失焦应移到无title控件，避免把全局标题提示误判为旧权重提示残留。原生SVG title必须为零，标签与扇区均保留可访问名称和焦点路径。
+
+**验证**
+
+- `python .tmp-tone-split/check-compact.py`：两主题/DPR1与1.5/三种比例/六种宽度共72组合通过，验证展开→单侧折叠→双侧折叠真实高度差、卡片对齐、原生比例误差、单一分隔线、百分比悬停/离开及标签与扇区聚焦提示。
+- `python .tmp-tone-split/check-formula.py` 原有72公式表格无溢出、独立折叠、键盘和曲线Tooltip回归通过。Node `22.23.5` 执行 `sync:test` 对应六个脚本120项通过，TypeScript与 `git diff --check` 通过。
+- 保留 `TONE_LCE_COMPACT_EXPANDED_*` / `TONE_LCE_COMPACT_COLLAPSED_*` 和 `TONE_LCE_WEIGHT_TOOLTIP_*` 的深浅实际组件截图。未本地编译Rust/Tauri、未验收整应用桌面行为，未提交/推送。
+
+### 2026-11-15：公式标题增强、Target层级整理与ToneMap横向适配
+
+**亮点**
+
+- `globals.css` 将两图公式表行列标题及目标关键字改为项目无衬线字体、600字重和更清晰的neutralForeground2；表格和公式保留11px文字，不再随卡片宽度整体缩到6px，数值继续等宽加粗。
+- `ToneChartMapMode.tsx` 的外层Target现在依次为标题、第二栏Cal公式、Ratio、LVTarget和Prob。原内部Target改名LVTarget，Cal移出该内部卡片，Prob移入外层Target；tableId仍为target/prob，保存、热力图、单元格跳转与参数插值入口不变。
+- `ToneLceCharts.tsx` 去除按列宽/分割比例推算高度的cqw系数，图体预算改为clamp(220px,32vh,340px)。固定窗口高度时仅横向列宽变化；展开/折叠公式栏仍有144px的整体高度差、比例继续保存。
+- `ToneLceCurve.tsx` 用一个有清理入口的ResizeObserver读取实际SVG尺寸，仅在宽高变化时更新视口，坐标/节点按实际绘图区重排，文字按像素绘制，不再随整个viewBox等比缩小。较窄绘图区降低横轴刻度密度，权重圆环继续保持圆形，不做非等比拉伸。
+
+**痛点**
+
+- 之前字体既是细等宽、低对比颜色，又使用随容器缩小的字号，参数名在正常列宽下也不显眼。只增加字重不足以解决缩小时仍变小的问题，本轮把标题字体和表格字号分别处理。
+- 上轮图体高度绑定列宽，拖动工作区分割器会同时产生纵向缩放，不符合用户期望的横向适配；简单把SVG改为preserveAspectRatio=none会拉伸文字或把圆环拉成椭圆，因此改为曲线实际视口重绘、环形维持比例。
+- 将Cal移到外层时仍需使用当前sourceDraftText覆盖后的target表插值；不能用固定值替代。此次仅调整React层级与标题，计算及记录/重算差值保持现有链路。
+
+**闭坑**
+
+- 按固定窗口高度拖左右分割器时比较卡片总高度，应保持不变；viewport高度变化和公式展开状态仍允许改变高度。极窄表格允许换行增高，不能靠裁切保证11px或隐藏关键字段。
+- ResizeObserver仅观察当前SVG元素，组件卸载disconnect，不创建图片缓存；viewBox与实际像素尺寸同步，避免通过修改viewBox反复触发布局反馈。保留真实P/O、Gain、GCEO来源、节点Tooltip和权重比例。
+- LVTarget重命名只影响可见标题，tableId仍为target；Prob在外层Target内且全页面仅一份，不能遗留原顶层重复卡片。公式先于三个参数卡片，不能再嵌入LVTarget。
+
+**验证**
+
+- `python .tmp-tone-split/check-horizontal.py`：72布局组合通过，两主题/DPR1与1.5/三种分割比例/六种容器宽度；验证组高度不随列宽变化、11px字号、600字重无衬线标题、SVG实际宽高与viewBox一致、公式无溢出及原有折叠高度差。
+- 实际浏览器验证Target层级为Ratio/LVTarget/Prob、Cal只在外层第二栏；真实拖动分割器高度不变，LVTarget单元格右键仍传递原字段路径，Prob热力图按钮仍更新ToneMap_prob状态，无浏览器异常。
+- Node `22.23.5` 执行 `sync:test` 六脚本121项通过；`npm run typecheck`及Node22直接执行TypeScript检查通过，`git diff --check`通过。保留 `TONE_LCE_HORIZONTAL_*` 与 `TONE_LCE_TARGET_GROUP_*` 深浅组件截图。
+- 未运行本地Rust/Tauri编译或整应用桌面验收，未提交/推送；之前cqw动态高度截图属于历史方案，以本节横向适配结果为准。
+
+### 2026-11-15：工程证据目录清理
+
+**亮点**
+
+- 核对实际目录 `docs/engineering/evidence/` 的文件、Git跟踪/忽略状态与全仓引用后，删除16张旧PNG、一次性 `inspect_tonetool_pyc.py` 和旧布局测量JSON，共18文件/1,197,081字节。保留最新横向适配/Target层级四张深浅截图，以及本地忽略的REA输出和反汇编文本。
+- 新增 `docs/engineering/EVIDENCE_MAINTENANCE.md` 说明用途、删除影响、恢复边界并加入索引。功能文档清理已删除图片链接，ToneTool分析文档说明脚本已删除；正式代码和回归测试不变。
+
+**痛点**
+
+- 多轮布局迭代生成了多个过渡版本的截图，功能文档仍链接历史图片；只删文件会留下断链。本次保留功能说明与测试结果，旧图链接改为文字历史记录。
+- 外部字节码辅助脚本硬编码用户本地ToneTool路径，既不是产品解析器也不在CI调用链；删除不影响当前功能，但失去该辅助工具原样复做分析的能力。原始REA与反汇编文本仍本地保留以供复查。
+
+**闭坑**
+
+- 历史账本中的截图名称和临时命令仅表示当时执行过；本次已清理旧图，不能继续作为当前可访问证据。代表最新实现的四张截图仍在，算法正式测试与产品代码未删。
+- 仅两张RESIZE截图被Git跟踪，可从历史提交恢复；其余未跟踪或忽略文件不能保证Git恢复。清理当前文件不会清除Git历史中的PNG体积，临时浏览器夹具重跑也可能重新生成旧文件。
+- 删除使用PowerShell原生命令，限定到已解析的evidence目录下普通文件，逐项核对父目录且拒绝reparse point；未递归删除整个目录，未触碰工作区外目标或用户的其他未提交代码。
+
+**验证**
+
+- 全仓引用检索与运行/构建目录定向检索确认依赖仅在文档/历史记录及忽略规则；Python校验剩余6个文件与预期相符、文档4个evidence链接全部存在、运行/构建/正式测试目录无引用，`git diff --check`通过。本次不运行Rust/Tauri编译，文档/证据删除不新增功能测试。
+- 本轮仅改文档与证据文件，前面尚未提交的ToneMap实现完整保留；未提交/推送，未安装或重启应用。
+
+### 2026-11-15：用户删除剩余截图后的文档同步与提交整理
+
+**亮点**
+
+- 用户手动删除 `TONE_LCE_HORIZONTAL_*` 和 `TONE_LCE_TARGET_GROUP_*` 四张未跟踪截图后，更新功能文档与清理说明，删除最后4个图片链接；当前evidence目录只保留已忽略的REA JSON与反汇编文本，无PNG或脚本。
+- 两轮累计清理22文件/1,514,116字节；截图删除不改变ToneMap实现和正式测试。历史账本中“曾生成/保留截图”的条目是当时的验证记录，以本条当前状态为准，不再将旧截图列为现存证据。
+- 按用户要求用中文提交说明整理未提交的ToneMap优化与文档/证据清理，按实现和维护两个范围分别提交，后续推送至origin/main。
+
+**痛点**
+
+- 四张截图未进入Git历史，手动删除后不会在git status中出现D记录，只能通过文件清单和文档链接检查发现缺失；原文继续链接会造成断链。
+
+**闭坑**
+
+- 清理说明不再承诺保留任何PNG；不将本地忽略的REA文件加入提交，不提交临时浏览器工具，正式新增组件和Rust测试文件须随功能改动一起提交。
+- 截图不存在不影响之前已执行验证的事实，也不能将历史浏览器验证描述为本轮重新桌面验收。分割比例的Rust兼容测试仍交给CI，禁止本地编译。
+
+**验证**
+
+- 提交前Python检查目录只剩预期两份本地分析文件，docs中的evidence图片链接为0；`npm run typecheck`、`npm run sync:test`（121项）与新增Rust测试文件 `rustfmt --check --edition 2021` 均通过，核对Git新增/删除清单与 `git diff --check` 通过。前节Node22与浏览器验证保留为此前实际结果，本轮未重做桌面验收。
+- 未重新安装或启动Tauri应用、未进行新的原生窗口截图验收。提交与推送结果以本轮交付说明和实际Git历史为准。
