@@ -16,6 +16,7 @@
 
 - 发布前确认GitHub最新正式版仍为v0.2.16，远端无v0.2.18标签或Release；历史main CI存在真实Rust测试失败，先读取日志并修正断言，不能以本地前端检查代替云端Rust验收。
 - 发布脚本测试会在用户临时目录启动Node子进程，沙箱内运行因用户目录lstat被拒而报EPERM；经授权在沙箱外重跑同一组测试通过，不修改测试实现绕过路径限制。
+- 同次推送触发独立插件工作流 `43795170024`：`build-plugin` 成功，`publish-plugin` 因重建的0.1.5包与已公开资产字节不同被不可变版本保护拒绝。已读取发布job日志确认错误为“Published plugin versions are immutable. Bump the plugin version before publishing changed bytes.”；原0.1.5 Release与四项资产保留，未覆盖旧包、未修改插件版本。该失败与LUXE正式应用发布分离。
 
 **闭坑**
 
@@ -26,7 +27,10 @@
 
 - Node `22.16.0` 执行 `npm run version:sync / version:check` 通过，`releaseNotesFor('0.2.18')` 正常生成与更新日志一致的中文说明；`npm run typecheck`、受影响Rust测试文件 `rustfmt --check --edition 2021` 通过。
 - Node22合并执行 release:test、sync:test、plugin:test 对应10个脚本，166项通过；没有本地Cargo/Tauri编译。提交前核对版本差异只影响版本字段，`git diff --check`通过。
-- 本记录写入时，Rust修正的CI运行 `43794188249` 已通过版本检查、全部Node脚本、前端打包和 `cargo test --locked --manifest-path src-tauri/Cargo.toml`，正在上传缓存收尾；正式版本工作流尚未触发。后续tag推送、CI及公开Release结果以实际GitHub状态和本轮交付为准。未进行Windows安装/升级或桌面截图验收。
+- `75da43c` 的CI运行 `43794188249` 完整成功后，以发布提交 `e339a62f7c9255276391e6a6c28412db51610e44` 原子推送main与annotated tag `v0.2.18`。对应主CI `43795169810` 和正式发布 `43795169562` 均成功，包含云端前端打包与Rust测试；公开Release于 `2026-11-16T03:05:27Z` 发布，非draft、非prerelease，GitHub latest为v0.2.18。
+- 公开资产恰为 `LUXE_0.2.18_x64-setup.exe`（5,951,609字节）、`.exe.sig`、`LUXE_0.2.18_x64_zh-CN.msi`（10,792,960字节）、`latest.json` 与 `SHA256SUMS.txt`。独立流式下载并计算四项业务资产SHA256，全部匹配校验文件；NSIS为 `5abf3dac9ebd5f43784e23eff1f626f9c99859eb1815ad72456e2d2f9e9036b8`，MSI为 `a4cafdbec603f8035ea3f6e9c84778ca5a5b96d7329eb53f9114b9011cefc122`。
+- 校验latest.json版本为0.2.18、平台为windows-x86_64、签名字符串与公开.sig文件一致、notes与Release正文一致、下载URL指向该tag的代理NSIS。另实际请求应用配置中的 `https://gh-proxy.com/https://github.com/diamond-cz/luxe-tauri/releases/latest/download/latest.json`，返回0.2.18及正确代理下载地址；未将签名字符串一致性检查描述为本地密码学验签。
+- 最后以独立文档提交记录上述实际结果，不移动或重写已公开的v0.2.18标签。未进行Windows安装/升级或桌面截图验收，未在本地编译Rust/Tauri。
 
 ### 2026-11-16：发布前纠正旧 EXIF 合并测试的扁平字段断言
 
