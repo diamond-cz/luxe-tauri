@@ -1193,10 +1193,6 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, "AE_TAG_FACE_PROB"),
     [tomlData],
   );
-  const faceNormalTargetValue = useMemo(
-    () => readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
-    [tomlData],
-  );
   const normalTargetFormulaSource = useMemo(() => readNormalTargetFormulaSource(tomlData), [tomlData]);
   const faceFbtOeSysValue = useMemo(
     () => readTomlValue(tomlData, FACE_FBT_OE_SYS_KEY),
@@ -2380,7 +2376,6 @@ export function ChartMapMode({
                 chart_face_flt_exif_use_parameter_fdsz_ra: !visual.chart_face_flt_exif_use_parameter_fdsz_ra,
               })}
               nsProbValue={nsProbValue}
-              normalTargetValue={faceNormalTargetValue}
               aeTargetValue={readTomlValue(tomlData, FACE_AE_TARGET_KEY)}
               cwrLowBoundValue={readTomlValue(tomlData, FACE_CWR_LOW_BOUND_KEY)}
               cwrHighBoundValue={readTomlValue(tomlData, FACE_CWR_HIGH_BOUND_KEY)}
@@ -3097,7 +3092,8 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
       exifCwrLowBound: value(FACE_CWR_LOW_BOUND_KEY),
       exifCwrHighBound: value(FACE_CWR_HIGH_BOUND_KEY),
       nsProb: value(NS_PROB_KEY),
-      normalTarget: value(FACE_NORMAL_TARGET_KEY),
+      exifNormalTarget: normalExif,
+      parameterNormalTarget: normalCalculated,
     };
     const face = calculateFaceTargetMetrics(faceSource, {
       ...common,
@@ -6542,7 +6538,8 @@ interface FaceTargetInputs {
   faceStsSize: number;
   faceStsLoc: number;
   nsProb: number;
-  normalTarget: number;
+  exifNormalTarget: number;
+  parameterNormalTarget: number;
   aeTarget: number;
   exifCwrLowBound: number;
   exifCwrHighBound: number;
@@ -6556,7 +6553,7 @@ interface FaceTargetInputs {
 }
 
 function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTargetInputs) {
-  const { bv, dr, cwv, fdy, nsProb, normalTarget, oeSys, exifThreshold, fltMode } = input;
+  const { bv, dr, cwv, fdy, nsProb, exifNormalTarget, parameterNormalTarget, oeSys, exifThreshold, fltMode } = input;
   const fddrRa = selectFaceFddrRa(source?.fddrRa ?? null, input.fddr).result;
   const faceWeight = fltMode
     ? selectFaceFddrRa(source?.fdszRa ?? null, input.fdsz).result
@@ -6584,14 +6581,14 @@ function calculateFaceTargetMetrics(source: FaceFbtSource | null, input: FaceTar
   const faceTarget = Number.isFinite(cwv) && Number.isFinite(thresholdValue) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (thresholdValue / fdy)
     : NaN;
-  const rawBackSceneTarget = Number.isFinite(faceTarget) && Number.isFinite(faceWeight) && Number.isFinite(normalTarget)
-    ? (faceTarget * faceWeight + normalTarget * (1024 - faceWeight)) / 1024
+  const rawBackSceneTarget = Number.isFinite(faceTarget) && Number.isFinite(faceWeight) && Number.isFinite(parameterNormalTarget)
+    ? (faceTarget * faceWeight + parameterNormalTarget * (1024 - faceWeight)) / 1024
     : NaN;
   const exifTarget = Number.isFinite(cwv) && Number.isFinite(exifThreshold) && Number.isFinite(fdy) && fdy !== 0
     ? cwv * (exifThreshold / fdy)
     : NaN;
-  const rawExifBackSceneTarget = Number.isFinite(exifTarget) && Number.isFinite(exifWeight) && Number.isFinite(normalTarget)
-    ? (exifTarget * exifWeight + normalTarget * (1024 - exifWeight)) / 1024
+  const rawExifBackSceneTarget = Number.isFinite(exifTarget) && Number.isFinite(exifWeight) && Number.isFinite(exifNormalTarget)
+    ? (exifTarget * exifWeight + exifNormalTarget * (1024 - exifWeight)) / 1024
     : NaN;
   const lowLimit = input.aeTarget * (source?.cwrBounds?.low ?? NaN) / 1024;
   const highLimit = input.aeTarget * (source?.cwrBounds?.high ?? NaN) / 1024;
@@ -6697,7 +6694,6 @@ function FaceTabContent({
   useParameterFdszRaForExif,
   onToggleFdszRaExifSource,
   nsProbValue,
-  normalTargetValue,
   aeTargetValue,
   cwrLowBoundValue,
   cwrHighBoundValue,
@@ -6744,7 +6740,6 @@ function FaceTabContent({
   useParameterFdszRaForExif: boolean;
   onToggleFdszRaExifSource: () => void;
   nsProbValue: string | null;
-  normalTargetValue: string | null;
   aeTargetValue: string | null;
   cwrLowBoundValue: string | null;
   cwrHighBoundValue: string | null;
@@ -6814,7 +6809,10 @@ function FaceTabContent({
   const fdy = parseFiniteNumber(fdyValue);
   const faceProb = parseFiniteNumber(faceProbValue);
   const nsProb = parseFiniteNumber(nsProbValue);
-  const normalTarget = parseFiniteNumber(normalTargetValue);
+  const normalFormula = calculateNormalTargetFormula(normalTargetSource);
+  const parameterNormalFormula = calculateParameterNormalTargetFormula(normalTargetParameterValues);
+  const exifNormalTarget = normalFormula.finalTarget;
+  const parameterNormalTarget = parameterNormalFormula.finalTarget;
   const aeTarget = parseFiniteNumber(aeTargetValue);
   const exifCwrLowBound = parseFiniteNumber(cwrLowBoundValue);
   const exifCwrHighBound = parseFiniteNumber(cwrHighBoundValue);
@@ -6827,7 +6825,7 @@ function FaceTabContent({
     thresholdValue, faceTarget, backSceneTarget, exifTarget, exifBackSceneTarget,
     rawBackSceneTarget, rawExifBackSceneTarget, lowLimit, highLimit, exifLowLimit, exifHighLimit,
   } = calculateFaceTargetMetrics(currentSource, {
-    bv, dr, cwv, fdy, faceProb, nsProb, normalTarget, oeSys, aeTarget, exifCwrLowBound, exifCwrHighBound,
+    bv, dr, cwv, fdy, faceProb, nsProb, exifNormalTarget, parameterNormalTarget, oeSys, aeTarget, exifCwrLowBound, exifCwrHighBound,
     faceStsSize: parseFiniteNumber(faceStsSizeValue),
     faceStsLoc: parseFiniteNumber(faceStsLocValue),
     fddr: parseFiniteNumber(fddrValue),
@@ -6837,8 +6835,6 @@ function FaceTabContent({
     exifThreshold, fltMode,
   });
   const exifFaceTarget = exifTarget;
-  const normalFormula = calculateNormalTargetFormula(normalTargetSource);
-  const parameterNormalFormula = calculateParameterNormalTargetFormula(normalTargetParameterValues);
   const faceProbHeatmapPoints = useMemo<FaceAxisHeatmapPoint[]>(
     () => imageHeatmapPoints.flatMap(({ path, faceProb: value }) => Number.isFinite(value) ? [{ path, value }] : []),
     [imageHeatmapPoints],
@@ -7014,20 +7010,20 @@ function FaceTabContent({
         </div>
           {linkTargetFormulaExpanded && <div id={linkTargetFormulaId} style={faceFormulaRowStyle}>
             {fltMode ? <FaceLinkFormula
-              exif={{ faceTarget: exifTarget, weight: exifWeight, normalTarget, aeTarget,
+              exif={{ faceTarget: exifTarget, weight: exifWeight, normalTarget: exifNormalTarget, aeTarget,
                 faceTargetSource: "CWV(EXIF) × AE_TAG_FLT_TARGET(EXIF) / AE_TAG_FLT_FDY(EXIF)",
                 lowBound: exifCwrLowBound, highBound: exifCwrHighBound,
                 rawTarget: rawExifBackSceneTarget, lowLimit: exifLowLimit, highLimit: exifHighLimit, result: exifBackSceneTarget,
                 lowBoundSource: `EXIF · ${FACE_CWR_LOW_BOUND_KEY}`, highBoundSource: `EXIF · ${FACE_CWR_HIGH_BOUND_KEY}`,
-                normalTargetSource: `EXIF · ${FACE_NORMAL_TARGET_KEY}`,
+                normalTargetSource: "Normal Target · Cal_final_tar(EXIF)",
                 weightSource: useParameterFdszRaForExif ? FACE_FLT_FDSZ_SOURCE : `EXIF · ${FACE_FLT_FDSZ_RA_KEY}`,
               }}
-              parameter={{ faceTarget, weight: faceWeight, normalTarget, aeTarget,
+              parameter={{ faceTarget, weight: faceWeight, normalTarget: parameterNormalTarget, aeTarget,
                 faceTargetSource: "CWV(EXIF) × FLT_TH(AE.cpp) / AE_TAG_FLT_FDY(EXIF)",
                 lowBound: currentSource?.cwrBounds?.low ?? NaN, highBound: currentSource?.cwrBounds?.high ?? NaN,
                 rawTarget: rawBackSceneTarget, lowLimit, highLimit, result: backSceneTarget,
                 lowBoundSource: `AE.cpp · ${FACE_CWR_LOW_BOUND_PATH}`, highBoundSource: `AE.cpp · ${FACE_CWR_HIGH_BOUND_PATH}`,
-                normalTargetSource: `EXIF · ${FACE_NORMAL_TARGET_KEY}`, weightSource: FACE_FLT_FDSZ_SOURCE,
+                normalTargetSource: "Normal Target · Cal_final_tar(AE.cpp)", weightSource: FACE_FLT_FDSZ_SOURCE,
               }}
               lowBoundPath={FACE_CWR_LOW_BOUND_PATH} highBoundPath={FACE_CWR_HIGH_BOUND_PATH}
               onJumpToLow={onSourceJump && lowBoundField && lowBoundField.line > 0
@@ -7036,9 +7032,11 @@ function FaceTabContent({
                 ? () => jumpToFaceCwrBoundSource(onSourceJump, currentSource, FACE_CWR_HIGH_BOUND_PATH, sourceDraftTextRef.current) : undefined}
             /> : <BackSceneTargetFormula
               exifTarget={exifTarget} parameterTarget={faceTarget}
-              exifWeight={exifWeight} parameterWeight={faceWeight} normalTarget={normalTarget}
+              exifWeight={exifWeight} parameterWeight={faceWeight}
+              exifNormalTarget={exifNormalTarget} parameterNormalTarget={parameterNormalTarget}
               exifResult={rawExifBackSceneTarget} parameterResult={rawBackSceneTarget}
-              normalTargetSource={`EXIF · ${FACE_NORMAL_TARGET_KEY}`} />}
+              exifNormalTargetSource="Normal Target · Cal_final_tar(EXIF)"
+              parameterNormalTargetSource="Normal Target · Cal_final_tar(AE.cpp)" />}
           </div>}
           <FaceDerivedTargetCard
             title={fltMode ? "FLT Target" : "FBT Target"}

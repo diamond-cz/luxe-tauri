@@ -4,6 +4,29 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-16：纠正 Back Scene / Face Link 的 Normal 输入来源
+
+**亮点**
+
+- `ChartMapMode.tsx` 的 `FaceTargetInputs` 改为必传 `exifNormalTarget / parameterNormalTarget`，FaceTabContent 和目录计算器均分别传入 Normal 卡片的 EXIF/参数 `Cal_final_tar`。两个下游 raw、Face Link 钳制及列表 BackTar/FLinkTar 共用相同数值接线，不新增计算副本或 IPC。
+- `DerivedTargetFormula.tsx` 的 Back Scene 摘要、代入和来源对照拆分 Normal 两侧值；Face Link 沿用现有组件的两套 FormulaValues，在调用方纠正取值与来源标记。维护文档记录数据契约和列表应用范围。
+
+**痛点**
+
+- 上轮仅完成 Normal 自身及 Normal_old/new 的计算，下游仍把图片 `AE_TAG_FACE_20_NORMAL_TARGET` 同时送入 EXIF 和参数两侧，造成用户截图 Normal 卡片814/809而 Back Scene 两行同为814；目录计算器同样错误，因此 HS 编辑未完整传导到 BackTar_new/FLinkTar_new。
+- 原 BackSceneTargetFormula 的接口只接受一个 Normal 数值，渲染层无法表达两条来源；仅修正显示文字或共享计算函数而不改调用方，会继续保留错误结果。
+
+**闭坑**
+
+- 下游必须与 Normal 卡片对应行的最终值一致，禁止使用单个记录标量覆盖两条链路；参数结果缺失时显示不可用，不回退借用 EXIF。所有取整只用于展示，不能把Normal摘要整数回灌下游。
+- Face Link 保持先混合、后按各自上下限钳制；raw变化而final停留在边界是正常现象。沿用 FDSZ_RA 来源开关及应用当前/全部范围，不因本次接线修改已有 EXIF/参数权重选择。
+- 回归应执行 FaceTabContent 的实际声明与 JSX 传参，而非只给共享计算器传入理想值。图片列表需同时核对 Normal、BackTar、FLinkTar 三组old/new别名，参数修改不能污染old链路。
+
+**验证**
+
+- Node `22.16.0` 执行 `node --test --test-reporter=spec scripts/face-link-target.test.mjs`：44项通过，本次新增5项，覆盖814/809分离、实际调用与摘要/来源、raw/钳制、缺失隔离、HS编辑到目录结果和三组别名。
+- 同一Node22执行 `sync:test` 对应六脚本：136项通过；`npm run typecheck`、`git diff --check` 通过。本轮只改前端、测试和既有维护文档，未运行本地 Rust/Tauri 编译或真实Windows桌面验收；未修改hiviewer_rs，未提交/推送。
+
 ### 2026-11-16：补齐 Normal Target 的 HS 明细、来源和参数联动
 
 **亮点**

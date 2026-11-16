@@ -140,7 +140,7 @@ const source = {
 };
 const inputs = {
   bv: 0, dr: 0, cwv: 1000, fdy: 1024, faceProb: 512, faceStsSize: 0, faceStsLoc: 0,
-  nsProb: 0, normalTarget: 100, aeTarget: 1024, oeSys: 1024, fddr: 0, fdsz: 0,
+  nsProb: 0, exifNormalTarget: 100, parameterNormalTarget: 100, aeTarget: 1024, oeSys: 1024, fddr: 0, fdsz: 0,
   exifFdszRa: 512, useParameterFdszRaForExif: false, exifThreshold: 1024, fltMode: true,
   exifCwrLowBound: 200, exifCwrHighBound: 600,
 };
@@ -158,7 +158,7 @@ test('Face Link card computes independent EXIF/AE.cpp limits after weighting', (
 });
 
 test('Face Link limits use AE_TAG_AE_TARGET, not NormalTarget, and keep fractional precision', () => {
-  const metrics = chart.calculateFaceTargetMetrics({ ...source, cwrBounds: { low: 90, high: 91 } }, { ...inputs, aeTarget: 752, normalTarget: 521 });
+  const metrics = chart.calculateFaceTargetMetrics({ ...source, cwrBounds: { low: 90, high: 91 } }, { ...inputs, aeTarget: 752, exifNormalTarget: 521, parameterNormalTarget: 521 });
   assert.equal(metrics.lowLimit, 752 * 90 / 1024);
   assert.equal(metrics.highLimit, 752 * 91 / 1024);
   assert.equal(metrics.backSceneTarget, metrics.highLimit);
@@ -216,7 +216,11 @@ test('parameter source loads only scalar .19/.20 and includes their fields in th
 test('directory calculator preserves EXIF clamping without a parameter file', async () => {
   const calculate = await chart.loadFaceLinkTargetCalculator(null);
   const data = detailData({ [schema.FLT.CWV]: '1000', AE_TAG_FLT_TARGET: '1024', AE_TAG_FLT_FDSZ_RA: '512' });
-  data[chart.FACE_NORMAL_TARGET_KEY] = '100';
+  Object.assign(data, {
+    AE_TAG_MTV6_MAINT_TARGET: '100', AE_TAG_HSV6_MAINT_WET: '1024',
+    AE_TAG_HSV6_HS_WET: '0', AE_TAG_NS_PROB: '0',
+  });
+  data[chart.FACE_NORMAL_TARGET_KEY] = '999'; // Must not bypass the Normal card's calculation.
   const result = calculate(data, 'AE_TAG_REALBVX1000');
   assert.equal(result.faceLink.exif, 550);
   data.AE_TAG_FACE_HIGH_BOUND = '400';
@@ -263,20 +267,21 @@ const visibleText = node => node == null || typeof node === 'boolean' ? '' : Arr
   : typeof node === 'object' ? visibleText(node.props?.children) : String(node);
 const formulaCards = tree => nodesOfType(tree, 'FormulaHeader')[0].props.details.map(section => section.props.children[1]);
 
-function chartFormulaProps(extra = {}) {
+function chartFormulaProps(extra = {}, component = 'FaceLinkFormula') {
   // Evaluate the actual callsite props too, so row order and jump callbacks
   // cannot drift from FaceTabContent while the standalone summary still passes.
   const parsed = ts.createSourceFile(chartPath, readFileSync(new URL(chartPath, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let invocation;
   const visit = node => {
-    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === 'FaceLinkFormula') invocation = node;
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsed) === component) invocation = node;
     ts.forEachChild(node, visit);
   };
   visit(parsed); assert.ok(invocation);
   const globals = {
     ...chart.calculateFaceTargetMetrics(source, inputs),
     ...loadSelected(chartPath, ['FACE_CWR_LOW_BOUND_KEY', 'FACE_CWR_HIGH_BOUND_KEY', 'FACE_CWR_LOW_BOUND_PATH', 'FACE_CWR_HIGH_BOUND_PATH', 'FACE_FLT_FDSZ_RA_KEY', 'FACE_FLT_FDSZ_SOURCE']),
-    FaceLinkFormula: 'FaceLinkFormula', aeTarget: inputs.aeTarget, normalTarget: inputs.normalTarget,
+    [component]: component, aeTarget: inputs.aeTarget,
+    exifNormalTarget: inputs.exifNormalTarget, parameterNormalTarget: inputs.parameterNormalTarget,
     exifCwrLowBound: inputs.exifCwrLowBound, exifCwrHighBound: inputs.exifCwrHighBound,
     currentSource: source, useParameterFdszRaForExif: false, sourceDraftTextRef: { current: '' },
     lowBoundField: null, highBoundField: null, onSourceJump: undefined, ...chart, ...extra,
@@ -585,7 +590,7 @@ const fixtureData = {
 const areaSource = { bvValues: [0, 10], thdValues: [40, 40], flatSettings: { flatThd: { value: 40 } }, flatProb: { x0: 0, x1: 10, y0: 0, y1: 0 } };
 const hsPipeline = loadSelected(chartPath, ['loadFaceLinkTargetCalculator', 'loadHsWeightSource', 'loadHsBrightAreaSource', 'loadHsMiddleAreaSource', 'loadHsDarkAreaSource'], {
   cppGetFieldsAtPath: async (path, prefix) => hsFixture(path === 'base' ? '' : path).groups.get(prefix) ?? [],
-  loadFaceFbtSource: async () => null,
+  loadFaceFbtSource: async () => ({ ...source, cwrBounds: { low: 0, high: 5000 } }),
   loadMainTargetThreshold: async () => ['BV', 'Base', 'Exp'].map((label, i) => ({ label, values: [String([0, 50, 0][i])] })),
   loadMainTargetMidCurve: async () => null,
   loadNsLowBndBounds: async () => ({ low: 0, limit: 1000 }),
@@ -696,4 +701,127 @@ test('Normal formula comparison retains six parameter paths and both EXIF aggreg
   assert.equal(tree.props.sources.find(entry => entry.name === 'HS_Wt').exif.source, 'EXIF · AE_TAG_HSV6_HS_WET');
   const { FACE_LINK_TARGET_IMAGE_KEYS } = loadSelected('../src/views/mtk/isp6s/TablePane/TablePane.tsx', ['FACE_LINK_TARGET_IMAGE_KEYS']);
   for (const key of ['AE_TAG_HSV6_HS_TARGET', 'AE_TAG_HSV6_HS_WET', normal.MAIN_TARGET_CWV_KEY]) assert.ok(FACE_LINK_TARGET_IMAGE_KEYS.includes(key), key);
+});
+
+// Execute the actual FaceTabContent declarations before evaluating its JSX props.
+// This catches a caller wired to the recorded Normal value despite correct helpers.
+function faceTabNormalBindings(metricInputs) {
+  const parsed = ts.createSourceFile(chartPath, readFileSync(new URL(chartPath, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const component = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'FaceTabContent');
+  assert.ok(component?.body);
+  const names = new Set(['normalFormula', 'parameterNormalFormula', 'exifNormalTarget', 'parameterNormalTarget']);
+  const statements = component.body.statements.filter(node => ts.isVariableStatement(node)
+    && node.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name)
+      ? names.has(declaration.name.text)
+      : declaration.name.elements.some(element => element.name?.getText(parsed) === 'rawBackSceneTarget')));
+  assert.equal(statements.length, 5);
+  const exports = statements.flatMap(statement => statement.declarationList.declarations.flatMap(declaration =>
+    ts.isIdentifier(declaration.name) ? [declaration.name.text] : declaration.name.elements.map(element => element.name.getText(parsed))));
+  const globals = {
+    ...normal, ...chart, ...loadSelected(chartPath, ['parseFiniteNumber']), ...metricInputs,
+    currentSource: source,
+    normalTargetSource: normal.readNormalTargetFormulaSource({
+      AE_TAG_MTV6_MAINT_TARGET: '814', AE_TAG_HSV6_MAINT_WET: '1024', AE_TAG_HSV6_HS_WET: '0', AE_TAG_NS_PROB: '0',
+    }),
+    normalTargetParameterValues: { mainTarget: 809, mainWeight: 1024, hsTargets: [NaN, NaN, NaN], hsWeights: [0, 0, 0], nsTarget: NaN, nsProb: 0 },
+    faceStsSizeValue: String(metricInputs.faceStsSize), faceStsLocValue: String(metricInputs.faceStsLoc),
+    fddrValue: String(metricInputs.fddr), fdszValue: String(metricInputs.fdsz), fdszRaValue: String(metricInputs.exifFdszRa),
+  };
+  const code = statements.map(statement => statement.getText(parsed)).join('\n') + `\nmodule.exports = { ${exports.join(', ')} };`;
+  const { outputText } = ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
+  const module = { exports: {} };
+  for (const name of exports) delete globals[name];
+  new Function('module', ...Object.keys(globals), outputText)(module, ...Object.values(globals));
+  return module.exports;
+}
+
+test('Back Scene caller, summary and derivation use Normal 814 from EXIF and 809 from parameters', () => {
+  const bindings = faceTabNormalBindings({ ...inputs, fltMode: false });
+  assert.equal(bindings.exifNormalTarget, 814);
+  assert.equal(bindings.parameterNormalTarget, 809);
+  close(bindings.rawExifBackSceneTarget, (1000 * 512 + 814 * 512) / 1024);
+  close(bindings.rawBackSceneTarget, (1000 * 512 + 809 * 512) / 1024);
+  const props = chartFormulaProps(bindings, 'BackSceneTargetFormula');
+  const { BackSceneTargetFormula } = loadSelected('../src/views/mtk/isp6s/ImagePane/DerivedTargetFormula.tsx', ['BackSceneTargetFormula'], {
+    useTranslation: () => ({ t }), DerivedTargetFormula: 'DerivedTargetFormula',
+  });
+  const tree = BackSceneTargetFormula(props);
+  const [exifRow, parameterRow] = tree.props.rows;
+  assert.equal(exifRow.values[2], 814);
+  assert.equal(parameterRow.values[2], 809);
+  assert.match(exifRow.steps[0].substitution, /814\.0/);
+  assert.match(parameterRow.steps[0].substitution, /809\.0/);
+  const entry = tree.props.sources.find(entry => entry.name === 'Normal_Target');
+  assert.match(entry.exif.source, /Cal_final_tar\(EXIF\)/);
+  assert.match(entry.parameter.source, /Cal_final_tar\(AE.cpp\)/);
+});
+
+test('Face Link caller uses separate Normal results in raw, clamp and source details', () => {
+  const bindings = faceTabNormalBindings(inputs);
+  const props = chartFormulaProps(bindings);
+  assert.equal(props.exif.normalTarget, bindings.normalFormula.finalTarget);
+  assert.equal(props.parameter.normalTarget, bindings.parameterNormalFormula.finalTarget);
+  close(props.exif.rawTarget, (1000 + 814) / 2);
+  close(props.parameter.rawTarget, (1000 + 809) / 2);
+  assert.equal(props.exif.result, 600, 'existing EXIF clamp still applies after mixing');
+  assert.equal(props.parameter.result, 500, 'existing parameter clamp still applies after mixing');
+  const tree = FaceLinkFormula(props);
+  const entry = nodesOfType(tree, 'FormulaHeader')[0].props.sources.find(entry => entry.name === 'Normal_Target');
+  assert.equal(entry.exif.value, 814);
+  assert.equal(entry.parameter.value, 809);
+  assert.match(entry.exif.source, /Cal_final_tar\(EXIF\)/);
+  assert.match(entry.parameter.source, /Cal_final_tar\(AE.cpp\)/);
+  assert.match(visibleText(formulaCards(tree)[0]), /814\.0/);
+  assert.match(visibleText(formulaCards(tree)[1]), /809\.0/);
+});
+
+for (const fltMode of [false, true]) {
+  test(`${fltMode ? 'Face Link' : 'Back Scene'} Normal inputs stay independent and missing parameters never borrow EXIF`, () => {
+    const wide = { ...source, cwrBounds: { low: 0, high: 5000 } };
+    const data = { ...inputs, fltMode, exifNormalTarget: 814, parameterNormalTarget: 809 };
+    const baseline = chart.calculateFaceTargetMetrics(wide, data);
+    const changed = chart.calculateFaceTargetMetrics(wide, { ...data, parameterNormalTarget: 700 });
+    assert.equal(changed.exifBackSceneTarget, baseline.exifBackSceneTarget);
+    close(changed.backSceneTarget - baseline.backSceneTarget, (700 - 809) / 2);
+    const unavailable = chart.calculateFaceTargetMetrics(wide, { ...data, parameterNormalTarget: NaN });
+    assert.ok(Number.isNaN(unavailable.rawBackSceneTarget));
+    assert.ok(Number.isNaN(unavailable.backSceneTarget));
+    assert.equal(unavailable.exifBackSceneTarget, baseline.exifBackSceneTarget);
+    const noExif = chart.calculateFaceTargetMetrics(wide, { ...data, exifNormalTarget: NaN });
+    assert.ok(Number.isNaN(noExif.exifBackSceneTarget));
+    assert.equal(noExif.backSceneTarget, baseline.backSceneTarget);
+  });
+}
+
+test('applied HS edits propagate through Normal_new to BackTar_new/FLinkTar_new in the directory calculator', async () => {
+  const data = {
+    ...fixtureData,
+    AE_TAG_FACE_20_NORMAL_TARGET: '9999', // Recorded legacy scalar must not short-circuit the Normal card.
+    AE_TAG_FBT_DR: '0', AE_TAG_FLT_DR: '0', AE_TAG_FBT_FDY: '1024', AE_TAG_FLT_FDY: '1024',
+    AE_TAG_FBT_OE_SYS: '1024', AE_TAG_FLT_OE_SYS: '1024', AE_TAG_FBT_FDDR: '0', AE_TAG_FLT_FDDR: '0', AE_TAG_FLT_FDSZ: '0',
+    AE_TAG_FBT_TARGET: '1024', AE_TAG_FLT_TARGET: '1024', AE_TAG_FACE_PROB: '512', AE_TAG_FLT_FDSZ_RA: '512',
+    AE_TAG_FACE_STS_SIZE: '0', AE_TAG_FACE_STS_LOC: '0', AE_TAG_AE_TARGET: '1024',
+    AE_TAG_FACE_LOW_BOUND: '0', AE_TAG_FACE_HIGH_BOUND: '5000',
+  };
+  const before = (await hsPipeline.loadFaceLinkTargetCalculator('base'))(data, 'AE_TAG_REALBVX1000');
+  const after = (await hsPipeline.loadFaceLinkTargetCalculator('bright'))(data, 'AE_TAG_REALBVX1000');
+  assert.notEqual(before.normal.calculated, after.normal.calculated);
+  for (const result of [before, after]) {
+    const faceTarget = Number(data[normal.MAIN_TARGET_CWV_KEY]);
+    close(result.backScene.exif, (faceTarget + result.normal.exif) / 2);
+    close(result.backScene.calculated, (faceTarget + result.normal.calculated) / 2);
+    close(result.faceLink.exif, result.backScene.exif);
+    close(result.faceLink.calculated, result.backScene.calculated);
+  }
+  assert.equal(before.backScene.exif, after.backScene.exif);
+  assert.equal(before.faceLink.exif, after.faceLink.exif);
+  close(after.backScene.calculated - before.backScene.calculated, (after.normal.calculated - before.normal.calculated) / 2);
+  close(after.faceLink.calculated - before.faceLink.calculated, (after.normal.calculated - before.normal.calculated) / 2);
+  const metrics = loadSelected('../src/views/mtk/isp6s/TablePane/imageTableMetrics.ts', ['deltaEv', 'formatDeltaEv']);
+  const { imageFaceTargetValues, imageTableFormulaAlias } = loadSelected('../src/views/mtk/isp6s/TablePane/TablePane.tsx', ['imageFaceTargetValues', 'imageTableFormulaAlias'], metrics);
+  for (const [key, pair] of [['Normal', 'normal'], ['BackTar', 'backScene'], ['FLinkTar', 'faceLink']]) {
+    const values = imageFaceTargetValues(after);
+    assert.equal(imageTableFormulaAlias(`${key}_old`, values, false), String(Math.round(after[pair].exif)));
+    assert.equal(imageTableFormulaAlias(`${key}_new`, values, false), String(Math.round(after[pair].calculated)));
+  }
 });

@@ -96,34 +96,36 @@ export function FaceTargetFormula({ title, cwv, fdy, exifThreshold, parameterThr
     ]} />;
 }
 
-export function BackSceneTargetFormula({ exifTarget, parameterTarget, exifWeight, parameterWeight, normalTarget, exifResult, parameterResult, normalTargetSource }: {
+export function BackSceneTargetFormula({ exifTarget, parameterTarget, exifWeight, parameterWeight, exifNormalTarget, parameterNormalTarget, exifResult, parameterResult, exifNormalTargetSource, parameterNormalTargetSource }: {
   exifTarget: number;
   parameterTarget: number;
   exifWeight: number;
   parameterWeight: number;
-  normalTarget: number;
+  exifNormalTarget: number;
+  parameterNormalTarget: number;
   exifResult: number;
   parameterResult: number;
-  normalTargetSource: string;
+  exifNormalTargetSource: string;
+  parameterNormalTargetSource: string;
 }) {
   const { t } = useTranslation();
   const formula = "Back Scene Target = (FBT_Target × FaceProb + Normal_Target × (1024 − FaceProb)) / 1024";
-  const step = (target: number, weight: number, result: number): DetailStep => ({
+  const step = (target: number, weight: number, normalTarget: number, result: number): DetailStep => ({
     title: t("target_formula.calculation"), formula,
     substitution: `(${detailNumber(target)} × ${detailNumber(weight)} + ${detailNumber(normalTarget)} × (1024 − ${detailNumber(weight)})) / 1024`,
     result,
   });
   return <DerivedTargetFormula title="Back Scene Target" columns={["FBT_Target", "FaceProb", "Normal_Target"]}
     formulas={[formula]} rows={[
-      { key: "exif", values: [exifTarget, exifWeight, normalTarget, exifResult], steps: [step(exifTarget, exifWeight, exifResult)] },
-      { key: "parameter", values: [parameterTarget, parameterWeight, normalTarget, parameterResult], steps: [step(parameterTarget, parameterWeight, parameterResult)] },
+      { key: "exif", values: [exifTarget, exifWeight, exifNormalTarget, exifResult], steps: [step(exifTarget, exifWeight, exifNormalTarget, exifResult)] },
+      { key: "parameter", values: [parameterTarget, parameterWeight, parameterNormalTarget, parameterResult], steps: [step(parameterTarget, parameterWeight, parameterNormalTarget, parameterResult)] },
     ]} sources={[
       { name: "FBT_Target", exif: { value: exifTarget, source: "CWV(EXIF) × AE_TAG_FBT_TARGET(EXIF) / AE_TAG_FBT_FDY(EXIF)" },
         parameter: { value: parameterTarget, source: "CWV(EXIF) × FBT_TH(AE.cpp) / AE_TAG_FBT_FDY(EXIF)" } },
       { name: "FaceProb", exif: { value: exifWeight, source: "EXIF · AE_TAG_FACE_PROB" },
         parameter: { value: parameterWeight, source: t("target_formula.parameter_source", { name: "FaceProb" }) } },
-      { name: "Normal_Target", exif: { value: normalTarget, source: normalTargetSource },
-        parameter: { value: normalTarget, source: normalTargetSource } },
+      { name: "Normal_Target", exif: { value: exifNormalTarget, source: exifNormalTargetSource },
+        parameter: { value: parameterNormalTarget, source: parameterNormalTargetSource } },
     ]} />;
 }
 

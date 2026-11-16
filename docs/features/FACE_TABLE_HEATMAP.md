@@ -94,6 +94,29 @@ Cal_final_tar = Cal_mt+hs_tar × (1024 − NS_Prob) / 1024 + NS_Target × NS_Pro
 
 本轮在 Node `22.16.0` 执行 `sync:test` 对应六个脚本共131项通过，`npm run typecheck` 通过；未进行 Tauri 桌面切图、应用当前/全部或撤销的人工验收。建议在 Windows 产物中依次编辑三张 Area 表和 HS Weight，确认卡片的六个明细及聚合随之变化，再应用并核对 `Normal_new` 与卡片参数行最终值的整数显示一致，`Normal_old` 保持不变。
 
+### Back Scene / Face Link 的 Normal 来源接线
+
+两个下游卡片及图片列表的 `loadFaceLinkTargetCalculator` 必须消费 Normal Target 卡片的对应链路最终值。`FaceTargetInputs` 强制区分 `exifNormalTarget` 和 `parameterNormalTarget`，不再接受两条链路共享的单个 `normalTarget`：
+
+| 下游链路 | Normal_Target 来源 | 来源对照表标记 |
+| --- | --- | --- |
+| EXIF | `calculateNormalTargetFormula(...).finalTarget`，即 Normal 卡片 EXIF 行的 `Cal_final_tar` | `Normal Target · Cal_final_tar(EXIF)` |
+| 参数计算 | `calculateParameterNormalTargetFormula(...).finalTarget`，即 Normal 卡片参数行的 `Cal_final_tar` | `Normal Target · Cal_final_tar(AE.cpp)` |
+
+```text
+BackScene_EXIF = (FBT_EXIF × FaceProb_EXIF + Normal_EXIF × (1024 − FaceProb_EXIF)) / 1024
+BackScene_new  = (FBT_new  × FaceProb_new  + Normal_new  × (1024 − FaceProb_new))  / 1024
+FaceLink_raw_EXIF = (FLT_EXIF × FDSZ_RA_EXIF + Normal_EXIF × (1024 − FDSZ_RA_EXIF)) / 1024
+FaceLink_raw_new  = (FLT_new  × FDSZ_RA_new  + Normal_new  × (1024 − FDSZ_RA_new))  / 1024
+FaceLink_final = limit(FaceLink_raw, low, high)  // 每条链路使用自己的边界
+```
+
+此前下游两侧都直接读取 `AE_TAG_FACE_20_NORMAL_TARGET`，导致 Normal 卡片显示814/809，但 Back Scene 两行仍同为814；列表也未将新的 Normal 结果继续送入 BackTar/FLinkTar。现由 FaceTabContent 先计算 Normal 两个最终值，再传给共享计算器、摘要行、公式代入及来源对照。这里不再用该记录标量替代 Normal 卡片最终值；参数 Normal 缺失时不借用 EXIF 结果，EXIF Normal 无法推导时也不借用参数结果。计算沿用未舍入的浮点值，卡片及列表展示时才取整。
+
+图片列表应用当前/全部时，同一参数快照的 `Normal_new` 会继续影响 `BackTar_new / FLinkTar_new` 及既有差值/AEGain。只改参数不会改变三个 `_old` 结果；Face Link 若已被上下限钳制，raw 可变化而 final 保持边界值，这是正常行为。该接线不改变权重来源开关、上下限来源或应用范围。
+
+本次新增5项回归，执行真实 `FaceTabContent` 的 Normal 声明及共享计算器调用，再验证实际 JSX 传参、Back Scene 摘要/代入和 Face Link 来源/钳制；另验证缺失值隔离、HS 编辑经目录计算器传递至三个 `_new` 别名。Node `22.16.0` 专项44项、`sync:test` 对应六脚本136项及 `npm run typecheck` 通过。未运行本地 Tauri 编译，真实桌面切图、应用/撤销和截图仍待 Windows 产物验收。
+
 ## 性能约束
 
 - 图片 TOML 必须批量读取，不能在每个单元格内发起 IPC。
