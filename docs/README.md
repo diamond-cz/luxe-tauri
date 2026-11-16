@@ -4,7 +4,7 @@
 
 | 领域 | 文档 | 内容 |
 | --- | --- | --- |
-| 功能 | [Face 表格与热力图](features/FACE_TABLE_HEATMAP.md) | 表格数据、编辑、轴命中和热力图接入约定 |
+| 功能 | [Face 表格与热力图](features/FACE_TABLE_HEATMAP.md) | 表格编辑、热力图、Normal Target 的 HS 插值/EXIF来源与图片列表联动约定 |
 | 功能 | [ToneMap LCE Target](features/TONE_LCE_TARGET.md) | 顶部双图横向适配、TOML分割比例、公式栏与Target/LVTarget/Prob层级、计算链与验证 |
 | 工程 | [ToneTool LCE 曲线分析](engineering/TONE_TOOL_CURVE_ANALYSIS.md) | REA 归档证据、Python 3.5 静态字节码、P/O/Gain、对数上下界和项目实现边界 |
 | 功能 | [参数源码编码兼容](features/SOURCE_ENCODING.md) | AE/Tone/CA-LTM 的 GBK/Unicode 加载、统一坐标、保留编码保存及回归验证 |

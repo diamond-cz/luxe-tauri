@@ -491,3 +491,209 @@ test('image list requests all three extra fields needed by the shared clamp calc
   const { FACE_LINK_TARGET_IMAGE_KEYS } = loadSelected('../src/views/mtk/isp6s/TablePane/TablePane.tsx', ['FACE_LINK_TARGET_IMAGE_KEYS']);
   for (const key of ['AE_TAG_AE_TARGET', 'AE_TAG_FACE_LOW_BOUND', 'AE_TAG_FACE_HIGH_BOUND']) assert.ok(FACE_LINK_TARGET_IMAGE_KEYS.includes(key), key);
 });
+
+const normal = loadSelected(chartPath, [
+  'readNormalTargetFormulaSource', 'calculateNormalTargetFormula', 'calculateParameterNormalTargetFormula',
+  'previewHsWeightSourceFromDraft', 'previewHsAreaSourceFromDraft',
+  'interpolateHsWeightSource', 'interpolateHsAreaSource', 'hsWeightChannelIndex',
+  'HS_TARGET_INPUTS', 'HS_TARGET_WEIGHT_TONE_BY_ID', 'HS_BRIGHT_AREA_SOURCE_CONFIG',
+  'HS_MIDDLE_AREA_SOURCE_CONFIG', 'HS_DARK_AREA_SOURCE_CONFIG', 'HS_MIDDLE_CORR_B2M_KEY',
+  'HS_WEIGHT_BV_PATH', 'HS_WEIGHT_DR_B2D_PATH', 'HS_WEIGHT_MID_PATH', 'HS_WEIGHT_VALUE_PATH',
+  'MAIN_TARGET_CWV_KEY', 'MTWV_VALUE_KEY',
+]);
+const normalExifData = {
+  AE_TAG_MTV6_MAINT_TARGET: '90', AE_TAG_HSV6_MAINT_WET: '435',
+  AE_TAG_HSV6_BT_TARGET: '130', AE_TAG_HSV6_MT_TARGET: '230', AE_TAG_HSV6_DT_TARGET: '330',
+  AE_TAG_HSV6_BT_WET: '335', AE_TAG_HSV6_MT_WET: '235', AE_TAG_HSV6_DT_WET: '135',
+  AE_TAG_HSV6_HS_TARGET: '250', AE_TAG_HSV6_HS_WET: '705',
+  AE_TAG_NS_FINAL_TARGET: '400', AE_TAG_NS_PROB: '512',
+};
+const sourceValue = (formula, name) => formula.sourceValues.find(entry => entry.name === name);
+const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
+
+test('Normal Target keeps six HS details and uses the recorded aggregate tags exactly once', () => {
+  const formula = normal.calculateNormalTargetFormula(normal.readNormalTargetFormulaSource(normalExifData));
+  for (const [tone, target, weight] of [['BT', 130, 335], ['MT', 230, 235], ['DT', 330, 135]]) {
+    assert.equal(sourceValue(formula, `HS_${tone}_Tar`).value, target);
+    assert.equal(sourceValue(formula, `HS_${tone}_Wt`).value, weight);
+  }
+  assert.equal(sourceValue(formula, 'HS_Tar').source, 'EXIF · AE_TAG_HSV6_HS_TARGET');
+  assert.equal(sourceValue(formula, 'HS_Wt').source, 'EXIF · AE_TAG_HSV6_HS_WET');
+  close(formula.mtHsTarget, (90 * 435 + 250 * 705) / 1140);
+  close(formula.finalTarget, ((90 * 435 + 250 * 705) / 1140 + 400) / 2);
+  const older = { ...normalExifData };
+  delete older.AE_TAG_HSV6_HS_TARGET; delete older.AE_TAG_HSV6_HS_WET;
+  const fallback = normal.calculateNormalTargetFormula(normal.readNormalTargetFormulaSource(older));
+  close(fallback.mtHsTarget, (90 * 435 + 130 * 335 + 230 * 235 + 330 * 135) / 1140);
+  assert.match(sourceValue(fallback, 'HS_Tar').source, /HS_BT_Tar/);
+  assert.notEqual(fallback.finalTarget, formula.finalTarget);
+});
+
+test('Normal Target does not turn missing active inputs into zero, and ignores inactive branches', () => {
+  const input = { mainTarget: 100, mainWeight: 435, hsTargets: [130, 230, 330], hsWeights: [335, 235, 135], nsTarget: 400, nsProb: 512 };
+  const calculate = normal.calculateParameterNormalTargetFormula;
+  for (const changes of [{ mainTarget: NaN }, { mainWeight: NaN }, { hsTargets: [NaN, 230, 330] },
+    { hsWeights: [NaN, 235, 135] }, { hsWeights: [-1, 235, 135] }, { nsTarget: NaN }, { nsProb: NaN }, { nsProb: 1025 }]) {
+    assert.ok(Number.isNaN(calculate({ ...input, ...changes }).finalTarget));
+  }
+  assert.equal(calculate({ ...input, hsTargets: [NaN, NaN, NaN], hsWeights: [0, 0, 0], nsProb: 0, nsTarget: NaN }).finalTarget, 100);
+  assert.equal(calculate({ ...input, mainTarget: NaN, mainWeight: NaN, hsWeights: [NaN, NaN, NaN], nsProb: 1024 }).finalTarget, 400);
+  assert.equal(calculate({ ...input, mainTarget: 0, hsTargets: [0, 0, 0], nsProb: 0 }).finalTarget, 0);
+  const missingTag = normal.calculateNormalTargetFormula({ ...normal.readNormalTargetFormulaSource(normalExifData), hsTarget: '-' });
+  assert.ok(Number.isNaN(missingTag.finalTarget), 'an explicitly invalid aggregate must not silently fall back');
+});
+
+// Real HS parser paths, with nonconstant values on all three weight axes and
+// both area axes. Only unrelated Face/MainT/NS source loading is stubbed.
+function hsFixture(edit = '') {
+  const groups = new Map(), fields = [];
+  const add = (prefix, path, value) => {
+    const entry = field(path, value, fields.length);
+    fields.push(entry);
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(entry);
+  };
+  for (const path of [normal.HS_WEIGHT_BV_PATH, normal.HS_WEIGHT_MID_PATH]) {
+    [0, 10].forEach((value, i) => add(path, `${path}.${i}`, value));
+  }
+  for (let bv = 0; bv < 2; bv++) {
+    [0, 10].forEach((value, dr) => add(normal.HS_WEIGHT_DR_B2D_PATH, `${normal.HS_WEIGHT_DR_B2D_PATH}[${bv}].${dr}`, value));
+    for (let dr = 0; dr < 2; dr++) for (let mid = 0; mid < 2; mid++) {
+      [400, 100, 200, 300].forEach((base, channel) => add(normal.HS_WEIGHT_VALUE_PATH,
+        `${normal.HS_WEIGHT_VALUE_PATH}[${bv}][${dr}][${mid}].${channel}`,
+        base + bv * 40 + dr * 20 + mid * 10 + (edit === 'weight' && channel === 1 ? 200 : 0)));
+    }
+  }
+  [normal.HS_BRIGHT_AREA_SOURCE_CONFIG, normal.HS_MIDDLE_AREA_SOURCE_CONFIG, normal.HS_DARK_AREA_SOURCE_CONFIG].forEach((config, tone) => {
+    [config.rowHeaderPath, config.columnHeaderPath].forEach(path => {
+      [0, 10].forEach((value, i) => add(path, `${path}.${i}`, value));
+    });
+    for (let bv = 0; bv < 2; bv++) for (let axis = 0; axis < 2; axis++) {
+      add(config.valuePath, `${config.valuePath}[${bv}].${axis}`, (tone + 1) * 10 + bv * 4 + axis * 2 + (edit === ['bright', 'middle', 'dark'][tone] ? 10 : 0));
+    }
+  });
+  return { groups, fields, draft: fields.map(entry => `${entry.value},`).join('\n') };
+}
+const fixtureData = {
+  ...normalExifData, AE_TAG_CWV: '1000', [normal.MAIN_TARGET_CWV_KEY]: '2000',
+  [normal.MTWV_VALUE_KEY]: '1000', AE_TAG_REALBVX1000: '5', AE_TAG_DRV6_B2D: '5', AE_TAG_DRV6_MIDRATIO: '5',
+  [normal.HS_MIDDLE_CORR_B2M_KEY]: '5', AE_TAG_HS_EVD: '5', AE_TAG_DRV6_CORR_MIDRATIO: '0',
+  AE_TAG_HSV6_BT_Final_Y: '100', AE_TAG_HSV6_MT_Final_Y: '100', AE_TAG_HSV6_DT_Final_Y: '100',
+  AE_TAG_NS_STS_CDF: '5', AE_TAG_NS_EVD: '5',
+  NS_LOWBND_THD: '40', NS_LOWBND_Y: '100', NS_Y: '100', NS_BrightTone_Y: '100',
+};
+const areaSource = { bvValues: [0, 10], thdValues: [40, 40], flatSettings: { flatThd: { value: 40 } }, flatProb: { x0: 0, x1: 10, y0: 0, y1: 0 } };
+const hsPipeline = loadSelected(chartPath, ['loadFaceLinkTargetCalculator', 'loadHsWeightSource', 'loadHsBrightAreaSource', 'loadHsMiddleAreaSource', 'loadHsDarkAreaSource'], {
+  cppGetFieldsAtPath: async (path, prefix) => hsFixture(path === 'base' ? '' : path).groups.get(prefix) ?? [],
+  loadFaceFbtSource: async () => null,
+  loadMainTargetThreshold: async () => ['BV', 'Base', 'Exp'].map((label, i) => ({ label, values: [String([0, 50, 0][i])] })),
+  loadMainTargetMidCurve: async () => null,
+  loadNsLowBndBounds: async () => ({ low: 0, limit: 1000 }),
+  loadNsProbabilityCurveSource: async () => ({ bv: { x0: 0, x1: 10, y0: 512, y1: 512 }, cdf: { x0: 0, x1: 10, y0: 1024, y1: 1024 } }),
+  loadNsNorTSource: async () => areaSource, loadNsBTSource: async () => areaSource,
+});
+
+async function hsSources(path) {
+  return Promise.all([hsPipeline.loadHsWeightSource(path), hsPipeline.loadHsBrightAreaSource(path), hsPipeline.loadHsMiddleAreaSource(path), hsPipeline.loadHsDarkAreaSource(path)]);
+}
+function hsCardFormula([weight, ...areas]) {
+  const wet = tone => normal.interpolateHsWeightSource(weight, normal.hsWeightChannelIndex(tone), 5, 5, 5);
+  return normal.calculateParameterNormalTargetFormula({
+    mainTarget: 100, mainWeight: wet('target'),
+    hsTargets: areas.map(area => 1000 * normal.interpolateHsAreaSource(area, 5, 5) / 100),
+    hsWeights: ['bright', 'middle', 'dark'].map(wet), nsTarget: 400, nsProb: 512,
+  });
+}
+
+test('HS interpolated six-term values and directory Normal_new share full precision', async () => {
+  const sources = await hsSources('base');
+  const formula = hsCardFormula(sources);
+  for (const [tone, target, weight] of [['BT', 130, 335], ['MT', 230, 235], ['DT', 330, 135]]) {
+    assert.equal(sourceValue(formula, `HS_${tone}_Tar`).value, target);
+    assert.equal(sourceValue(formula, `HS_${tone}_Wt`).value, weight);
+    assert.match(sourceValue(formula, `HS_${tone}_Tar`).source, /Area THD.*interp.*Final_Y/);
+    assert.match(sourceValue(formula, `HS_${tone}_Wt`).source, /HS Weight.*interp/);
+  }
+  close(sourceValue(formula, 'HS_Tar').value, 142150 / 705);
+  assert.equal(sourceValue(formula, 'HS_Wt').value, 705);
+  close(formula.finalTarget, ((100 * 435 + 142150) / 1140 + 400) / 2);
+  const calculate = await hsPipeline.loadFaceLinkTargetCalculator('base');
+  const result = calculate(fixtureData, 'AE_TAG_REALBVX1000');
+  assert.equal(result.normal.calculated, formula.finalTarget);
+  const metrics = loadSelected('../src/views/mtk/isp6s/TablePane/imageTableMetrics.ts', ['deltaEv', 'formatDeltaEv']);
+  const { imageFaceTargetValues, imageTableFormulaAlias } = loadSelected('../src/views/mtk/isp6s/TablePane/TablePane.tsx', ['imageFaceTargetValues', 'imageTableFormulaAlias'], metrics);
+  const values = imageFaceTargetValues(result);
+  assert.equal(values.normalCwr, '294(281)');
+  assert.equal(imageTableFormulaAlias('Normal_old', values, true), '294');
+  assert.equal(imageTableFormulaAlias('Normal_new', values, true), '281');
+  const noMainCwv = { ...fixtureData };
+  delete noMainCwv[normal.MAIN_TARGET_CWV_KEY];
+  assert.ok(Number.isNaN(calculate(noMainCwv, 'AE_TAG_REALBVX1000').normal.calculated), 'MainT cannot borrow the Face CWV fallback');
+  const hsFallback = { ...fixtureData };
+  delete hsFallback.AE_TAG_CWV;
+  close(calculate(hsFallback, 'AE_TAG_REALBVX1000').normal.calculated, ((100 * 435 + 2 * 142150) / 1140 + 800) / 2);
+  const noFile = await hsPipeline.loadFaceLinkTargetCalculator(null);
+  assert.ok(Number.isNaN(noFile(fixtureData, 'AE_TAG_REALBVX1000').normal.calculated));
+});
+
+for (const edit of ['bright', 'middle', 'dark', 'weight']) {
+  test(`editing HS ${edit} updates draft/card and applied list Normal_new while preserving Normal_old`, async () => {
+    const original = await hsSources('base');
+    const baseline = hsCardFormula(original);
+    const draft = hsFixture(edit).draft;
+    const projected = [normal.previewHsWeightSourceFromDraft(original[0], draft), ...original.slice(1).map(area => normal.previewHsAreaSourceFromDraft(area, draft))];
+    const updated = hsCardFormula(projected);
+    assert.notEqual(updated.finalTarget, baseline.finalTarget);
+    assert.equal(hsCardFormula(original).finalTarget, baseline.finalTarget, 'preview does not mutate loaded sources');
+    const calculate = await hsPipeline.loadFaceLinkTargetCalculator(edit);
+    const before = (await hsPipeline.loadFaceLinkTargetCalculator('base'))(fixtureData, 'AE_TAG_REALBVX1000');
+    const after = calculate(fixtureData, 'AE_TAG_REALBVX1000');
+    close(after.normal.calculated, updated.finalTarget);
+    assert.equal(after.normal.exif, before.normal.exif);
+    const reverted = [normal.previewHsWeightSourceFromDraft(original[0], hsFixture().draft), ...original.slice(1).map(area => normal.previewHsAreaSourceFromDraft(area, hsFixture().draft))];
+    assert.equal(hsCardFormula(reverted).finalTarget, baseline.finalTarget);
+  });
+}
+
+test('HS area axis drafts recompute interpolation and same-line tokens stay independent', async () => {
+  const [, area] = await hsSources('base');
+  const lines = hsFixture().draft.split('\n');
+  lines[area.rowHeaderFields[1].line - 1] = '20,';
+  const updated = normal.previewHsAreaSourceFromDraft(area, lines.join('\n'));
+  assert.equal(normal.interpolateHsAreaSource(updated, 5, 5), 12);
+  assert.equal(normal.interpolateHsAreaSource(area, 5, 5), 13);
+  const first = field('[0][3][1][28][0].0', 10, 0), second = { ...field('[0][3][1][28][0].1', 12, 1), line: 1 };
+  const inline = { ...area, fields: [first, second], rowHeaderFields: [], columnHeaderFields: [], valueFields: [[first, second]], values: [[10, 12]] };
+  assert.deepEqual(normal.previewHsAreaSourceFromDraft(inline, '14, 18,').values, [[14, 18]]);
+});
+
+test('HS Weight BV/B2D/Mid axis drafts change the same trilinear interpolation used by Normal Target', async () => {
+  const [weight] = await hsSources('base');
+  const interpolate = entry => normal.interpolateHsWeightSource(entry, normal.hsWeightChannelIndex('bright'), 5, 5, 5);
+  assert.equal(interpolate(weight), 335);
+  for (const [entry, expected] of [[weight.bvAxisFields[1], 325], [weight.drB2dFields[0][1], 332.5], [weight.midAxisFields[1], 332.5]]) {
+    const lines = hsFixture().draft.split('\n');
+    lines[entry.line - 1] = '20,';
+    assert.equal(interpolate(normal.previewHsWeightSourceFromDraft(weight, lines.join('\n'))), expected);
+    assert.equal(interpolate(weight), 335);
+  }
+  assert.equal(normal.previewHsWeightSourceFromDraft(weight, hsFixture().draft), weight, 'unchanged drafts retain the loaded object');
+});
+
+test('Normal formula comparison retains six parameter paths and both EXIF aggregate sources', () => {
+  const { NormalTargetFormula } = loadSelected('../src/views/mtk/isp6s/ImagePane/DerivedTargetFormula.tsx', ['NormalTargetFormula'], {
+    useTranslation: () => ({ t }), DerivedTargetFormula: 'DerivedTargetFormula',
+  });
+  const exif = normal.calculateNormalTargetFormula(normal.readNormalTargetFormulaSource(normalExifData));
+  const parameter = normal.calculateParameterNormalTargetFormula({ mainTarget: 100, mainWeight: 435, hsTargets: [130, 230, 330], hsWeights: [335, 235, 135], nsTarget: 400, nsProb: 512 });
+  const tree = NormalTargetFormula({ exif, parameter });
+  for (const tone of ['BT', 'MT', 'DT']) for (const suffix of ['Tar', 'Wt']) {
+    const row = tree.props.sources.find(entry => entry.name === `HS_${tone}_${suffix}`);
+    assert.ok(Number.isFinite(row.parameter.value));
+    assert.match(row.parameter.source, /interp/);
+  }
+  assert.equal(tree.props.sources.find(entry => entry.name === 'HS_Tar').exif.source, 'EXIF · AE_TAG_HSV6_HS_TARGET');
+  assert.equal(tree.props.sources.find(entry => entry.name === 'HS_Wt').exif.source, 'EXIF · AE_TAG_HSV6_HS_WET');
+  const { FACE_LINK_TARGET_IMAGE_KEYS } = loadSelected('../src/views/mtk/isp6s/TablePane/TablePane.tsx', ['FACE_LINK_TARGET_IMAGE_KEYS']);
+  for (const key of ['AE_TAG_HSV6_HS_TARGET', 'AE_TAG_HSV6_HS_WET', normal.MAIN_TARGET_CWV_KEY]) assert.ok(FACE_LINK_TARGET_IMAGE_KEYS.includes(key), key);
+});

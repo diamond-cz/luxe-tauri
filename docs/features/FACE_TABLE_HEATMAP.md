@@ -58,11 +58,41 @@ Face Link Target = limit(raw, low, high)
 - **参数链路**：AE.cpp 的标量路径 `[0][4][1].19 / [0][4][1].20` 分别提供下限/上限系数，基数仍是图片 `AE_TAG_AE_TARGET`，不是 `NormalTarget`，也不是 `[0][4][1][19] / [0][4][1][20]` 数组。`loadFaceCwrBounds` 在加载 Face_FLT 源码快照时读取两项，源码草稿变化时 `previewFaceCwrBoundsFromDraft` 用现有 token 定位更新派生范围，不写图片 TOML。
 - **显示与复用**：`FaceLinkFormula.tsx` 使用 EXIF / 参数计算两行、五列“来源 → 加权值 → 边界显示 → 限制范围 → 最终值”摘要，并标明范围内/抬至下限/压至上限/数据不全；摘要统一四舍五入为整数。公式在表格上方直接显示，问号按钮通过 `FormulaHeader.tsx` 的 Fluent Popover 打开“变量、EXIF、参数计算、差值、来源”紧凑对照表；数值为一位小数，差值方向为参数计算减 EXIF，相同来源只展示一次，不同来源合并在同一来源列中区分。Face Link 除输入外还对照 raw/low/high/final；完整代入过程默认折叠，点击“展开完整推导”再显示，避免初次打开即重复展开两套来源与公式。参数 FDSZ_RA 仍列出真实轴路径。所有舍入只用于展示，不回写共享计算器或改变边界判断；标题和图片列表仍共享 `calculateFaceTargetMetrics`，不增加请求。
 - **边界系数与数值跳转**：“边界显示”列位于加权值右侧，各来源行内显示原始下限/上限系数；不再在表格下重复展示独立边界行。原始系数与乘以 AE Target 后的“限制范围”分别展示。EXIF 系数只读，点击问号可查看 `AE_TAG_FACE_LOW_BOUND / AE_TAG_FACE_HIGH_BOUND` 及一位小数值；参数系数数值本身为 Fluent Link 按钮，AE.cpp 下限 `[0][4][1].19`、上限 `[0][4][1].20` 路径放在来源对照表和按钮无障碍名称中。`jumpToFaceCwrBoundSource` 复用既有 `onSourceJump → ImagePane.handleSourceJump → param_map` 路由，传入精确 path、当前源码 token、行号及同一行 ordinal，定位并选中对应参数，避免相同数值/同一行多个参数误选。参数值非有限、字段缺失、行号无效或没有跳转能力时禁用链接；零值有效。不打开浏览器、不新增 IPC 或自定义观察器，也不改写/保存参数。
-- **派生 Target 公式摘要**：`DerivedTargetFormula.tsx` 的 FLT/FBT 均使用“来源、CWV、FLT_TH/FBT_TH、FDY、最终值”五列；Normal 使用“来源、MainT + HS、NS_Prob、NS_Target、最终值”五列。原悬浮说明位置直接显示计算公式，旁边问号按钮打开来源对照表与详细代入过程；移除行及数值的悬浮预览。CWV 标明实际命中的 EXIF key，参数行 CWV/FDY 仍来自 EXIF，只有阈值来自当前 AE.cpp 草稿推导。Normal 同时列出 EXIF 的 BT/MT/DT 原始 HS 项和参数的聚合 HS 项，按变量名匹配，无对应项显示 `-`，不能按数组下标把聚合项误当 BT 项。结果直接消费既有计算器；摘要整数、对照/详情一位小数，舍入不参与计算。沿用折叠状态，折叠时卸载摘要与弹层。
+- **派生 Target 公式摘要**：`DerivedTargetFormula.tsx` 的 FLT/FBT 均使用“来源、CWV、FLT_TH/FBT_TH、FDY、最终值”五列；Normal 使用“来源、MainT + HS、NS_Prob、NS_Target、最终值”五列。原悬浮说明位置直接显示计算公式，旁边问号按钮打开来源对照表与详细代入过程；移除行及数值的悬浮预览。CWV 标明实际命中的 EXIF key，参数行 CWV/FDY 仍来自 EXIF，只有阈值来自当前 AE.cpp 草稿推导。Normal 的 EXIF 与参数两侧同时保留 BT/MT/DT 六个明细和 HS_Tar/HS_Wt 汇总，按变量名匹配，参数来源保留真实表路径和计算表达式；具体契约见下节。结果直接消费共享计算器；摘要整数、对照/详情一位小数，舍入不参与计算。沿用折叠状态，折叠时卸载摘要与弹层。
 - **字体与公式样式**：摘要继续使用 `--font-family-formula` 的 CJK 等宽字体栈。常显公式单独使用 `--font-family-formula-expression`（Cascadia Code、Consolas、Sarasa Mono SC、monospace），字号 13px、字重 500、正文级文字对比度；取消原顶部横线和公式行间横线，仅保留公式组底部分隔。来源弹层采用 Fluent/Segoe UI 正文无衬线字体、13px 数值及 tabular-nums，常规字重、浅色主题表头、细行线，来源次级显示；不继承卡片的高字重或中文衬线回退。全局应用正文和图片表格不受影响，没有字体下载。
 - **Back Scene 与视口约束**：Back Scene Target 使用“来源、FBT_Target、FaceProb、Normal_Target、最终值”两行摘要，直接消费 raw EXIF/参数混合结果，不引入 Face Link 钳制。共用 Popover 使用 fixed 定位、窗口边界、16px 留白、自动翻转及可覆盖锚点的位移；`autoSize: "height"` 根据真实可用空间写入高度约束，不仅按总窗口高度限制。Surface 为纵向 flex，标题和关闭按钮固定，正文 `min-height: 0`、内部 overflow-auto，上限为 `min(60dvh, 520px)`；窄窗口表格横向滚动、纵向表头 sticky。关闭按钮是弹层首个可聚焦控件，避免默认焦点落在底部详情按钮。关闭/Escape/焦点约束、定位和监听器清理由 Fluent 提供，不增加自定义全局监听器。
 - **异常边界**：缺少/非有限的基数、系数或加权输入时对应最终值显示 `-`，不能拿另一条链路的边界或未钳制值冒充成功；零边界有效，颠倒上下限沿用现有 `limitNumber / limit` 的排序语义。Face 页的 FBT `Back Scene Target` 不新增本次 FLT 限制。
 - **验证**：`scripts/face-link-target.test.mjs` 执行实际 TOML 公式、Face 表求值器、卡片/列表计算器、源码边界加载与草稿映射，并执行真实公式栏 JSX 的渲染逻辑；由 `npm run sync:test` 接入既有 Windows CI。Rust schema 用例仅验证资源契约，编译/行为测试由 CI 执行。本次未通过本地 Tauri 编译验收真实桌面显示。
+
+## Normal Target 的 HS 数据与图片列表联动
+
+Face / Face_FLT 页的 Normal Target 使用 `readNormalTargetFormulaSource` 读取 EXIF，使用 `calculateParameterNormalTargetFormula` 计算参数结果；卡片和 `loadFaceLinkTargetCalculator` 共用这两个入口。
+
+| 变量 | EXIF 来源 | 参数计算来源 |
+| --- | --- | --- |
+| `HS_BT_Tar` | `AE_TAG_HSV6_BT_TARGET` | HS Bright Area：BV 轴 `[0][3][1][25]`、EVD 轴 `[0][3][1][27]`、矩阵 `[0][3][1][28]` 双线性插值为 THD；`CWV × THD / AE_TAG_HSV6_BT_Final_Y` |
+| `HS_MT_Tar` | `AE_TAG_HSV6_MT_TARGET` | HS Middle Area：BV 轴 `[0][3][1][33]`、CORR_B2M 轴 `[0][3][1][35]`、矩阵 `[0][3][1][36]` 双线性插值为 THD；`CWV × THD / AE_TAG_HSV6_MT_Final_Y` |
+| `HS_DT_Tar` | `AE_TAG_HSV6_DT_TARGET` | HS Dark Area：BV 轴 `[0][3][1][37]`、B2D 轴 `[0][3][1][38]`、矩阵 `[0][3][1][39]` 双线性插值为 THD；`CWV × THD / AE_TAG_HSV6_DT_Final_Y` |
+| `HS_BT_Wt / HS_MT_Wt / HS_DT_Wt` | `AE_TAG_HSV6_BT_WET / AE_TAG_HSV6_MT_WET / AE_TAG_HSV6_DT_WET` | HS Weight 的 BV/B2D/Mid 三线性插值；轴路径 `[0][3][1][40..42]`、值路径 `[0][3][1][43]`，通道顺序为 MainT、DT、MT、BT，须按通道名映射 |
+| `HS_Tar` | `AE_TAG_HSV6_HS_TARGET` | 三个区域 Target 按各自插值权重求加权平均 |
+| `HS_Wt` | `AE_TAG_HSV6_HS_WET` | 三个区域插值权重之和 |
+
+以上 HS 的 CWV 来自图片 `AE_TAG_CWV`，缺少时沿用 MainT 的 CWV 来源；Area 轴沿用 HS 页的 `HS_BRIGHT_EVD_KEY / HS_MIDDLE_CORR_B2M_KEY / AE_TAG_DRV6_B2D`，不能替换为数值相似的其他 EXIF 字段。
+
+```text
+HS_Wt = HS_BT_Wt + HS_MT_Wt + HS_DT_Wt
+HS_Tar = (HS_BT_Tar × HS_BT_Wt + HS_MT_Tar × HS_MT_Wt + HS_DT_Tar × HS_DT_Wt) / HS_Wt
+Cal_mt+hs_tar = (MainT_Tar × MainT_Wt + HS_Tar × HS_Wt) / (MainT_Wt + HS_Wt)
+Cal_final_tar = Cal_mt+hs_tar × (1024 − NS_Prob) / 1024 + NS_Target × NS_Prob / 1024
+```
+
+- **EXIF 与参数隔离**：EXIF 优先消费有效的两个 HS 汇总标签，六个原始明细用于对照，不与汇总重复计权。旧图片缺少有效汇总标签时，对缺失项由三项原始明细计算回退值，来源列显示推导公式。参数侧始终由当前 HS 表插值计算汇总，不能拿 EXIF 汇总替代修改后的参数结果。
+- **草稿预览**：`previewHsWeightSourceFromDraft / previewHsAreaSourceFromDraft` 按已有 `FieldEntry` 的 path、line、index 和行内 token 次序覆盖数字，生成不可变派生快照。投影同时覆盖轴和值，无改动时复用原快照，变化映射只在本次调用中存在；HS 与 Normal 使用相同投影。结构变动后以现有草稿解析/重载链路更新坐标，不把旧坐标当作新源码坐标。
+- **图片列表**：批量字段请求包含两个 HS 汇总 EXIF 标签。`Normal_old` 是 EXIF 链路最终结果，`Normal_new` 是当前已应用参数的最终结果；通过既有 `normalCwr → imageTableFormulaAlias` 提供给列显示、差值及用户公式。修改草稿后，卡片预览随草稿更新；列表依照现有“应用当前 / 应用全部”提交的参数快照更新，保留单张应用及撤销范围。MainT 的 CWV 和 HS 的 CWV 回退规则与卡片一致，不借用 Face 专用 CWV 回退链路。
+- **数值边界**：中间插值及加权不调用三位小数输入格式化，也不将缺失项变为零。非零权重对应的 Target 缺失、权重缺失或为负、NS 概率不在 `0..1024` 时结果不可用；零权重支路允许 Target 缺失。`NS_Prob=0/1024` 时只要求实际参与的支路有效。HS 页的 Target 汇总也复用同一加权检查。
+- **自动化验证**：`scripts/face-link-target.test.mjs` 新增10项用例，执行实际 HS 路径加载、双线性/三线性插值、三个 Area 与 Weight 草稿修改、轴修改、同一行多 token、汇总 EXIF 优先/缺失兼容、零/缺失边界、列表两个别名以及公式来源 JSX；不需要 Tauri 运行时。用例中的 MainT/NS/Face 加载为隔离夹具，不代表真实图片或桌面应用已验收。
+
+本轮在 Node `22.16.0` 执行 `sync:test` 对应六个脚本共131项通过，`npm run typecheck` 通过；未进行 Tauri 桌面切图、应用当前/全部或撤销的人工验收。建议在 Windows 产物中依次编辑三张 Area 表和 HS Weight，确认卡片的六个明细及聚合随之变化，再应用并核对 `Normal_new` 与卡片参数行最终值的整数显示一致，`Normal_old` 保持不变。
 
 ## 性能约束
 

@@ -132,7 +132,7 @@ export function NormalTargetFormula({ exif, parameter }: { exif: NormalFormulaVa
   const rows: SummaryRow[] = (["exif", "parameter"] as const).map((key) => {
     const values = key === "exif" ? exif : parameter;
     return { key, values: [values.mtHsTarget, values.nsProb, values.nsTarget, values.finalTarget], steps: [
-      { title: t("target_formula.mt_hs"), formula: "Cal_mt+hs_tar = (MainT_Tar × MainT_Wt + Σ(HS_Tar × HS_Wt)) / (MainT_Wt + ΣHS_Wt)",
+      { title: t("target_formula.mt_hs"), formula: "Cal_mt+hs_tar = (MainT_Tar × MainT_Wt + HS_Tar × HS_Wt) / (MainT_Wt + HS_Wt)",
         substitution: detailExpression(values.exifMtHsExpression), result: values.mtHsTarget },
       { title: t("target_formula.ns_blend"), formula: "Cal_final_tar = Cal_mt+hs_tar × (1024 − NS_Prob) / 1024 + NS_Tar × NS_Prob / 1024",
         substitution: detailExpression(values.exifFinalExpression), result: values.finalTarget },
@@ -143,9 +143,13 @@ export function NormalTargetFormula({ exif, parameter }: { exif: NormalFormulaVa
     const exifValue = exif.sourceValues.find((entry) => entry.name === name);
     const parameterValue = parameter.sourceValues.find((entry) => entry.name === name);
     return { name, exif: exifValue ?? { value: NaN, source: "-" },
-      parameter: { value: parameterValue?.value ?? NaN, source: parameterValue ? t("target_formula.parameter_source", { name }) : "-" } };
+      parameter: parameterValue ?? { value: NaN, source: "-" } };
   });
   return <DerivedTargetFormula title="Normal Target" columns={["MainT + HS", "NS_Prob", "NS_Target"]} rows={rows}
-    formulas={rows[0].steps.map((step) => step.formula)}
+    formulas={[
+      "HS_Wt = HS_BT_Wt + HS_MT_Wt + HS_DT_Wt",
+      "HS_Tar = (HS_BT_Tar × HS_BT_Wt + HS_MT_Tar × HS_MT_Wt + HS_DT_Tar × HS_DT_Wt) / HS_Wt",
+      ...rows[0].steps.map((step) => step.formula),
+    ]}
     sources={sources} />;
 }

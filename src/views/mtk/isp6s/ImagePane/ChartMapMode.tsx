@@ -422,6 +422,8 @@ interface NormalTargetFormulaSource {
   mainWeight: string | null;
   hsTargets: Array<string | null>;
   hsWeights: Array<string | null>;
+  hsTarget?: string | null;
+  hsWeight?: string | null;
   nsTarget: string | null;
   nsProb: string | null;
   nsTargetSource?: string;
@@ -1132,16 +1134,24 @@ export function ChartMapMode({
     }
     setHeatmapRequested(true);
   };
-  const currentHsWeightSource = hsSourceIdentity === sourceIdentity ? hsWeightSource : null;
+  const currentHsWeightSource = useMemo(() => previewHsWeightSourceFromDraft(
+    hsSourceIdentity === sourceIdentity ? hsWeightSource : null, sourceDraftText,
+  ), [hsSourceIdentity, hsWeightSource, sourceIdentity, sourceDraftText]);
   const currentNsLowBndBounds = nsLowBndBounds.identity === sourceIdentity ? nsLowBndBounds.bounds : null;
   const currentNsDtSource = nsDtSource.identity === sourceIdentity ? nsDtSource.source : null;
   const currentNsProbabilitySource = nsProbabilitySource.identity === sourceIdentity ? nsProbabilitySource.source : null;
   const currentNsNorTSource = nsNorTSource.identity === sourceIdentity ? nsNorTSource.source : null;
   const currentNsBTSource = nsBTSource.identity === sourceIdentity ? nsBTSource.source : null;
   const currentFaceFbtSource = faceFbtSource.identity === sourceIdentity ? faceFbtSource.source : null;
-  const currentHsBrightAreaSource = hsSourceIdentity === sourceIdentity ? hsBrightAreaSource : null;
-  const currentHsMiddleAreaSource = hsSourceIdentity === sourceIdentity ? hsMiddleAreaSource : null;
-  const currentHsDarkAreaSource = hsSourceIdentity === sourceIdentity ? hsDarkAreaSource : null;
+  const currentHsBrightAreaSource = useMemo(() => previewHsAreaSourceFromDraft(
+    hsSourceIdentity === sourceIdentity ? hsBrightAreaSource : null, sourceDraftText,
+  ), [hsSourceIdentity, hsBrightAreaSource, sourceIdentity, sourceDraftText]);
+  const currentHsMiddleAreaSource = useMemo(() => previewHsAreaSourceFromDraft(
+    hsSourceIdentity === sourceIdentity ? hsMiddleAreaSource : null, sourceDraftText,
+  ), [hsSourceIdentity, hsMiddleAreaSource, sourceIdentity, sourceDraftText]);
+  const currentHsDarkAreaSource = useMemo(() => previewHsAreaSourceFromDraft(
+    hsSourceIdentity === sourceIdentity ? hsDarkAreaSource : null, sourceDraftText,
+  ), [hsSourceIdentity, hsDarkAreaSource, sourceIdentity, sourceDraftText]);
   const currentTouchTargetSource = touchTargetSource.identity === sourceIdentity ? touchTargetSource.source : null;
   const imageBvValue = useMemo(
     () => readTomlValue(tomlData, schema.Image?.BV ?? "AE_TAG_REALBVX1000"),
@@ -1187,23 +1197,7 @@ export function ChartMapMode({
     () => readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
     [tomlData],
   );
-  const normalTargetFormulaSource = useMemo<NormalTargetFormulaSource>(() => ({
-    mainTarget: readTomlValue(tomlData, "AE_TAG_MTV6_MAINT_TARGET"),
-    mainWeight: readTomlValue(tomlData, "AE_TAG_HSV6_MAINT_WET"),
-    hsTargets: [
-      readTomlValue(tomlData, "AE_TAG_HSV6_BT_TARGET"),
-      readTomlValue(tomlData, "AE_TAG_HSV6_MT_TARGET"),
-      readTomlValue(tomlData, "AE_TAG_HSV6_DT_TARGET"),
-    ],
-    hsWeights: [
-      readTomlValue(tomlData, "AE_TAG_HSV6_BT_WET"),
-      readTomlValue(tomlData, "AE_TAG_HSV6_MT_WET"),
-      readTomlValue(tomlData, "AE_TAG_HSV6_DT_WET"),
-    ],
-    nsTarget: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") ?? readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
-    nsTargetSource: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") !== null ? "AE_TAG_NS_FINAL_TARGET" : FACE_NORMAL_TARGET_KEY,
-    nsProb: readTomlValue(tomlData, NS_PROB_KEY),
-  }), [tomlData]);
+  const normalTargetFormulaSource = useMemo(() => readNormalTargetFormulaSource(tomlData), [tomlData]);
   const faceFbtOeSysValue = useMemo(
     () => readTomlValue(tomlData, FACE_FBT_OE_SYS_KEY),
     [tomlData],
@@ -1476,11 +1470,6 @@ export function ChartMapMode({
       const wet = wetTone ? hsTargetWeightWetValues[wetTone] ?? NaN : NaN;
       return { target, wet };
     });
-    const hsWeight = hsTerms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
-    const hsWeightedSum = hsTerms.reduce((sum, term) => (
-      sum + (Number.isFinite(term.target) && Number.isFinite(term.wet) ? term.target * term.wet : 0)
-    ), 0);
-    const hsTarget = hsWeight > 0 ? hsWeightedSum / hsWeight : NaN;
     const nsTerms = nsTargetInputs.map((input) => {
       const areaComputation = input.id === "NorT"
         ? nsAreaComputations.NorT
@@ -1498,8 +1487,8 @@ export function ChartMapMode({
     return {
       mainTarget,
       mainWeight: hsTargetWeightWetValues.target ?? NaN,
-      hsTargets: [hsTarget],
-      hsWeights: [hsWeight],
+      hsTargets: hsTerms.map((term) => term.target),
+      hsWeights: hsTerms.map((term) => term.wet),
       nsTarget,
       nsProb: nsProbability,
     };
@@ -3052,14 +3041,7 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
     const firstValue = (keys: string[]) => parseFiniteNumber(readFirstTomlValue(tomlData, keys));
     const cwv = parseFiniteNumber(readFirstTomlValue(tomlData, FACE_CWV_KEYS));
     const bv = value(bvKey);
-    const normalExif = calculateNormalTargetFormula({
-      mainTarget: readTomlValue(tomlData, "AE_TAG_MTV6_MAINT_TARGET"),
-      mainWeight: readTomlValue(tomlData, "AE_TAG_HSV6_MAINT_WET"),
-      hsTargets: ["BT", "MT", "DT"].map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_TARGET`)),
-      hsWeights: ["BT", "MT", "DT"].map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_WET`)),
-      nsTarget: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") ?? readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
-      nsProb: readTomlValue(tomlData, NS_PROB_KEY),
-    }).finalTarget;
+    const normalExif = calculateNormalTargetFormula(readNormalTargetFormulaSource(tomlData)).finalTarget;
     const bvRow = mainThreshold?.find((row) => row.label === "BV");
     const baseRow = mainThreshold?.find((row) => row.label === "Base");
     const expRow = mainThreshold?.find((row) => row.label === "Exp");
@@ -3070,9 +3052,10 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
     const mainThd = computeSegmentedThd(value("AE_TAG_DRV6_CORR_MIDRATIO"), base, exp, maxThd,
       buildSegmentedMidPoints(buildMidCurvePoints(mainMidCurve)), value("AE_TAG_MTV6_MAINT_MID_INTRATIO"));
     const mainY = value(MTWV_VALUE_KEY);
-    const mainTarget = Number.isFinite(cwv) && Number.isFinite(mainThd) && Number.isFinite(mainY) && mainY !== 0
-      ? cwv * mainThd / mainY : NaN;
-    const hsCwv = Number.isFinite(value(HS_TARGET_CWV_KEY)) ? value(HS_TARGET_CWV_KEY) : cwv;
+    const mainCwv = value(MAIN_TARGET_CWV_KEY);
+    const mainTarget = Number.isFinite(mainCwv) && Number.isFinite(mainThd) && Number.isFinite(mainY) && mainY !== 0
+      ? mainCwv * mainThd / mainY : NaN;
+    const hsCwv = parseFiniteNumber(readTomlValue(tomlData, HS_TARGET_CWV_KEY) ?? readTomlValue(tomlData, MAIN_TARGET_CWV_KEY));
     const b2d = value("AE_TAG_DRV6_B2D");
     const mid = value("AE_TAG_DRV6_MIDRATIO");
     const wet = (tone: HsWeightToneId) => hsWeight
@@ -3087,9 +3070,6 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
         ? hsCwv * thd / y : NaN;
       return { target, wet: wet(HS_TARGET_WEIGHT_TONE_BY_ID[input.id]) };
     });
-    const hsWeightSum = hsTerms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
-    const hsTarget = hsWeightSum > 0 ? hsTerms.reduce((sum, term) =>
-      sum + (Number.isFinite(term.target) && Number.isFinite(term.wet) ? term.target * term.wet : 0), 0) / hsWeightSum : NaN;
     const nsCwv = hsCwv;
     const nsTerms = NS_TARGET_INPUTS.map((input) => {
       const computation = input.id === "NorT" ? calculateNsAreaComputation(nsNorT, bv, value(NS_EVD_KEY))
@@ -3105,11 +3085,10 @@ export async function loadFaceLinkTargetCalculator(filePath: string | null) {
     const bvProb = nsProbability ? interpolateNsProbabilityCurve(nsProbability.bv, bv) : NaN;
     const cdfProb = nsProbability ? interpolateNsProbabilityCurve(nsProbability.cdf, cdf) : NaN;
     const nsProb = Number.isFinite(bvProb) && Number.isFinite(cdfProb) ? bvProb * cdfProb / 1024 : NaN;
-    const parameterValue = (number: number) => formatInputNumber(Number.isFinite(number) ? number : 0);
-    const normalCalculated = calculateNormalTargetFormula({
-      mainTarget: parameterValue(mainTarget), mainWeight: parameterValue(wet("target")),
-      hsTargets: [parameterValue(hsTarget)], hsWeights: [parameterValue(hsWeightSum)],
-      nsTarget: parameterValue(nsTarget), nsProb: parameterValue(nsProb),
+    const normalCalculated = calculateParameterNormalTargetFormula({
+      mainTarget, mainWeight: wet("target"),
+      hsTargets: hsTerms.map((term) => term.target), hsWeights: hsTerms.map((term) => term.wet),
+      nsTarget, nsProb,
     }).finalTarget;
     const common = {
       bv,
@@ -6470,39 +6449,86 @@ function formatAblRowLabel(label: string): string {
   return (match?.[0] ?? label).replace(/[;,]+$/, "").trim();
 }
 
-function calculateNormalTargetFormula(source: NormalTargetFormulaSource) {
+function readNormalTargetFormulaSource(tomlData: Record<string, string>): NormalTargetFormulaSource {
+  return {
+    mainTarget: readTomlValue(tomlData, "AE_TAG_MTV6_MAINT_TARGET"),
+    mainWeight: readTomlValue(tomlData, "AE_TAG_HSV6_MAINT_WET"),
+    hsTargets: HS_TARGET_TERM_ORDER.map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_TARGET`)),
+    hsWeights: HS_TARGET_TERM_ORDER.map((tone) => readTomlValue(tomlData, `AE_TAG_HSV6_${tone}_WET`)),
+    hsTarget: readTomlValue(tomlData, "AE_TAG_HSV6_HS_TARGET"),
+    hsWeight: readTomlValue(tomlData, "AE_TAG_HSV6_HS_WET"),
+    nsTarget: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") ?? readTomlValue(tomlData, FACE_NORMAL_TARGET_KEY),
+    nsTargetSource: readTomlValue(tomlData, "AE_TAG_NS_FINAL_TARGET") !== null ? "AE_TAG_NS_FINAL_TARGET" : FACE_NORMAL_TARGET_KEY,
+    nsProb: readTomlValue(tomlData, NS_PROB_KEY),
+  };
+}
+
+// A missing active term must not silently contribute zero to a weighted result.
+// Zero-weight terms are inactive and do not require a target.
+function calculateNormalWeightedTarget(targets: number[], weights: number[]) {
+  if (targets.length !== weights.length || weights.some((weight) => !Number.isFinite(weight) || weight < 0)) {
+    return { target: NaN, weight: NaN };
+  }
+  const weight = weights.reduce((sum, value) => sum + value, 0);
+  const complete = targets.every((target, index) => weights[index] === 0 || Number.isFinite(target));
+  const numerator = targets.reduce((sum, target, index) => sum + (weights[index] === 0 ? 0 : target * weights[index]), 0);
+  return { target: complete && weight > 0 ? numerator / weight : NaN, weight };
+}
+
+function calculateParameterNormalTargetFormula(values: NormalTargetParameterValues) {
+  // Preserve full interpolation precision and distinguish unavailable values from real zeroes.
+  const token = (value: number) => Number.isFinite(value) ? String(value) : null;
+  return calculateNormalTargetFormula({
+    mainTarget: token(values.mainTarget), mainWeight: token(values.mainWeight),
+    hsTargets: values.hsTargets.map(token), hsWeights: values.hsWeights.map(token),
+    nsTarget: token(values.nsTarget), nsProb: token(values.nsProb),
+  }, true);
+}
+
+function calculateNormalTargetFormula(source: NormalTargetFormulaSource, parameter = false) {
   const mainTarget = parseFiniteNumber(source.mainTarget);
   const mainWeight = parseFiniteNumber(source.mainWeight);
   const hsTargets = source.hsTargets.map(parseFiniteNumber);
   const hsWeights = source.hsWeights.map(parseFiniteNumber);
   const nsTarget = parseFiniteNumber(source.nsTarget);
   const nsProb = parseFiniteNumber(source.nsProb);
-  const weightSum = [mainWeight, ...hsWeights].reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
-  const mtHsTarget = weightSum > 0
-    ? [mainTarget, ...hsTargets].reduce((sum, value, index) => {
-      const weight = index === 0 ? mainWeight : hsWeights[index - 1];
-      return sum + (Number.isFinite(value) && Number.isFinite(weight) ? value * weight : 0);
-    }, 0) / weightSum
+  const hs = calculateNormalWeightedTarget(hsTargets, hsWeights);
+  // EXIF aggregates describe the recorded pipeline output; details remain visible
+  // for comparison. Older EXIF without these tags falls back to the three terms.
+  const hsTarget = source.hsTarget == null ? hs.target : parseFiniteNumber(source.hsTarget);
+  const hsWeight = source.hsWeight == null ? hs.weight : parseFiniteNumber(source.hsWeight);
+  const mtHsTarget = calculateNormalWeightedTarget([mainTarget, hsTarget], [mainWeight, hsWeight]).target;
+  const finalTarget = Number.isFinite(nsProb) && nsProb >= 0 && nsProb <= 1024
+    ? calculateNormalWeightedTarget([mtHsTarget, nsTarget], [1024 - nsProb, nsProb]).target
     : NaN;
-  const finalTarget = Number.isFinite(mtHsTarget) && Number.isFinite(nsTarget) && Number.isFinite(nsProb)
-    ? mtHsTarget * (1024 - nsProb) / 1024 + nsTarget * nsProb / 1024
-    : NaN;
+  const weightSource = (tone: HsWeightToneId) => `HS Weight · ${HS_WEIGHT_VALUE_PATH} · ${tone} · interp(BV ${HS_WEIGHT_BV_PATH}, B2D ${HS_WEIGHT_DR_B2D_PATH}, Mid ${HS_WEIGHT_MID_PATH})`;
+  const hsTermSource = (index: number, target: boolean) => {
+    const tone = HS_TARGET_TERM_ORDER[index];
+    if (!parameter) return `EXIF · AE_TAG_HSV6_${tone}_${target ? "TARGET" : "WET"}`;
+    if (!target) return weightSource(HS_TARGET_WEIGHT_TONE_BY_ID[tone]);
+    const area = [HS_BRIGHT_AREA_SOURCE_CONFIG, HS_MIDDLE_AREA_SOURCE_CONFIG, HS_DARK_AREA_SOURCE_CONFIG][index];
+    return `CWV(EXIF) × HS ${["Bright", "Middle", "Dark"][index]} Area THD(${area.valuePath}; interp(BV ${area.rowHeaderPath}, ${["EVD", "CORR_B2M", "B2D"][index]} ${area.columnHeaderPath})) / ${HS_TARGET_INPUTS[index].yKey}(EXIF)`;
+  };
   return {
     mtHsTarget,
     finalTarget,
     nsTarget,
     nsProb,
     sourceValues: [
-      { name: "MainT_Tar", value: mainTarget, source: "EXIF · AE_TAG_MTV6_MAINT_TARGET" },
-      { name: "MainT_Wt", value: mainWeight, source: "EXIF · AE_TAG_HSV6_MAINT_WET" },
+      { name: "MainT_Tar", value: mainTarget, source: parameter ? "CWV(EXIF) × MainT THD(AE.cpp) / MTWV(EXIF)" : "EXIF · AE_TAG_MTV6_MAINT_TARGET" },
+      { name: "MainT_Wt", value: mainWeight, source: parameter ? weightSource("target") : "EXIF · AE_TAG_HSV6_MAINT_WET" },
       ...hsTargets.flatMap((value, index) => [
-        { name: hsTargets.length === 1 ? "HS_Tar" : `HS_${["BT", "MT", "DT"][index]}_Tar`, value, source: `EXIF · AE_TAG_HSV6_${["BT", "MT", "DT"][index]}_TARGET` },
-        { name: hsTargets.length === 1 ? "HS_Wt" : `HS_${["BT", "MT", "DT"][index]}_Wt`, value: hsWeights[index], source: `EXIF · AE_TAG_HSV6_${["BT", "MT", "DT"][index]}_WET` },
+        { name: `HS_${HS_TARGET_TERM_ORDER[index]}_Tar`, value, source: hsTermSource(index, true) },
+        { name: `HS_${HS_TARGET_TERM_ORDER[index]}_Wt`, value: hsWeights[index], source: hsTermSource(index, false) },
       ]),
-      { name: "NS_Target", value: nsTarget, source: `EXIF · ${source.nsTargetSource ?? "NS_Target"}` },
-      { name: "NS_Prob", value: nsProb, source: "EXIF · AE_TAG_NS_PROB" },
+      { name: "HS_Tar", value: hsTarget, source: parameter || source.hsTarget == null
+        ? "(HS_BT_Tar × HS_BT_Wt + HS_MT_Tar × HS_MT_Wt + HS_DT_Tar × HS_DT_Wt) / HS_Wt" : "EXIF · AE_TAG_HSV6_HS_TARGET" },
+      { name: "HS_Wt", value: hsWeight, source: parameter || source.hsWeight == null
+        ? "HS_BT_Wt + HS_MT_Wt + HS_DT_Wt" : "EXIF · AE_TAG_HSV6_HS_WET" },
+      { name: "NS_Target", value: nsTarget, source: parameter ? "max(CWV × NorT_THD / NorT_Y, CWV × BT_THD / BT_Y, limit(CWV × DT_THD / DT_Y, low, high))" : `EXIF · ${source.nsTargetSource ?? "NS_Target"}` },
+      { name: "NS_Prob", value: nsProb, source: parameter ? "NS Probability(AE.cpp) · BV_Prob × CDF_Prob / 1024" : "EXIF · AE_TAG_NS_PROB" },
     ],
-    exifMtHsExpression: `(${formatComputedNumber(mainTarget)}*${formatComputedNumber(mainWeight)} + ${hsTargets.map((value, index) => `${formatComputedNumber(value)}*${formatComputedNumber(hsWeights[index])}`).join(" + ")}) / (${formatComputedNumber(mainWeight)} + ${hsWeights.map(formatComputedNumber).join(" + ")})`,
+    exifMtHsExpression: `(${formatComputedNumber(mainTarget)}*${formatComputedNumber(mainWeight)} + ${formatComputedNumber(hsTarget)}*${formatComputedNumber(hsWeight)}) / (${formatComputedNumber(mainWeight)} + ${formatComputedNumber(hsWeight)})`,
     exifFinalExpression: `${formatComputedNumber(mtHsTarget)} * (1024 - ${formatComputedNumber(nsProb)}) / 1024 + ${formatComputedNumber(nsTarget)} * ${formatComputedNumber(nsProb)} / 1024`,
   };
 }
@@ -6812,15 +6838,7 @@ function FaceTabContent({
   });
   const exifFaceTarget = exifTarget;
   const normalFormula = calculateNormalTargetFormula(normalTargetSource);
-  const formatParameterValue = (value: number) => formatInputNumber(Number.isFinite(value) ? value : 0);
-  const parameterNormalFormula = calculateNormalTargetFormula({
-    mainTarget: formatParameterValue(normalTargetParameterValues.mainTarget),
-    mainWeight: formatParameterValue(normalTargetParameterValues.mainWeight),
-    hsTargets: normalTargetParameterValues.hsTargets.map(formatParameterValue),
-    hsWeights: normalTargetParameterValues.hsWeights.map(formatParameterValue),
-    nsTarget: formatParameterValue(normalTargetParameterValues.nsTarget),
-    nsProb: formatParameterValue(normalTargetParameterValues.nsProb),
-  });
+  const parameterNormalFormula = calculateParameterNormalTargetFormula(normalTargetParameterValues);
   const faceProbHeatmapPoints = useMemo<FaceAxisHeatmapPoint[]>(
     () => imageHeatmapPoints.flatMap(({ path, faceProb: value }) => Number.isFinite(value) ? [{ path, value }] : []),
     [imageHeatmapPoints],
@@ -9436,10 +9454,7 @@ function HsTargetCard({
   });
   const termIds = terms.map((term) => term.id);
   const firstTermId = terms[0]?.id ?? null;
-  const wetSum = terms.reduce((sum, term) => sum + (Number.isFinite(term.wet) ? term.wet : 0), 0);
-  const weightedSum = terms.reduce((sum, term) =>
-    sum + (Number.isFinite(term.contribution) ? term.contribution : 0), 0);
-  const targetValue = wetSum > 0 ? weightedSum / wetSum : NaN;
+  const targetValue = calculateNormalWeightedTarget(terms.map((term) => term.target), terms.map((term) => term.wet)).target;
   const fullFormula = "HS Target = ((CWV*BT_THD/BT_Y)*BT_Wet + (CWV*MT_THD/MT_Y)*MT_Wet + (CWV*DT_THD/DT_Y)*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
   const compactFormula = "HS Target = (BT_Target*BT_Wet + MT_Target*MT_Wet + DT_Target*DT_Wet) / (BT_Wet + MT_Wet + DT_Wet) =";
   const formulaMode: HsTargetFormulaMode = formulaNeedsCompact || formulaModePreference === "compact" ? "compact" : "full";
@@ -12468,6 +12483,62 @@ function previewHsWeightSourceTarget(source: HsWeightSource, target: HsWeightCel
           )
         : bvRows,
     ),
+  };
+}
+
+// Project a draft in one pass, retaining parser field coordinates and the loaded
+// snapshot. Both the HS page and Normal Target consume this same projection.
+function hsDraftProjection(fields: FieldEntry[], draftText: string | null | undefined) {
+  if (!draftText) return null;
+  const key = (field: FieldEntry) => `${field.path}\u0000${field.line}\u0000${field.index}`;
+  const changed = new Map<string, FieldEntry>();
+  for (const field of fields) {
+    const token = sourceFieldToken(draftText, field, fields);
+    if (token !== null && isSourceNumberText(token) && token !== field.value) {
+      changed.set(key(field), { ...field, value: token });
+    }
+  }
+  if (changed.size === 0) return null;
+  const field = (entry: FieldEntry | null) => entry ? changed.get(key(entry)) ?? entry : null;
+  const value = (original: number, entry: FieldEntry | null | undefined) => {
+    const updated = entry ? changed.get(key(entry)) : null;
+    return updated ? parseFiniteNumber(updated.value) : original;
+  };
+  return { field, value, fields: fields.map((entry) => changed.get(key(entry)) ?? entry) };
+}
+
+function previewHsWeightSourceFromDraft(source: HsWeightSource | null, draftText: string | null | undefined): HsWeightSource | null {
+  if (!source) return null;
+  const draft = hsDraftProjection(source.fields, draftText);
+  if (!draft) return source;
+  return {
+    ...source,
+    bvAxis: source.bvAxis.map((value, index) => draft.value(value, source.bvAxisFields[index])),
+    bvAxisFields: source.bvAxisFields.map(draft.field),
+    midAxis: source.midAxis.map((value, index) => draft.value(value, source.midAxisFields[index])),
+    midAxisFields: source.midAxisFields.map(draft.field),
+    drB2dRows: source.drB2dRows.map((row, bv) => row.map((value, dr) => draft.value(value, source.drB2dFields[bv]?.[dr]))),
+    drB2dFields: source.drB2dFields.map((row) => row.map(draft.field)),
+    values: source.values.map((rows, bv) => rows.map((mids, dr) => mids.map((channels, mid) =>
+      channels.map((value, channel) => draft.value(value, source.valueFields[bv]?.[dr]?.[mid]?.[channel]))))),
+    valueFields: source.valueFields.map((rows) => rows.map((mids) => mids.map((channels) => channels.map(draft.field)))),
+    fields: draft.fields,
+  };
+}
+
+function previewHsAreaSourceFromDraft(source: HsAreaSource | null, draftText: string | null | undefined): HsAreaSource | null {
+  if (!source) return null;
+  const draft = hsDraftProjection(source.fields, draftText);
+  if (!draft) return source;
+  return {
+    ...source,
+    rowHeaders: source.rowHeaders.map((value, index) => draft.value(value, source.rowHeaderFields[index])),
+    rowHeaderFields: source.rowHeaderFields.map(draft.field),
+    columnHeaders: source.columnHeaders.map((value, index) => draft.value(value, source.columnHeaderFields[index])),
+    columnHeaderFields: source.columnHeaderFields.map(draft.field),
+    values: source.values.map((row, r) => row.map((value, c) => draft.value(value, source.valueFields[r]?.[c]))),
+    valueFields: source.valueFields.map((row) => row.map(draft.field)),
+    fields: draft.fields,
   };
 }
 

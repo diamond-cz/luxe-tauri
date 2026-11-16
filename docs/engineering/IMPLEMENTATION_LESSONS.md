@@ -4,6 +4,31 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-16：补齐 Normal Target 的 HS 明细、来源和参数联动
+
+**亮点**
+
+- `ChartMapMode.tsx` 的参数输出保留 BT/MT/DT 六个明细，并计算 HS_Tar/HS_Wt；`readNormalTargetFormulaSource` 统一读取 EXIF 的六个明细及 `AE_TAG_HSV6_HS_TARGET / AE_TAG_HSV6_HS_WET`，卡片与图片列表共用 `calculateParameterNormalTargetFormula / calculateNormalTargetFormula`。`DerivedTargetFormula.tsx` 保留具体参数表路径，常显公式补齐 HS 两步汇总。
+- HS 源码通过 `previewHsWeightSourceFromDraft / previewHsAreaSourceFromDraft` 一次遍历生成轴/值的不可变草稿投影，不新增长期缓存或 IPC；HS 页与 Normal 同用插值输入。`TablePane.tsx` 补齐批量 EXIF 字段，现有 Normal_old/Normal_new 别名、应用当前/全部范围继续复用。维护说明与索引同步更新。
+
+**痛点**
+
+- 原参数侧先把 BT/MT/DT 合并为一对 HS_Tar/HS_Wt，EXIF 侧却只有六个明细；来源表按名称匹配后，六行参数均无对应值。来源渲染还把具体参数路径替换成泛化文本，单项聚合的 EXIF 来源被错误标成 BT 标签。
+- 卡片与列表把非有限参数变成0，并用输入控件的三位小数格式化参与后续计算；缺少有效 Target 仍可能得到貌似有效的数值。现在仅忽略明确为0的权重支路，保留插值原始精度。HS 页汇总复用相同缺失值检查。
+- HS 子卡片的局部编辑结果和父级加载快照存在不同所有者；新增显式草稿投影，跨页读取不依赖此前访问 HS 卡片的回调。列表原先将 Face 的 CWV 回退链路复用于 MainT/HS，改为与各自卡片相同的关键字及回退规则。
+
+**闭坑**
+
+- EXIF HS 汇总与 BT/MT/DT 明细不能重复计权；旧图无有效汇总时才回退推导，参数链路不能借用 EXIF Target/Weight 冒充插值。HS Weight 通道按 MainT/DT/MT/BT 映射，不能按 BT/MT/DT 展示次序索引。
+- 草稿投影按字段坐标定位同一行多数字，保留原始快照；源码结构更改继续依赖既有重新解析更新坐标。输入格式化只供展示，不得回写数值计算。新增长驻缓存、观察器和后台任务为0。
+- Normal_old 始终来自图片，编辑参数后通过既有应用操作更新指定图片的 Normal_new；不能自动将单张预览广播为全目录已应用。NS 概率端点只要求有效支路，非零权重缺少目标时显示不可用。
+
+**验证**
+
+- `npm run typecheck` 通过；Node `22.16.0` 执行 `npm run sync:test` 对应六脚本，共131项通过，其中本次新增10项 Normal/HS 测试。最后完善来源表达式及CWV断言后，Node22再次执行 `node --test --test-reporter=spec scripts/face-link-target.test.mjs`，39项通过，TypeScript复检通过。另在本机默认 Node `24.14.1` 执行 Face/Normal 专项测试时曾发现夹具缺少导入的 `deltaEv`、无效 EXIF 被既有读取器归一化为空值，已修正夹具和断言。
+- Node22便携工具放在忽略目录 `.tmp-normal-target-tools/`，下载ZIP按官方 `SHASUMS256.txt` 校验，不纳入提交；`git diff --check` 通过，改动清单仅7份产品代码、测试与文档文件。
+- 未运行本地 Rust/Tauri 编译，未实测真实图片、Windows桌面切图、应用/撤销交互或截图；未修改 `D:\Image_process\hiviewer_rs`，本轮未提交/推送。
+
 ### 2026-11-05：整理并准备发布 v0.2.15
 
 **亮点**
