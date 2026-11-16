@@ -142,9 +142,28 @@ fn bare_legacy_ae_tags_can_be_upgraded_without_treating_unknown_roots_as_aliases
         Some(99)
     );
     assert_eq!(
-        load_prepared_image_toml(&path).unwrap()["AE_TAG_ALGO_VER"],
-        "99"
+        root["AE"]["AE_TAG_ALGO_VER"].as_integer(),
+        Some(123),
+        "an unrelated custom section must not suppress the incoming AE field"
     );
+    let fields = load_prepared_image_toml(&path).unwrap();
+    assert_eq!(fields["AE.AE_TAG_ALGO_VER"], "123");
+    assert_eq!(fields["my_custom_section.AE_TAG_ALGO_VER"], "99");
+    assert_eq!(
+        fields["AE_TAG_ALGO_VER"], "123",
+        "the existing flat projection visits AE before my_custom_section"
+    );
+    let key = path.to_string_lossy().into_owned();
+    let selected = load_prepared_image_toml_fields_batch(
+        vec![key.clone()],
+        vec![
+            "AE_TAG_ALGO_VER".into(),
+            "my_custom_section.AE_TAG_ALGO_VER".into(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(selected[&key]["AE_TAG_ALGO_VER"], "123");
+    assert_eq!(selected[&key]["my_custom_section.AE_TAG_ALGO_VER"], "99");
 }
 
 #[test]
