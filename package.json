@@ -1,6 +1,6 @@
 {
   "name": "luxe-tauri",
-  "version": "0.2.16",
+  "version": "0.2.18",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.12.1",

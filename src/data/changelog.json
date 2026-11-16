@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.2.18",
+    "date": "2026-11-16",
+    "items": [
+      { "type": "新增", "content": "支持直接读取 MTK 第5/6代 JPEG 私有 EXIF，内置353份精确头文件，并扩展 AE 统计表、模块识别与诊断；不支持的布局保留 DebugParser 兜底提示。" },
+      { "type": "优化", "content": "完善图片 EXIF 解析操作：左键确认后使用 DebugParser 覆盖，右键直接读取 JPEG 覆盖；导入复用已有 TOML，切图只读准备后的数据，并显示真实任务阶段与进度。" },
+      { "type": "修复", "content": "修复含中文的 GBK、UTF-8/BOM、UTF-16 参数源码导入与定位问题，编辑保存时保留原编码。" },
+      { "type": "新增", "content": "Normal Target 补齐 HS 六项参数插值、HS_TARGET/HS_WET 的 EXIF 来源和加权汇总，参数草稿修改贯通图片列表 Normal_new。" },
+      { "type": "修复", "content": "修复 Back Scene Target 与 Face Link Target 参数计算误用 EXIF Normal 值的问题，统一卡片、公式来源及列表计算链路；Face Link 在完整加权后按各自上下限限制。" },
+      { "type": "新增", "content": "完善 ToneMap LCE 曲线的 P/O、Gain 与最终输出展示，补齐 Target Weight 的 LV/Luma/Flat 权重数据及计算对照。" },
+      { "type": "优化", "content": "统一 ToneMap 标签、公式栏与悬浮提示样式；LCE 双图支持可记忆分割比例和独立公式栏折叠，Target 内整合 Ratio、LVTarget 与 Prob，拖动分割器按横向适配。" },
+      { "type": "优化", "content": "优化 Face/Face_FLT 公式摘要、来源对照与完整推导，支持边界参数数值跳转源码，统一显示精度与缺失值提示。" },
+      { "type": "修复", "content": "配套 HiViewer 图片联动插件0.1.5修复宿主命令变更及测试机图片路由，提供卡片检查更新、代理下载与校验；插件包仍需在宿主确认安装，启用即同步的宿主扩展另见集成指南。" },
+      { "type": "修复", "content": "增强应用检查更新的版本元数据回退，减少更新清单暂不可用时的检查失败。" }
+    ]
+  },
+  {
     "version": "0.2.16",
     "date": "2026-11-10",
     "items": [

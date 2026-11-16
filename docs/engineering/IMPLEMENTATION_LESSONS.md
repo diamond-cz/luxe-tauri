@@ -4,6 +4,30 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-16：整理 v0.2.18 发布边界与更新说明
+
+**亮点**
+
+- 用户要求的 Normal 来源修复以中文提交 `d4bef20` 推送至origin/main；发版前另以 `75da43c` 修正旧Rust测试断言。保留 `v0.2.16..75da43c` 的19个提交，不重写已推送历史，以独立版本提交和 `v0.2.18` 标签确定发布边界。
+- `src/data/changelog.json` 按实际提交整理10条中文更新，涵盖MTK JPEG/统计解析、参数编码、Normal及下游Target计算、ToneMap/LCE布局、公式来源、配套插件0.1.5及检查更新回退。应用内更新与GitHub Release共用 `releaseNotesFor`，没有虚构未发布的v0.2.17记录，也不宣称宿主“启用即同步”已完成。
+- 从 `src-tauri/tauri.conf.json` 将版本改为0.2.18，使用现有同步脚本更新npm/Cargo清单与锁文件，仅修改应用自身版本，不升级依赖。沿用现有tag触发的签名NSIS/MSI、代理更新清单和SHA256资产发布链路。
+
+**痛点**
+
+- 发布前确认GitHub最新正式版仍为v0.2.16，远端无v0.2.18标签或Release；历史main CI存在真实Rust测试失败，先读取日志并修正断言，不能以本地前端检查代替云端Rust验收。
+- 发布脚本测试会在用户临时目录启动Node子进程，沙箱内运行因用户目录lstat被拒而报EPERM；经授权在沙箱外重跑同一组测试通过，不修改测试实现绕过路径限制。
+
+**闭坑**
+
+- 版本标签必须指向完整版本提交，安装包、更新清单和签名由GitHub Actions生成；不本地编译Rust/Tauri、不重建密钥、不推送无关标签。发布说明准确区分应用版本与独立插件版本及宿主尚待接线的边界。
+- 推送tag前核对实际CI状态；构建发布后仍需检查Release非draft、五项资产及latest.json版本/代理URL/签名与SHA256。安装升级及真实桌面交互未经实测，不得宣称已验收。
+
+**验证**
+
+- Node `22.16.0` 执行 `npm run version:sync / version:check` 通过，`releaseNotesFor('0.2.18')` 正常生成与更新日志一致的中文说明；`npm run typecheck`、受影响Rust测试文件 `rustfmt --check --edition 2021` 通过。
+- Node22合并执行 release:test、sync:test、plugin:test 对应10个脚本，166项通过；没有本地Cargo/Tauri编译。提交前核对版本差异只影响版本字段，`git diff --check`通过。
+- 本记录写入时，Rust修正的CI运行 `43794188249` 已通过版本检查、全部Node脚本、前端打包和 `cargo test --locked --manifest-path src-tauri/Cargo.toml`，正在上传缓存收尾；正式版本工作流尚未触发。后续tag推送、CI及公开Release结果以实际GitHub状态和本轮交付为准。未进行Windows安装/升级或桌面截图验收。
+
 ### 2026-11-16：发布前纠正旧 EXIF 合并测试的扁平字段断言
 
 **亮点**
