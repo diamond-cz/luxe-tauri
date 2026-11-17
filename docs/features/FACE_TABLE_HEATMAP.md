@@ -13,7 +13,7 @@
 | 源码跳转 | `jumpToCellSource` | 根据字段所在源码行、同一行内的序号和当前值定位并选中对应 token |
 | 热力图状态 | `useChartTableHeatmapMode` | 以 `${faceTab}_${tableKey}` 保存开关及参数值/命中数模式；左键切换开关，开启后右键图标切换显示模式 |
 | 命中统计 | `countFaceBvDrHits`、`faceBvDrHitPaths` | 仅统计 BV、DR 均有效的图片；NS 表另外要求 `NS_PROB` 有效且非零；分别用 `boundsForTableAxis` 判定行列命中，筛选结果按路径去重 |
-| 热力颜色 | `faceBvDrHeatCellStyle` | 命中数先用 `log1p` 归一化，再混合 `--face-heat-low/high`；命中数单元格右键筛选图片，加载中显示 `…`，失败显示 `-` |
+| 热力颜色 | `faceBvDrHeatCellStyle` | 命中数先用 `log1p` 归一化，再混合 `--face-heat-low/high`；命中数单元格左键选中所有命中图片，右键跳转对应参数，加载中显示 `…`，失败显示 `-` |
 
 `boundsForTableAxis` 先过滤无效轴值并按数值排序。恰好落在轴点上只命中该点；落在两点之间命中相邻两点；超出轴范围命中最近端点。二维表格对行、列分别执行该规则，所以一张图片最多命中四个数据单元格。新增表格时应先核对图片 EXIF 的单位与源码轴单位一致。
 
@@ -29,8 +29,16 @@ Face、Face_FLT 页面中的 `FaceProb`、`FDSZ_RA`、`FDDR_RA` 使用相同的�
 | 颜色 | `faceAxisHeatCellStyle` 根据 `log1p(count)` 混合 `--face-heat-low/high` | 选中列只改变背景色和字体颜色，不添加外框阴影 |
 | 网格边线 | `faceProbTableStyle` 绘制外框，`faceProbTableValueStyle`、`faceProbTableLabelStyle` 绘制单元格右边线和下边线 | 热力图样式从数据格样式继承边线，命中数模式也保持完整网格 |
 | 控件 | `useChartTableHeatmapMode` 保存开关和显示模式 | 使用唯一 key，例如 `Face_faceProb`、`Face_FLT_fddrRa` |
-| 交互 | 左键开关，右键切换参数值/命中数；命中数单元格右键筛选图片 | 复用 `FaceProbEditableCell` 的 `heatmap*` 属性 |
+| 交互 | 图标左键开关，图标右键切换参数值/命中数；命中数单元格左键选中图片、右键跳转参数 | 复用 `FaceProbEditableCell` 的 `heatmap*` 属性 |
 | 折叠 | 三个卡片标题栏最右侧共用 `FaceAxisTableCollapseButton` | 只卸载各自的表格区域，保留标题、计算结果、保存及热力图按钮；折叠时暂停该表的命中统计 |
+
+## 命中数模式（右键状态二）的点击契约
+
+开启笛卡尔热力图后，右键标题栏热力图图标切换至命中数模式（`showHitCounts / showCounts`）。此时左键点击数据单元格，将该单元格的全部命中路径传入既有 `Isp6sAeVisual.onSelectHeatmapImages`：替换上一组热力图多选、按当前图片索引去重选中，并定位第一张命中图片，同时保留整组高亮。命中数为0时清空该多选，不跳转到无关图片。加载中、统计失败和没有选择回调时不触发选择；右键单元格只执行已有参数映射跳转，没有参数可跳时不再回退为图片选择。
+
+这一契约覆盖 MainT 的 Base/Exp、HS Area、Face/Face_FLT 二维表、FaceProb/FDSZ_RA/FDDR_RA，以及 ToneMap LCE 的命中数单元格。普通参数值模式的左键编辑和图标的模式切换不变；不修改命中算法、NS统计资格、状态持久化和图片扫描。左右键均在各自处理处阻止冒泡，避免外层点击重复处理。
+
+此前图片选择与源码跳转共用右键事件，新增跳转优先分支后，只要存在参数字段，图片选择分支就无法执行。现将左键选择独立接线，继续使用原有命中路径函数、工作区多选和图片列表高亮入口。`scripts/face-link-target.test.mjs` 执行五类单元格的实际事件处理，覆盖左右键隔离、加载/失败拦截、参数模式不选图，以及实际工作区多选/第一张定位链路；桌面交互仍需Windows产物验收。
 
 ## 接入步骤
 

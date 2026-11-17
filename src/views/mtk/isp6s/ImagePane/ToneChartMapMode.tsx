@@ -691,14 +691,17 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
     boxShadow: active && heat ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
     fontWeight: active ? 700 : 400,
   };
-  if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]" style={cellStyle}
+  if (showCount) return <div className="flex items-center justify-center font-mono text-[10px]"
+    style={{ ...cellStyle, cursor: onHitImages && !controls.heatmapLoading && !controls.heatmapFailed ? "pointer" : "default" }}
+    onClick={(event) => {
+      event.stopPropagation();
+      if (!controls.heatmapLoading && !controls.heatmapFailed) onHitImages?.();
+    }}
     onContextMenu={(event) => {
-      if (!field && !onHitImages) return;
       event.preventDefault();
+      event.stopPropagation();
       if (field) {
         controls.onCellJump(tableId, field, value);
-      } else if (!controls.heatmapLoading && !controls.heatmapFailed) {
-        onHitImages?.();
       }
     }}>
     {controls.heatmapLoading ? "…" : controls.heatmapFailed ? "-" : hitCount ?? 0}

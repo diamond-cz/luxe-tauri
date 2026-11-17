@@ -71,6 +71,8 @@ Luma = (1 − v) × (1 − p)
 
 ## 验证
 
+2026-11-17 命中数交互调整：LCE 热力图开启后右键图标切到命中数模式，左键点击命中数单元格选中图片列表内全部命中图片，右键保留对应参数映射跳转；加载中或统计失败不改变图片选择。复用原有 `onHitImages → onSelectHeatmapImages` 路径，不更改权重、插值和热力图模式保存。具体选择契约与自动化验证见 [Face热力图说明](FACE_TABLE_HEATMAP.md#命中数模式右键状态二的点击契约)。
+
 2026-11-15 布局调整：ToneMap 的 LTM/LCE/GMA/DCE/CA-LTM 与 AE Basic 的 MainT/HS 等共用 `ImagePane/chartMapTabStyles.ts`，激活项使用品牌色实心背景、非激活项使用中性背景和边框。LCE Curve 与 LCE Target Weight 从 Target 内移到 LCE 标签页首行，通过 `ToneLceCharts.tsx` 横向 PanelGroup 和公共 ResizeHandle 调整左右比例；Target 下的 Ratio、Target 参数表与 Cal 保持原有编辑/热力图/源码跳转逻辑。
 
 左右默认 50/50，各自最小 25%，最大 75%。比例保存为 `isp6s_ae_visual.tone_lce_curve_ratio`，经既有 Zustand visual 状态和 200ms 串行持久化入口写入 TOML，切页和应用重启后恢复；旧配置缺字段默认 50，前端对非有限数值回退 50、超界值限制到 25..75。此设置独立于工作区列宽、图片详情分割器及 AE Basic 布局，不写 localStorage。

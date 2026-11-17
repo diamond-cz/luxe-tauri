@@ -46,6 +46,114 @@ function loadSelected(relative, names, globals = {}) {
   return module.exports;
 }
 
+// Execute the real count-cell events without mounting canvas/scatter observers.
+function heatmapCellEvents(functionName, globals, relative = chartPath) {
+  const parsed = ts.createSourceFile(relative, readFileSync(new URL(relative, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === functionName);
+  assert.ok(declaration, functionName);
+  let attributes;
+  const visit = node => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const props = node.attributes.properties.filter(ts.isJsxAttribute);
+      const click = props.find(prop => prop.name.getText(parsed) === 'onClick');
+      if (click && /onSelectHeatmapImages|onHitImages/.test(click.getText(parsed))
+        && props.some(prop => prop.name.getText(parsed) === 'onContextMenu')) attributes = props;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration);
+  assert.ok(attributes, `${functionName}: count-cell left click`);
+  const events = ['onClick', 'onContextMenu'].map(name => {
+    const prop = attributes.find(prop => prop.name.getText(parsed) === name);
+    return `${name}: ${prop.initializer.expression.getText(parsed)}`;
+  });
+  const { outputText } = ts.transpileModule(`module.exports = { ${events.join(', ')} };`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const module = { exports: {} };
+  new Function('module', ...Object.keys(globals), outputText)(module, ...Object.values(globals));
+  return module.exports;
+}
+
+test('count-mode heatmap cells select hits on left click and reserve right click for parameter navigation', () => {
+  const tableSource = { rowHeaders: [0, 10], columnHeaders: [0, 10] };
+  const points = [{ path: 'a.toml', bv: 0, dr: 0, axis: 0 }, { path: 'b.toml', bv: 5, dr: 5, axis: 5 },
+    { path: 'a.toml', bv: 0, dr: 0, axis: 0 }, { path: 'other.toml', bv: 10, dr: 10, axis: 10 }];
+  const helpers = loadSelected(chartPath, ['faceBvDrHitPaths', 'hsAreaHitPaths']);
+  for (const name of ['FaceProbEditableCell', 'FaceBvDrTableCard', 'HsAreaGrid', 'ThresholdEditableCell', 'ToneNumberCell']) {
+    for (const blocked of ['', 'loading', 'failed']) {
+      const selected = [], jumps = [];
+      const globals = {
+        ...helpers, source: tableSource, eligibleHeatmapPoints: points, heatmapPoints: points,
+        rowIndex: 0, columnIndex: 0, field: { value: '123' }, value: '123', target: { kind: 'value', rowIndex: 0, columnIndex: 0 },
+        showHitCounts: true, heatmapLoading: blocked === 'loading', heatmapFailed: blocked === 'failed',
+        onSelectHeatmapImages: paths => selected.push(paths ?? ['a.toml', 'b.toml']),
+        onSourceJump: (...args) => jumps.push(args), jumpToCellSource: (...args) => jumps.push(args), onCellSourceJump: (...args) => jumps.push(args),
+        onHitImages: () => selected.push(['a.toml', 'b.toml']), tableId: 'target',
+        controls: { heatmapLoading: blocked === 'loading', heatmapFailed: blocked === 'failed', onCellJump: (...args) => jumps.push(args) },
+      };
+      const relative = name === 'ToneNumberCell' ? '../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx' : chartPath;
+      const events = heatmapCellEvents(name, globals, relative);
+      let stopped = 0, prevented = 0;
+      const event = { stopPropagation: () => stopped++, preventDefault: () => prevented++ };
+      events.onClick(event);
+      assert.deepEqual(selected, blocked ? [] : [['a.toml', 'b.toml']], `${name}/${blocked}: all unique hits`);
+      assert.equal(jumps.length, 0, 'left click never jumps');
+      events.onContextMenu(event);
+      assert.equal(jumps.length, 1, `${name}: right click still navigates`);
+      assert.equal(selected.length, blocked ? 0 : 1, 'right click cannot also change image selection');
+      assert.equal(stopped, 2);
+      assert.equal(prevented, 1);
+    }
+  }
+});
+
+test('threshold parameter mode and an unbound count cell cannot accidentally select images', () => {
+  let selections = 0;
+  const props = { showHitCounts: false, heatmapLoading: false, heatmapFailed: false, value: '123',
+    onSelectHeatmapImages: () => selections++, onSourceJump: undefined };
+  const events = heatmapCellEvents('ThresholdEditableCell', props);
+  const event = { stopPropagation() {}, preventDefault() {} };
+  events.onClick(event);
+  events.onContextMenu(event);
+  assert.equal(selections, 0);
+  const unbound = heatmapCellEvents('FaceProbEditableCell', { ...props, onSelectHeatmapImages: undefined });
+  assert.doesNotThrow(() => unbound.onClick(event));
+  assert.doesNotThrow(() => unbound.onContextMenu(event));
+});
+
+test('left-click heatmap hits reach the workspace multi-selection and focus only the first matching image', () => {
+  const relative = '../src/views/mtk/isp6s/Isp6sAeVisual.tsx';
+  const parsed = ts.createSourceFile(relative, readFileSync(new URL(relative, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'onSelectHeatmapImages') declaration = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  assert.ok(declaration);
+  const { outputText } = ts.transpileModule(`const ${declaration.getText(parsed)}; module.exports = onSelectHeatmapImages;`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const entries = ['a.toml', 'b.toml', 'other.toml'].map(toml_path => ({ toml_path }));
+  const states = [], picks = [];
+  const globals = { heatmapSelection: { entries, paths: ['other.toml'] }, imageDir: { entries },
+    setHeatmapSelection: state => states.push(state), onPickImage: (...args) => picks.push(args) };
+  const module = { exports: {} };
+  new Function('module', ...Object.keys(globals), outputText)(module, ...Object.values(globals));
+  const cell = heatmapCellEvents('FaceBvDrTableCard', {
+    ...loadSelected(chartPath, ['faceBvDrHitPaths']), source: { rowHeaders: [0, 10], columnHeaders: [0, 10] },
+    eligibleHeatmapPoints: [{ path: 'a.toml', bv: 0, dr: 0 }, { path: 'b.toml', bv: 5, dr: 5 }, { path: 'other.toml', bv: 10, dr: 10 }],
+    rowIndex: 0, columnIndex: 0, heatmapLoading: false, heatmapFailed: false, onSelectHeatmapImages: module.exports,
+  });
+  cell.onClick({ stopPropagation() {} });
+  assert.deepEqual(states[0], { entries, paths: ['a.toml', 'b.toml'] });
+  assert.deepEqual(picks, [[0, { preserveHeatmapSelection: true }]]);
+  module.exports([]);
+  assert.deepEqual(states[1].paths, [], 'zero hits clears selection without picking an unrelated image');
+  assert.equal(picks.length, 1);
+});
+
 const presentation = loadSelected('../src/views/mtk/isp6s/TablePane/tableCellPresentation.ts', ['formatSubstitutedValue']);
 const table = loadSelected(tablePath, ['evaluateFaceTable', 'withLookupAliases'], presentation);
 

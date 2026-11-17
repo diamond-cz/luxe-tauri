@@ -7992,13 +7992,17 @@ function FaceProbEditableCell({
     const hitStatus = heatmapLoading ? "统计中" : heatmapFailed ? "读取失败" : `${heatmapCount ?? 0} 张图片命中`;
     return (
       <div
-        style={heatmapStyle}
+        style={{ ...heatmapStyle, cursor: onSelectHeatmapImages && !heatmapLoading && !heatmapFailed ? "pointer" : "default" }}
         title={hitStatus}
         aria-label={hitStatus}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           if (onSourceJump) onSourceJump(value);
-          else if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
         }}
       >
         {heatmapLoading ? "…" : heatmapFailed ? "-" : heatmapCount ?? 0}
@@ -8695,15 +8699,21 @@ function FaceBvDrTableCard({
                     if (showHeatmap && showHitCounts) return (
                       <div
                         key={`${title}:cell:${rowIndex}:${columnIndex}`}
-                        style={faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active)}
+                        style={{ ...faceBvDrHeatCellStyle(hitCount, maxHeatmapCount, active),
+                          cursor: onSelectHeatmapImages && !heatmapLoading && !heatmapFailed ? "pointer" : "default" }}
                         title={`BV ${formatComputedNumber(source.rowHeaders[rowIndex])} / DR ${formatComputedNumber(source.columnHeaders[columnIndex])}: ${hitStatus}`}
                         aria-label={`${title} BV ${formatComputedNumber(source.rowHeaders[rowIndex])} DR ${formatComputedNumber(source.columnHeaders[columnIndex])} ${hitStatus}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!heatmapLoading && !heatmapFailed) {
+                            onSelectHeatmapImages?.(faceBvDrHitPaths(source, eligibleHeatmapPoints, rowIndex, columnIndex));
+                          }
+                        }}
                         onContextMenu={(event) => {
                           event.preventDefault();
+                          event.stopPropagation();
                           if (field && onSourceJump) {
                             jumpToCellSource(field, target, field.value);
-                          } else if (!heatmapLoading && !heatmapFailed) {
-                            onSelectHeatmapImages?.(faceBvDrHitPaths(source, eligibleHeatmapPoints, rowIndex, columnIndex));
                           }
                         }}
                       >
@@ -10341,7 +10351,8 @@ function HsAreaGrid({
                     }}
                     title={heatmapStatus}
                     aria-label={`HS Area BV 第 ${rowIndex + 1} 行，${columnLabel} 第 ${columnIndex + 1} 列，${heatmapStatus}`}
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       if (source && !heatmapLoading && !heatmapFailed) {
                         onSelectHeatmapImages?.(hsAreaHitPaths(source, heatmapPoints, rowIndex, columnIndex));
                       }
@@ -10351,8 +10362,6 @@ function HsAreaGrid({
                       event.stopPropagation();
                       if (field && onCellSourceJump) {
                         onCellSourceJump(field, { kind: "value", rowIndex, columnIndex }, field.value);
-                      } else if (source && !heatmapLoading && !heatmapFailed) {
-                        onSelectHeatmapImages?.(hsAreaHitPaths(source, heatmapPoints, rowIndex, columnIndex));
                       }
                     }}
                   >
@@ -10539,11 +10548,17 @@ function ThresholdEditableCell({
           boxShadow: highlighted ? "inset 0 0 0 1px var(--colorBrandStroke1)" : undefined,
         } : {}),
       }}
+      onClick={(event) => {
+        if (showHitCounts) {
+          event.stopPropagation();
+          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+        }
+      }}
       onContextMenu={(event) => {
         if (showHitCounts) {
           event.preventDefault();
           event.stopPropagation();
-          if (!heatmapLoading && !heatmapFailed) onSelectHeatmapImages?.();
+          onSourceJump?.(value);
           return;
         }
         if (event.target !== event.currentTarget || !onSourceJump) return;
@@ -10553,7 +10568,7 @@ function ThresholdEditableCell({
     >
       {showHitCounts ? (
         <div
-          aria-label={`${label}${heatmapStatus}，右键筛选命中图片`}
+          aria-label={`${label}${heatmapStatus}，左键筛选命中图片`}
           style={{
             ...thresholdCellInputStyle(false),
             cursor: onSelectHeatmapImages && !heatmapLoading && !heatmapFailed ? "pointer" : "default",
