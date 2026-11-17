@@ -54,7 +54,6 @@ export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCal
     <ToneLceChartHeader title="LCE Target Weight" source={t("tone_lce.weight_source")} expanded={expanded}
       controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
     <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
-      <div className="formula-expression">Target = (LVTarget × LVProb + LumaFlatTarget × (1000 − LVProb)) / 1000</div>
       <table className="w-full table-auto border-collapse text-left tabular-nums" aria-label="LCE Target Weight · EXIF">
         <tbody>{values.map(([key, value, target, targetKey]) => <tr key={key}>
           <th scope="row" className="font-normal">{key}</th>

@@ -37,7 +37,6 @@ export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> })
   return <section className="tone-lce-chart-card" aria-label="LCE Curve">
     <ToneLceChartHeader title="LCE Curve" expanded={expanded} controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
     <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
-      <div className="formula-expression">Gain = O − P</div>
       <table className="w-full table-fixed border-collapse text-center tabular-nums" aria-label={t("tone_lce.curve_nodes")}>
         <thead><tr>
           <th className="font-normal" scope="col">EXIF</th>

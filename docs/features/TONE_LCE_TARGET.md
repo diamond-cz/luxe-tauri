@@ -34,7 +34,7 @@ LCE 标签页首行左右分别为 `LCE Curve` 与 `LCE Target Weight`，独立�
 
 `ToneLceChartHeader.tsx` 在各自标题右侧提供 Fluent 上/下箭头按钮，分别显示/隐藏本卡片第二栏。默认展开，折叠只隐藏公式与数据；不改变左右分割比例或另一张卡片的展开状态。单侧折叠时共用外框仍保持对齐，两侧都折叠时整体高度随之缩减。按钮包含五语言 aria-label/title、aria-expanded 和指向唯一公式栏的 aria-controls，不新增持久化字段。
 
-第二栏包含公式说明与数据表。Curve 显示 `Gain = O − P`，Weight 显示 LVTarget 与 LumaFlatTarget 的概率混合结构；说明不将重算值写回 EXIF。表格参考 Back Scene Target 公式栏：仅横向细分隔线、数值加粗，移除纵向网格和交替底色。行列标题与右侧目标关键字使用项目 `--fontFamilyBase` 无衬线字体、600字重及 `--colorNeutralForeground2`，提高可辨识度；公式和数值保留原等宽字体。截图已清理，当前样式以实现和本文说明为准。
+第二栏仅包含数据表，2026-11-16 按用户要求移除 Curve 的 `Gain = O − P` 和 Weight 的 Target 概率混合说明行及对应分隔线；保留 Gain 数据、权重表、图表、提示和标题栏折叠功能，Target 卡片中的 Cal 计算说明仍保留。表格参考 Back Scene Target 公式栏：仅横向细分隔线、数值加粗，移除纵向网格和交替底色。行列标题与右侧目标关键字使用项目 `--fontFamilyBase` 无衬线字体、600字重及 `--colorNeutralForeground2`，提高可辨识度；数值保留原等宽字体。截图已清理，当前样式以实现和本文说明为准。
 
 公式表最后一行取消底线，保留公式区唯一外边界作为与图体的分隔，避免重复横线。展开/折叠行为保留自动化验收记录，过渡版本截图已清理。
 

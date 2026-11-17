@@ -280,6 +280,7 @@ test('chart headers expose independent formula-row toggles and place data before
     assert.equal(children[0].type, 'ToneLceChartHeader');
     assert.equal(children[1].props.className, 'tone-lce-chart-formula formula-panel');
     assert.equal(children[1].props.hidden, false);
+    assert.equal(children[1].props.children.type, 'table');
     assert.equal(children[2].props.className, 'tone-lce-chart-body');
     assert.equal(nodes(children[1], 'tr').length, 4);
   }
