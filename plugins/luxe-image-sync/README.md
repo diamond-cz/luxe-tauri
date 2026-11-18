@@ -1,12 +1,22 @@
 # LUXE 图片联动插件
 
-当前插件版本 **0.1.5**，仅支持 Windows x64。HiViewer 通过 `native-view` 快照推送图片路径，LUXE 将路径映射到已扫描工作区中的图片 index；两个应用的列表排序可以不同，不直接复制数字 index。
+当前插件版本 **0.1.6**，仅支持 Windows x64。HiViewer 通过 `native-view` 快照推送图片路径，LUXE 将路径映射到已扫描工作区中的图片 index；两个应用的列表排序可以不同，不直接复制数字 index。
 
 设置测试机列后，跟随宿主快照的 `testMachineCurrentPath`：点击参考机图片时，同步同一行的测试机图片；该行缺少测试机图片时停止该次同步，不跳首图或参考机。未设置测试机列时跟随 `currentPath`。关闭插件窗口会隐藏窗口并保持后台同步；A/D 和上一张/下一张按钮控制 LUXE 的图片选择。
 
 LUXE 必须运行且图片目录已被扫描。路径必须命中唯一的已索引图片；未匹配或多个工作区匹配时不会猜测、扫描或改写工作区。
 
-## 0.1.5 更新与状态命令
+## 0.1.6 宿主接管的自更新
+
+按2026-11-18只读核对的 HiViewer 提交 `faa06671`，宿主已支持 `native.update` 权限和 `plugin.update.v1` stdio 回调。首次将0.1.5升级到0.1.6仍须从完整 `.hvp` 安装，并在启用时授予新增的 `native.update`；旧版插件不能自行追加权限。完成这一次安装后，后续契约兼容的新版本可在插件窗口点击“检查插件更新 → 下载并安装”，无需再次选包或重新启用。
+
+插件先经固定代理目录下载 `.hvp` 并验证 SHA-256、ID/版本/平台，再对比除版本外的完整 manifest 契约。只将 `bin/` 文件解至私有 `updates/runtime-<version>-<nonce>/`，不执行新程序、不覆盖当前安装。随后仍连接宿主的原插件进程发送 `host/plugin.update.prepare`，使用响应的规范路径/版本/digest发送commit；校验并保存commit回执后，发送无ID的complete通知。宿主导入新revision并保留授权/数据，终止旧进程，尝试恢复原生视图和最新viewer快照；界面最终提示可能随旧进程交接而消失，应以宿主安装版本和重开后的握手为准。
+
+等待回执期间，stdin读取线程继续分派viewer/update，回调使用唯一字符串ID、单个在途槽位、60秒等待上限；stdout共用同一互斥写入器。超时不把“下载成功”当作“安装成功”，也不自动重发commit；先检查宿主实际安装状态。已成功复制或明确失败的候选目录会尝试删除，超时保留供核查；未解决候选最多2份。权限、命令、dataVersion或其他集成声明变化时，提示改走完整包审查。
+
+旧宿主未同时公布能力和授权时不发送host更新回调，继续下载/定位包并提示手动安装。LUXE应用版本不随插件0.1.6修改；本次不修改HiViewer代码、不承诺启用生命周期已由宿主接线。
+
+## 0.1.5 更新与状态命令（历史）
 
 插件清单新增可见命令 `check-update / updater/open`。现有 HiViewer 根据清单自动在插件卡片的状态命令旁显示“检查插件更新”；点击后打开状态窗口并自动检查，窗口尚未就绪时通过恢复状态保留检查请求。原 `sync / view/open` 的文字改为“检查 LUXE 图片联动状态”，命令 ID 保留。
 
@@ -24,20 +34,20 @@ LUXE 必须运行且图片目录已被扫描。路径必须命中唯一的已索
 
 ## 首次获取与安装
 
-1. 从 GitHub Actions 的 **Build HiViewer plugin** 下载 artifact `luxe-image-sync-windows-x86_64` 并解压，取出 `luxe-image-sync-0.1.5-windows-x86_64.hvp`。选择内部 `.hvp`，不要选择 artifact 外层 ZIP。
-2. 发布 job 完成后也可从 Release `luxe-image-sync-v0.1.5` 获取同名 `.hvp`。构建 job 成功与发布 job 成功需要分别核对。
-3. 在 HiViewer **设置 → 自定义插件 → 从插件包安装／更新** 选择 `.hvp`，确认安装，启用 **LUXE 图片联动** 并授权 `selection.read` / `native.execute`。
+1. 从 GitHub Actions 的 **Build HiViewer plugin** 下载 artifact `luxe-image-sync-windows-x86_64` 并解压，取出 `luxe-image-sync-0.1.6-windows-x86_64.hvp`。选择内部 `.hvp`，不要选择 artifact 外层 ZIP。
+2. 发布 job 完成后也可从 Release `luxe-image-sync-v0.1.6` 获取同名 `.hvp`。构建 job 成功与发布 job 成功需要分别核对；尚未推送/发布的版本在线上不可下载。
+3. 在 HiViewer **设置 → 自定义插件 → 从插件包安装／更新** 选择 `.hvp`，确认安装，启用 **LUXE 图片联动** 并授权 `selection.read` / `native.execute` / `native.update`。
 4. 启动 LUXE 并加载图片工作区。在目前尚未扩展生命周期的 HiViewer 上，首次仍需点击 **检查 LUXE 图片联动状态** 建立会话，之后隐藏窗口可继续同步。只修改清单文字不等于宿主启用时已经自动启动。
 
 ## 后续更新
 
-插件窗口提供 **检查插件更新**。发现较新版本后按钮变为 **下载 v版本号**；下载完成校验 SHA-256、包内插件 ID、版本及平台，在资源管理器定位 `.hvp`，窗口显示完整路径。然后在 HiViewer **从插件包安装／更新** 选择该文件并确认安装，再启用并打开插件，无需卸载旧版。
+插件窗口提供 **检查插件更新**。支持授权自更新的宿主上发现新版本后显示 **下载并安装 v版本号**，按上节完成宿主交接；无此能力时显示 **下载 v版本号**，校验后在资源管理器定位 `.hvp`，再从HiViewer完整包安装并授权，无需卸载旧版。
 
 更新需要 Windows 自带的 Windows PowerShell 5.1；下载在隐藏进程中进行，流式读写、限时与限额，失败后可重试。包保存在宿主授权的 `HIVIEWER_PLUGIN_DATA_DIR/updates/`，只复用同一版本且摘要一致的文件，不覆盖已有文件。该目录保留已下载版本用于手动安装；不存入已安装包目录。
 
 Windows PowerShell 5.1 启动时将 `PSModulePath` 限定为自身 `$PSHOME/Modules`，仅影响更新子进程；避免从 PowerShell 7 经 Node 或宿主继承不兼容模块路径，导致 `Get-FileHash` 无法使用。`npm run plugin:test` 包含带不兼容模块路径的完整校验测试；CI 仍使用 Node 22，不能通过跳过更新脚本测试解决此问题。
 
-**边界：现有 HiViewer v1 未开放插件安装回调。仅修改本插件可增加卡片上的命令按钮、自动检查、下载、校验和定位；直接进入宿主安装确认和“启用即同步”仍需要宿主生命周期/安装接口扩展。本次没有修改 `D:\Image_process\hiviewer_rs`，不会覆盖正在运行的 EXE 或改写宿主安装记录。**
+**边界：新版HiViewer的安装回调仅在当前stdio会话获得native.update授权后开放；完整包声明变化不能通过该接口绕过审查。“启用即同步”生命周期与自更新分开验收。本次没有修改 `D:\Image_process\hiviewer_rs`，不会覆盖正在运行的 EXE 或自行改写宿主安装记录。**
 
 ## 启用即同步需要的宿主接线
 
@@ -81,11 +91,11 @@ https://gh-proxy.com/https://github.com/diamond-cz/luxe-tauri/releases/download/
 npm run typecheck
 npm run sync:test
 npm run plugin:test
-rustfmt --check --edition 2021 plugins/luxe-image-sync/native/src/main.rs plugins/luxe-image-sync/native/src/viewer_snapshot.rs plugins/luxe-image-sync/native/src/plugin_update.rs
+rustfmt --check --edition 2021 plugins/luxe-image-sync/native/src/main.rs plugins/luxe-image-sync/native/src/viewer_snapshot.rs plugins/luxe-image-sync/native/src/plugin_update.rs plugins/luxe-image-sync/native/src/host_update.rs
 ```
 
 完整 `npm run plugin -- check plugins/luxe-image-sync` 和 `pack` 需要 `bin/luxe-image-sync.exe`，由 CI 构建后执行。本地包测试使用不执行的二进制夹具验证真实打包、目录生成及摘要；更新脚本测试用本地 ZIP 和模拟传输覆盖真实校验、下载、复用与失败清理，不代表远程下载或安装包已验收。
 
-安装产物后应检查：主窗口/对比窗口切图、设置测试机并切换参考机同一行、测试机缺图、取消测试机配置、隐藏插件窗口继续同步、LUXE 晚启动重连、A/D、更新失败重试，以及较新版本下载后从宿主安装并重新启用。Windows 实际安装、网络和桌面交互需要单独验收。
+安装产物后应检查：主窗口/对比窗口切图、设置测试机并切换参考机同一行、测试机缺图、取消测试机配置、隐藏插件窗口继续同步、LUXE晚启动重连、A/D；新版宿主上安装0.1.6完整包并授予native.update，随后用实际发布的更高版本验证插件内下载安装、宿主版本/启用/数据保留、视图及最新选图恢复；另验证旧宿主回退、权限撤销、下载/commit失败和契约变化。仅把当前版本号改低或伪装新版本不能替代真实新程序握手。Windows实际安装、网络和桌面交互需要单独验收。
 
 stdout 只用于 HiViewer JSON-RPC，日志写入 stderr。LUXE 联动使用 Windows Named Pipe `\\.\pipe\luxe-image-sync-v1` 与有界 JSONL。

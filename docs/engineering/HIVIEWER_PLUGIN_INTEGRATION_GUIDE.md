@@ -1,5 +1,27 @@
 # HiViewer 插件启用、状态检查与更新安装改造指南
 
+## 2026-11-18：新版宿主自更新接口已接入 LUXE 插件0.1.6
+
+本节优先于下方2026-11-14的历史分析。只读核对 `D:/Image_process/hiviewer_rs` 提交 `faa06671`：`docs/plugins/native-updates.md`、`plugins/sdk/rust/src/lib.rs`、`src-tauri/src/plugins/{sidecar,update_rpc,native_update}.rs` 已定义可用的原生自更新契约，旧结论“无host安装回调”不再适用于支持该能力的宿主。当前修改仅在LUXE仓库，不改HiViewer。
+
+| 环节 | 当前实际接口与LUXE实现 |
+| --- | --- |
+| 首次接入 | 0.1.6完整包声明native.update；从0.1.5首次升级须完整包安装并授予新增权限 |
+| 能力协商 | plugin/initialize.params中的host.capabilities含plugin.update.v1且permissions含native.update；缺少任一项仅提供手动包安装 |
+| 下载校验 | 固定gh-proxy目录、原地址回退、SHA256及manifest身份校验保持原逻辑；独立安装还比较除版本外的全部manifest声明，变更契约须完整包审查 |
+| 文件准备 | update.ps1将bin文件解至HIVIEWER_PLUGIN_DATA_DIR/updates/runtime-版本-随机值，仅运行目录导入；拒绝路径穿越、链接、重名和过大解包内容，不执行安装器 |
+| prepare | 原插件进程通过当前stdout发送字符串ID请求host/plugin.update.prepare，只含executable/version；宿主检查并返回规范路径、版本、digest |
+| commit | 同一会话发送host/plugin.update.commit，只含prepare返回的executable/version及expectedDigest；校验回执pluginId/version/enabled/status/revision |
+| complete | 消费commit回执、尽力保存本地回执并清理已复制候选后，发送无ID的host/plugin.update.complete；之后可能立即被宿主结束，不依赖UI invoke返回判断安装是否成功 |
+| 并发 | host_update.rs单个在途回调、唯一字符串ID、60秒超时；stdin主循环继续处理数字ID的viewer/update，响应按ID送回等待线程；stdout互斥串行写入 |
+| 恢复 | 宿主复用授权、数据及集成声明，管理新revision并尝试恢复打开的native-view及最新viewer快照；commit成功不代表新版握手或UI一定成功，须分别验收 |
+
+不移动安装目录中的旧EXE，不自行改宿主安装记录；host API安装失败保留原安装，超时不盲目重发commit。候选目录最多保留2份未解决记录，明确失败/成功的候选会尝试清理，超时保留供核对宿主状态。权限、命令、Worker、dataVersion或其他声明变化时不走独立更新。自更新不推定存在host/image.select，也不证明启用生命周期已经接线。
+
+验证入口为 `npm run plugin:test / sync:test` 和原有插件CI：PowerShell实际ZIP测试覆盖资源层级、契约变化及路径拒绝；JS测试覆盖“下载并安装”、旧宿主回退和安装状态；Rust新增能力/权限、交错viewer消息、原会话prepare/commit/complete顺序、错误与断开测试。本地Rust只做rustfmt静态检查；尚未发布的0.1.6包、真实跨版本安装及视图恢复仍需CI产物与Windows宿主验收。
+
+## 以下为2026-11-14宿主改造历史分析
+
 ## 范围与当前结论
 
 本文供后续在 `D:/Image_process/hiviewer_rs` 中实施优化使用。本轮只修改 `D:/Image_process/luxe-tauri`，没有把本文中的宿主方案写入 HiViewer，也没有声明宿主功能已完成。

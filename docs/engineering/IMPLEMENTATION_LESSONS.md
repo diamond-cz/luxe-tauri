@@ -4,6 +4,32 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-18：插件0.1.6接入新版HiViewer原会话自更新
+
+**亮点**
+
+- 只读核对 `D:/Image_process/hiviewer_rs` 提交 `faa06671` 的 `docs/plugins/native-updates.md`、SDK及 `sidecar/update_rpc/native_update`，据此在LUXE插件新增 `native/src/host_update.rs`。原stdio会话发送prepare/commit，使用宿主返回的规范路径与digest，核对安装回执，持久化/清理后再发无ID的complete；不直接覆盖运行EXE或改写宿主安装记录。
+- 复用现有代理目录、SHA256和包身份验证，在 `update.ps1` 增加完整manifest契约比较及bin运行目录提取；单文件128MiB、总量256MiB、2048条目及15层路径上限，拒绝穿越、链接和大小写重复。仅私有updates写入，最多保留2份未解决候选，明确失败/安装成功后尝试清理，超时保留供核查。
+- 插件版本在Manifest/Cargo/Tauri四处同步为0.1.6，首次增加native.update授权；窗口根据协商能力显示“下载并安装”或旧宿主手动包安装。复用五语言资源，更新插件说明、宿主接口指南与索引，并修正规则R07/R13中过时的“无host更新回调”断言。LUXE应用版本保持0.2.18。
+
+**痛点**
+
+- 0.1.5只下载并在Explorer定位包，未协商宿主安装能力、未分派插件发起的回调响应；直接在stdin读取线程等待回执会与viewer/update互相阻塞。新实现采用唯一字符串ID、单个pending槽位和60秒超时，原读取循环继续处理宿主数字ID请求，共享stdout互斥写入。
+- 宿主独立导入保留旧manifest/Worker/授权，仅更新版本及运行目录；因此不能把未来包内新增权限或命令当作已获授权。下载校验后另比较除版本外的完整manifest，声明变化提示完整包重装审查。旧0.1.5必须先手动完整包安装0.1.6并授权一次，不能从旧进程自增权限。
+- 早期负例夹具用PowerShell普通Hashtable构造大小写重复路径，键被覆盖而未形成重复ZIP项；改用Ordinal字典才准确验证大小写重复拒绝。首次批量生成翻译时PowerShell管道将Unicode变成问号，已改为UTF-8临时Node文件生成并由五语言Unicode/placeholder测试复检，未保留错误文案。
+
+**闭坑**
+
+- 能力plugin.update.v1与权限native.update必须同时存在；没有能力不发送host回调。commit回执才是安装依据，不能因下载完成或发送complete就声明新程序已握手成功；complete后宿主可立即结束旧进程，不依赖UI返回才能完成必要写入。
+- 更新不能由新启动进程代替原会话提交；prepare返回的路径/版本/digest原样传给commit，不夹带pluginId等额外字段。超时先核查宿主版本，不自动重发commit。恢复原生视图由宿主负责，需独立验收，不把自更新接线当作启用即同步已完成。
+- 插件check/pack对LUXE清单检查新增权限；同版本发布资产不可覆盖，0.1.6需由原有插件CI构建发布后线上目录才可见。不能拿旧bin伪装为新版本，也不为本地验收运行Cargo编译。
+
+**验证**
+
+- Node `22.16.0` 合并执行sync:test与plugin:test对应7脚本148项通过；插件/联动专项25项通过，含Windows PowerShell5.1实际ZIP校验/运行目录提取、嵌套资源、契约拒绝、穿越/重复拒绝、真实Invoke编排返回runtime、2候选上限及继承PowerShell7模块路径回归。JS覆盖授权安装、旧宿主回退、重入与错误重试、五语言键及Unicode。
+- `npm run typecheck`、受影响3个Rust文件 `rustfmt --check --edition 2021` 与 `git diff --check`通过。Rust新增4项测试覆盖能力/授权、交错响应、断开/错误/回执校验及原会话prepare→commit→complete完整顺序；本地未编译/执行，等待插件CI。
+- HiViewer工作区 `git status --short`为空，本轮未修改宿主代码。未编译Rust/Tauri、未生成可安装0.1.6产物、未实测真实网络更新/宿主跨版本交接/Windows窗口恢复；当前未提交或推送。轻量夹具打包通过不代表真实插件安装已验收。
+
 ### 2026-11-17：恢复热力图命中数模式的左键图片多选
 
 **亮点**

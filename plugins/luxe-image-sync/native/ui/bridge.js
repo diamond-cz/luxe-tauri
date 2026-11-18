@@ -8,6 +8,8 @@ let ready = false;
 let updateBusy = false;
 let updateVersion = null;
 let autoCheckRequested = false;
+let nativeUpdateAvailable = false;
+let updateInstalled = false;
 const bufferedEvents = [];
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
 const t = (key, args = {}) => (labels[`image_sync.${key}`] || key)
@@ -21,8 +23,8 @@ function render() {
   document.querySelector('h1').textContent = t('title');
   document.title = t('title');
   const updateButton = document.querySelector('#update');
-  updateButton.textContent = t(updateBusy ? 'update_busy' : updateVersion ? 'update_download' : 'update_check', { version: updateVersion });
-  updateButton.disabled = !ready || updateBusy;
+  updateButton.textContent = t(updateBusy ? 'update_busy' : updateVersion ? (nativeUpdateAvailable ? 'update_download_install' : 'update_download') : 'update_check', { version: updateVersion });
+  updateButton.disabled = !ready || updateBusy || updateInstalled;
   document.querySelector('#path').textContent = state.currentPath || t('no_image');
   for (const [id, key] of [['previous', 'previous'], ['next', 'next']]) {
     const button = document.querySelector(`#${id}`);
@@ -42,7 +44,7 @@ function render() {
 }
 
 async function checkPluginUpdate(download = updateVersion !== null) {
-  if (!ready || updateBusy) return;
+  if (!ready || updateBusy || updateInstalled) return;
   updateBusy = true;
   const status = document.querySelector('#update-status');
   status.textContent = t('update_busy');
@@ -50,7 +52,11 @@ async function checkPluginUpdate(download = updateVersion !== null) {
   try {
     const result = await invoke('update_plugin', { download });
     updateVersion = result.available ? result.version : null;
-    if (result.path) {
+    if (result.installed) {
+      updateInstalled = true;
+      updateVersion = null;
+      status.textContent = t('update_installed', { version: result.version });
+    } else if (result.path) {
       status.textContent = t('update_install', { version: result.version, path: result.path });
       updateVersion = null;
     } else status.textContent = t(result.available ? 'update_available' : 'update_latest', { version: result.version });
@@ -58,6 +64,7 @@ async function checkPluginUpdate(download = updateVersion !== null) {
     console.warn('plugin update failed', error);
     const message = String(error);
     status.textContent = message.includes('catalog-not-published') ? t('update_not_published')
+      : message.includes('plugin-contract-changed') ? t('update_contract_changed')
       : t('update_failed', { error: message });
   } finally {
     updateBusy = false;
@@ -94,6 +101,12 @@ window.addEventListener('keydown', (event) => {
 });
 
 function applyEvent(name, payload) {
+  if (name === 'plugin-update-capability') {
+    nativeUpdateAvailable = payload === true;
+    if (!updateBusy && !updateVersion && !updateInstalled) document.querySelector('#update-status').textContent = t(nativeUpdateAvailable ? 'update_auto_hint' : 'update_hint');
+    render();
+    return;
+  }
   if (name === 'plugin-update-requested') {
     autoCheckRequested = true;
     if (ready) { autoCheckRequested = false; void checkPluginUpdate(false); }
@@ -133,7 +146,7 @@ function applyEvent(name, payload) {
 const registrations = [];
 void (async () => {
   try {
-    for (const name of ['viewer-updated', 'luxe-selection', 'luxe-connection', 'luxe-sync-pending', 'luxe-sync-result', 'luxe-sync-cleared', 'plugin-update-requested']) {
+    for (const name of ['viewer-updated', 'luxe-selection', 'luxe-connection', 'luxe-sync-pending', 'luxe-sync-result', 'luxe-sync-cleared', 'plugin-update-requested', 'plugin-update-capability']) {
       registrations.push(await window.__TAURI__.event.listen(name, ({ payload }) => {
         if (ready) applyEvent(name, payload);
         else {
@@ -151,6 +164,7 @@ void (async () => {
     document.documentElement.lang = code.replace('_', '-');
     await window.__TAURI__.window.getCurrentWindow().setTitle(t('title'));
     const initial = await invoke('get_bridge_state');
+    applyEvent('plugin-update-capability', initial.nativeUpdateAvailable);
     autoCheckRequested = initial.updateRequested === true;
     applyEvent('viewer-updated', initial.snapshot);
     if (initial.lastSelection) applyEvent('luxe-selection', initial.lastSelection);

@@ -139,7 +139,93 @@ function Test-PluginArchive([string]$ArchivePath, $Artifact) {
     } finally { $archive.Dispose() }
 }
 
-function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Directory) {
+function ConvertTo-ContractValue($Value) {
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [string] -or $Value -is [ValueType]) { return (ConvertTo-Json -InputObject $Value -Compress) }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [pscustomobject]) {
+        return '[' + ((@($Value | ForEach-Object { ConvertTo-ContractValue $_ })) -join ',') + ']'
+    }
+    return '{' + ((@($Value.PSObject.Properties | Sort-Object Name | ForEach-Object {
+        (ConvertTo-Json -InputObject $_.Name -Compress) + ':' + (ConvertTo-ContractValue $_.Value)
+    })) -join ',') + '}'
+}
+
+function Expand-PluginRuntime([string]$ArchivePath, [string]$Directory, [string]$Version, [string]$CurrentManifestJson) {
+    if (-not $CurrentManifestJson) { throw 'Current plugin contract unavailable' }
+    $current = $CurrentManifestJson | ConvertFrom-Json
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
+    $runtime = $null
+    $complete = $false
+    try {
+        $manifestEntry = @($archive.Entries | Where-Object { $_.FullName -ceq 'manifest.json' })
+        if ($manifestEntry.Count -ne 1 -or $manifestEntry[0].Length -gt 64KB) { throw 'Invalid package manifest' }
+        $reader = [IO.StreamReader]::new($manifestEntry[0].Open(), [Text.UTF8Encoding]::new($false, $true))
+        try { $candidate = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        if ($candidate.version -cne $Version) { throw 'Runtime version mismatch' }
+        # Independent updates preserve the host's installed contract. Any new
+        # permission/command/data/UI declaration needs a full package review.
+        $candidate.version = $current.version
+        if ((ConvertTo-ContractValue $candidate) -cne (ConvertTo-ContractValue $current)) { throw 'plugin-contract-changed: install the full package in HiViewer' }
+        if ($candidate.backend.executable -cne 'bin/luxe-image-sync.exe') { throw 'Invalid plugin executable' }
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $binEntries = @()
+        [long]$total = 0
+        if ($archive.Entries.Count -gt 2048) { throw 'Too many package entries' }
+        foreach ($entry in $archive.Entries) {
+            $name = $entry.FullName
+            if (-not $name -or $name.Contains('\') -or $name.StartsWith('/') -or $name.Contains(':') -or
+                @($name.Split('/') | Where-Object { $_ -in @('', '.', '..') -or $_.EndsWith('.') -or $_.EndsWith(' ') }).Count -gt 0 -or
+                $name.Split('/').Count -gt 15 -or -not $names.Add($name) -or
+                (($entry.ExternalAttributes -shr 16) -band 0xf000) -eq 0xa000 -or
+                ($entry.ExternalAttributes -band 0x400) -ne 0) { throw 'Unsafe package path or duplicate entry' }
+            $total += $entry.Length
+            if ($entry.Length -gt 128MB -or $total -gt 256MB) { throw 'Expanded package exceeds size limit' }
+            if ($name.StartsWith('bin/', [StringComparison]::Ordinal)) { $binEntries += $entry }
+        }
+        if (-not $names.Contains('bin/luxe-image-sync.exe')) { throw 'Plugin executable missing' }
+        # At most two unresolved candidates can survive interrupted/timed-out
+        # handoffs. Successful imports are removed by the native adapter.
+        if (@([IO.Directory]::GetDirectories($Directory, 'runtime-*')).Count -ge 2) { throw 'Too many unresolved plugin runtimes; inspect the installed version and remove retired runtime-* directories from the plugin update folder' }
+        $runtime = [IO.Path]::GetFullPath((Join-Path $Directory ('runtime-' + $Version + '-' + [Guid]::NewGuid().ToString('N'))))
+        $root = [IO.Path]::GetFullPath($Directory).TrimEnd('\') + '\'
+        if (-not $runtime.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe runtime directory' }
+        $null = [IO.Directory]::CreateDirectory($runtime)
+        [long]$writtenTotal = 0
+        foreach ($entry in $binEntries) {
+            $target = [IO.Path]::GetFullPath((Join-Path $runtime $entry.FullName.Substring(4)))
+            if (-not $target.StartsWith($runtime + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe runtime path' }
+            $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+            $inputStream = $entry.Open()
+            $outputStream = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                $buffer = New-Object byte[] 65536
+                [long]$written = 0
+                while (($count = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $written += $count
+                    $writtenTotal += $count
+                    if ($written -gt $entry.Length -or $written -gt 128MB -or $writtenTotal -gt 256MB) { throw 'Expanded runtime exceeds size limit' }
+                    $outputStream.Write($buffer, 0, $count)
+                }
+                if ($written -ne $entry.Length) { throw 'Truncated runtime entry' }
+                $outputStream.Flush($true)
+            }
+            finally { $outputStream.Dispose(); $inputStream.Dispose() }
+        }
+        $complete = $true
+        return (Join-Path $runtime 'luxe-image-sync.exe')
+    } finally {
+        $archive.Dispose()
+        if (-not $complete -and $runtime -and [IO.Directory]::Exists($runtime)) {
+            $root = [IO.Path]::GetFullPath($Directory).TrimEnd('\') + '\'
+            if (-not $runtime.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or
+                -not ([IO.Path]::GetFileName($runtime)).StartsWith('runtime-')) { throw 'Unsafe failed runtime cleanup' }
+            [IO.Directory]::Delete($runtime, $true)
+        }
+    }
+}
+
+function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Directory, [bool]$NativeInstall = $false, [string]$CurrentManifestJson = '') {
     if ($Mode -notin @('check', 'download')) { throw 'Invalid update operation' }
     $null = Get-VersionParts $CurrentVersion
     if (-not [IO.Path]::IsPathRooted($Directory)) { throw 'Absolute update directory required' }
@@ -160,7 +246,9 @@ function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Di
             # File.Move refuses to replace an existing package. The live installed package is never modified.
             [IO.File]::Move($partial, $destination)
         }
-        return @{ available = $true; version = $artifact.version; path = $destination }
+        $executable = $null
+        if ($NativeInstall) { $executable = Expand-PluginRuntime $destination $Directory $artifact.version $CurrentManifestJson }
+        return @{ available = $true; version = $artifact.version; path = $destination; executable = $executable }
     } finally {
         foreach ($temporary in @($catalogPath, $partial)) {
             if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
@@ -170,7 +258,7 @@ function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Di
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        Invoke-PluginUpdate $env:LUXE_PLUGIN_UPDATE_MODE $env:LUXE_PLUGIN_CURRENT_VERSION $env:LUXE_PLUGIN_UPDATE_DIRECTORY | ConvertTo-Json -Compress
+        Invoke-PluginUpdate $env:LUXE_PLUGIN_UPDATE_MODE $env:LUXE_PLUGIN_CURRENT_VERSION $env:LUXE_PLUGIN_UPDATE_DIRECTORY ($env:LUXE_PLUGIN_NATIVE_INSTALL -eq '1') $env:LUXE_PLUGIN_CURRENT_MANIFEST | ConvertTo-Json -Compress
     } catch {
         [Console]::Error.WriteLine($_.Exception.Message)
         exit 1

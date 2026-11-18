@@ -105,7 +105,53 @@ try {
     Assert-True (@(Get-ChildItem -LiteralPath $updates -File).Count -eq 1) 'temporary files always removed'
     Assert-True ([IO.File]::ReadAllText($downloaded.path) -eq 'corrupted') 'existing corrupt package never overwritten'
     Assert-Throws { Invoke-PluginUpdate 'install' '0.1.4' $updates } 'Invalid update operation'
-    Write-Output 'Plugin update version, identity, digest, download, reuse and cleanup assertions passed.'
+    # Independent runtime import: only bin/ is exported; package integration
+    # declarations cannot silently change under inherited host grants.
+    $runtimeManifest = @{ manifestVersion = 1; apiVersion = 1; id = 'luxe.image-sync'; version = '0.1.7';
+        permissions = @('native.execute', 'selection.read', 'native.update'); dataVersion = 1;
+        backend = @{ executable = 'bin/luxe-image-sync.exe'; target = 'windows-x86_64'; transport = 'stdio-jsonl' } }
+    $contract = $runtimeManifest | ConvertTo-Json -Depth 10 -Compress
+    $runtimeManifest.version = '0.1.8'
+    function New-RuntimeArchive([string]$ExtraPath = '', [bool]$ChangedContract = $false) {
+        $archivePath = Join-Path $root ([Guid]::NewGuid().ToString('N') + '.hvp')
+        $zip = [IO.Compression.ZipFile]::Open($archivePath, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $copy = ($runtimeManifest | ConvertTo-Json -Depth 10) | ConvertFrom-Json
+            if ($ChangedContract) { $copy.permissions += 'network.fetch' }
+            $entries = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+            $entries.Add('manifest.json', ($copy | ConvertTo-Json -Depth 10))
+            $entries.Add('main.js', 'worker')
+            $entries.Add('bin/luxe-image-sync.exe', 'new-executable')
+            $entries.Add('bin/lib/runtime.dll', 'library')
+            if ($ExtraPath) { $entries[$ExtraPath] = 'unsafe' }
+            foreach ($name in $entries.Keys) {
+                $entry = $zip.CreateEntry($name)
+                $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
+                try { $writer.Write($entries[$name]) } finally { $writer.Dispose() }
+            }
+        } finally { $zip.Dispose() }
+        return $archivePath
+    }
+    $runtimeArchive = New-RuntimeArchive
+    $executable = Expand-PluginRuntime $runtimeArchive $updates '0.1.8' $contract
+    Assert-True ([IO.File]::ReadAllText($executable) -eq 'new-executable') 'runtime executable staged'
+    $runtimeDir = [IO.Path]::GetDirectoryName($executable)
+    Assert-True ([IO.File]::ReadAllText((Join-Path $runtimeDir 'lib/runtime.dll')) -eq 'library') 'nested runtime resources preserved'
+    Assert-True (-not [IO.File]::Exists((Join-Path $runtimeDir 'main.js'))) 'worker/manifest are not copied into runtime root'
+    Assert-True (@(Get-ChildItem -LiteralPath $runtimeDir -File).Count -eq 1) 'runtime contains no downloaded archives or updater state'
+    Assert-Throws { Expand-PluginRuntime $runtimeArchive $updates '0.1.9' $contract } 'version mismatch'
+    Assert-Throws { Expand-PluginRuntime (New-RuntimeArchive -ChangedContract $true) $updates '0.1.8' $contract } 'plugin-contract-changed'
+    foreach ($unsafe in @('bin/../escape.exe', 'bin/C:/escape.exe', 'bin/lib/./bad.dll', 'bin/LUXE-IMAGE-SYNC.EXE')) {
+        Assert-Throws { Expand-PluginRuntime (New-RuntimeArchive $unsafe) $updates '0.1.8' $contract } 'Unsafe package path'
+    }
+    $fixture = $runtimeArchive
+    $artifact.version = '0.1.8'
+    $artifact.url = 'https://gh-proxy.com/https://github.com/diamond-cz/luxe-tauri/releases/download/luxe-image-sync-v0.1.8/luxe-image-sync-0.1.8-windows-x86_64.hvp'
+    $artifact.sha256 = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
+    $native = Invoke-PluginUpdate 'download' '0.1.7' $updates $true $contract
+    Assert-True ([IO.File]::Exists($native.path) -and [IO.File]::Exists($native.executable)) 'real updater returns both verified package and isolated runtime'
+    Assert-Throws { Expand-PluginRuntime $runtimeArchive $updates '0.1.8' $contract } 'Too many unresolved'
+    Write-Output 'Plugin update version, identity, digest, download, reuse, runtime contract and cleanup assertions passed.'
 } finally {
     # Only this explicitly created test directory may be removed.
     $resolvedRoot = [IO.Path]::GetFullPath($root)

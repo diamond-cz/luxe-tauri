@@ -35,6 +35,7 @@ test('plugin has an invocable open command and declares the hidden refresh metho
   assert.ok(manifest.commands.some(command => command.method === 'viewer/start' && command.hidden));
   assert.ok(manifest.commands.some(command => command.method === 'viewer/update' && command.hidden));
   assert.equal(manifest.dataVersion, 1);
+  assert.ok(manifest.permissions.includes('native.update'));
   for (const locale of ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'tr-TR']) {
     for (const command of visible) {
       assert.ok(manifest.localizations[locale][command.title.slice(1, -1)]?.trim());
@@ -66,6 +67,14 @@ test('source package checker rejects mismatched native handshake version', t => 
   const result = spawnSync(process.execPath, [tool, 'check', f.plugin], { encoding: 'utf8' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /versions must match/);
+});
+
+test('LUXE self-update package cannot omit its one-time native.update grant', t => {
+  const f = fixture(t);
+  f.save({ ...manifest, permissions: manifest.permissions.filter(value => value !== 'native.update') });
+  const result = spawnSync(process.execPath, [tool, 'check', f.plugin], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /self-update requires native.update/);
 });
 
 test('catalog identifies the exact packed archive by immutable version, platform and SHA256', t => {

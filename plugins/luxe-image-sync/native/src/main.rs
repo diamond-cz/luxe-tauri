@@ -1,5 +1,5 @@
 use std::{
-    io::{BufReader, Write},
+    io::BufReader,
     sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::watch;
 
+mod host_update;
 mod plugin_update;
 #[path = "../../../../src-tauri/src/image_sync/protocol.rs"]
 mod protocol;
@@ -26,6 +27,7 @@ struct BridgeState {
     luxe_connected: std::sync::atomic::AtomicBool,
     snapshot: RwLock<ViewerSnapshot>,
     update_requested: std::sync::atomic::AtomicBool,
+    host_update: Arc<host_update::HostUpdate>,
 }
 
 impl Default for BridgeState {
@@ -36,6 +38,7 @@ impl Default for BridgeState {
             luxe_connected: std::sync::atomic::AtomicBool::new(false),
             snapshot: RwLock::new(ViewerSnapshot::default()),
             update_requested: std::sync::atomic::AtomicBool::new(false),
+            host_update: Arc::new(host_update::HostUpdate::default()),
         }
     }
 }
@@ -85,6 +88,7 @@ fn get_bridge_state(state: State<'_, Arc<BridgeState>>) -> Result<Value, String>
     Ok(
         json!({ "snapshot": *snapshot, "connected": is_connected(&state),
         "updateRequested": state.update_requested.load(std::sync::atomic::Ordering::Acquire),
+        "nativeUpdateAvailable": state.host_update.available(),
         "pendingSequence": queue.pending_sequence(), "lastAck": queue.last_ack, "lastSelection": *selection }),
     )
 }
@@ -148,14 +152,8 @@ fn queue_image_selection(
     Ok(())
 }
 
-fn send_host_message(stdout: &Arc<Mutex<std::io::Stdout>>, message: Value) {
-    if let Ok(mut bytes) = serde_json::to_vec(&message) {
-        bytes.push(b'\n');
-        if let Ok(mut output) = stdout.lock() {
-            let _ = output.write_all(&bytes);
-            let _ = output.flush();
-        }
-    }
+fn send_host_message(stdout: &Arc<host_update::HostUpdate>, message: Value) {
+    let _ = stdout.send(&message);
 }
 
 fn read_host_line<R: std::io::BufRead>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>> {
@@ -191,7 +189,7 @@ fn read_host_line<R: std::io::BufRead>(reader: &mut R) -> std::io::Result<Option
 }
 
 fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
-    let stdout = Arc::new(Mutex::new(std::io::stdout()));
+    let stdout = state.host_update.clone();
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
         let mut reader = BufReader::new(stdin.lock());
@@ -204,15 +202,22 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
             let Ok(message) = serde_json::from_slice::<Value>(line) else {
                 continue;
             };
+            if stdout.receive(&message) {
+                continue;
+            }
             let id = message.get("id").cloned().unwrap_or(Value::Null);
             match message.get("method").and_then(Value::as_str) {
-                Some("plugin/initialize") => send_host_message(
-                    &stdout,
-                    json!({
-                        "jsonrpc": "2.0", "id": id,
-                        "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": env!("CARGO_PKG_VERSION") }, "capabilities": [] }
-                    }),
-                ),
+                Some("plugin/initialize") => {
+                    stdout.initialize(&message["params"]);
+                    let _ = app.emit("plugin-update-capability", stdout.available());
+                    send_host_message(
+                        &stdout,
+                        json!({
+                            "jsonrpc": "2.0", "id": id,
+                            "result": { "protocolVersion": 1, "plugin": { "id": PLUGIN_ID, "version": env!("CARGO_PKG_VERSION") }, "capabilities": [] }
+                        }),
+                    );
+                }
                 Some("view/open")
                 | Some("updater/open")
                 | Some("viewer/start")
@@ -292,6 +297,7 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                 }
             }
         }
+        stdout.disconnect();
         std::process::exit(0);
     });
 }

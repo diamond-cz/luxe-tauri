@@ -77,6 +77,7 @@ async function readManifest(root) {
       fail("native-view requires a viewer/update command");
     }
     if (!manifest.permissions.includes("selection.read")) fail("native-view requires selection.read permission");
+    if (manifest.id === "luxe.image-sync" && !manifest.permissions.includes("native.update")) fail("LUXE self-update requires native.update permission");
     for (const contribution of manifest.contributions ?? []) {
       if (!visible.some((command) => command.id === contribution.command)) {
         fail(`contribution ${contribution.id} must reference a visible command`);

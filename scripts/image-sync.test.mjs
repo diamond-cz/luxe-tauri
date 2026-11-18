@@ -212,7 +212,7 @@ test('sync labels have the same keys and placeholders in all five languages with
   }
 });
 
-async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.5', path: null }), initialUpdateRequested = false) {
+async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.6', path: null }), initialUpdateRequested = false, nativeUpdateAvailable = false) {
   const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next', '#update', '#update-status'].map((key) => [key, {}]));
   const events = {}, windowEvents = {}, commands = [];
   const window = {
@@ -228,6 +228,7 @@ async function pluginUiHarness(update = async () => ({ available: false, version
           snapshot: { files: ['C:/a.jpg', 'C:/b.jpg'], currentPath: 'C:/a.jpg' },
           connected: true, pendingSequence: 1,
           updateRequested: initialUpdateRequested,
+          nativeUpdateAvailable,
         };
       } },
     },
@@ -294,6 +295,27 @@ test('plugin checks then downloads updates, blocks double clicks and explains ho
   assert.equal(h.commands.at(-1)[1].download, true);
   assert.match(h.nodes.get('#update-status').textContent, /C:\/data\/updates\/plugin.hvp/);
   assert.match(h.nodes.get('#update-status').textContent, /HiViewer/);
+});
+
+test('authorized plugin UI offers installation and treats only the host commit receipt as installed', async () => {
+  const h = await pluginUiHarness(async ({ download }) => ({ available: true, version: '0.1.7',
+    path: download ? 'C:/private/updates/plugin.hvp' : null, installed: download }), false, true);
+  assert.equal(h.nodes.get('#update-status').textContent, bundles.en_US['image_sync.update_auto_hint']);
+  await h.nodes.get('#update').onclick();
+  assert.equal(h.nodes.get('#update').textContent, 'Download and install v0.1.7');
+  await h.nodes.get('#update').onclick();
+  assert.match(h.nodes.get('#update-status').textContent, /0.1.7 installed/);
+  assert.equal(h.nodes.get('#update').disabled, true);
+  const count = h.commands.length;
+  await h.nodes.get('#update').onclick();
+  assert.equal(h.commands.length, count);
+});
+
+test('contract changes explain a full-package review and leave update controls retryable', async () => {
+  const h = await pluginUiHarness(async () => { throw new Error('plugin-contract-changed'); }, false, true);
+  await h.nodes.get('#update').onclick();
+  assert.equal(h.nodes.get('#update-status').textContent, bundles.en_US['image_sync.update_contract_changed']);
+  assert.equal(h.nodes.get('#update').disabled, false);
 });
 
 test('missing test-machine row clears navigation and clearing the device restores host focus', async () => {
