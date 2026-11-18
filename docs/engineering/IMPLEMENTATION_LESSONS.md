@@ -4,6 +4,28 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-18：发布可安装联动插件0.1.6并校验线上目录
+
+**亮点**
+
+- 自更新实现以中文提交 `5b3db8c` 推送origin/main，复用现有 `.github/workflows/plugin.yml`，Windows原生测试、release编译、check/pack与发布均成功；工作流 `44242484940` 的build-plugin和publish-plugin均为success，主CI `44242484926` 也为success。未另推插件tag触发重复构建，保留工作流生成的版本Release与稳定目录发布方式。
+- Release `luxe-image-sync-v0.1.6` 于 `2026-11-18T05:18:59Z` 公开，包含 `.hvp`、`.hvp.sha256`、中文安装说明和宿主集成指南。安装包 `luxe-image-sync-0.1.6-windows-x86_64.hvp` 为9,499,090字节，SHA256为 `c51be76b10aabd1bea60ba304cef08d700fb915cacbb70d10ba03c73cdb0dbc5`；下载副本保存在忽略目录 `.tmp-plugin-v016/published/`，未入库。
+
+**痛点**
+
+- 无新增发布失败；上次0.1.5重复发布遇到不可变包保护，本次增加到0.1.6后正常发布，无覆盖旧包。构建成功只证明包及原生测试通过，首次授权和真实跨版本窗口恢复仍须宿主安装验收。
+
+**闭坑**
+
+- 从0.1.5首次升级需完整安装0.1.6并授予native.update，后续契约兼容的新版本才能在插件中自更新；不能让旧包自行增加权限。安装选择内部.hvp，不选择Actions外层ZIP，不伪装版本进行更新验收。
+- 插件Release与目录不得替代应用latest；实际GitHub应用latest仍为v0.2.18。更新目录SHA256必须对应公开版本包，不能拿本地重建的同版包替换已发布字节。
+
+**验证**
+
+- 提交前Node `22.16.0` 的sync:test与plugin:test对应7脚本148项通过，`npm run typecheck`、3个受影响Rust文件rustfmt检查与 `git diff --check`通过；Rust编译/行为测试由上述成功CI执行，本地未运行Cargo编译。
+- 独立下载公开包并验证整体SHA256及大小；ZIP包含4个文件，manifest ID/0.1.6版本/windows-x86_64 stdio-jsonl入口及native.update权限正确，EXE具备MZ头，全部3个payload摘要匹配checksums.json。对解压后的实际产物执行 `node scripts/plugin-package.mjs check .tmp-plugin-v016/published/package` 通过。
+- 在线原地址plugins.json与gh-proxy.com目录内容一致，版本为0.1.6、URL指向版本Release，目录SHA256与下载包一致；Release非draft、非prerelease，四项资产齐全。真实HiViewer安装/授权、跨版本自更新及窗口交接尚未人工验收，未修改hiviewer_rs。
+
 ### 2026-11-18：插件0.1.6接入新版HiViewer原会话自更新
 
 **亮点**
