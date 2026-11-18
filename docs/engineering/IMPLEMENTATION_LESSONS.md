@@ -28,7 +28,10 @@
 
 - Node22合并运行sync:test与plugin:test对应7脚本148项通过；专项25项通过，实际JS覆盖一键download=true、后台快照恢复、50%字节进度、未知total、安装不确定阶段、过期事件与失败重试，PowerShell5.1用实际Console JSONL捕获验证字节计数、null总量和独立校验阶段。
 - `npm run typecheck`、3个Rust文件rustfmt检查、`git diff --check`通过；Rust新增流协议用例已写入，未在本地编译执行，等待本轮CI。公开0.1.6包manifest与0.1.7仅version不同。
-- `python .tmp-plugin-v017/check_ui.py` 在headless Edge中执行实际HTML/bridge和模拟Tauri，深浅两主题验证已知/未知大小、阶段/错误/重试、恢复不重发任务及无横向溢出，无浏览器异常；临时截图已查看。该验证不是Windows宿主卡片操作或真实安装交接验收。本记录写入时尚未提交发布，后续结果另补。
+- `python .tmp-plugin-v017/check_ui.py` 在headless Edge中执行实际HTML/bridge和模拟Tauri，深浅两主题验证已知/未知大小、阶段/错误/重试、恢复不重发任务及无横向溢出，无浏览器异常；临时截图已查看。该验证不是Windows宿主卡片操作或真实安装交接验收。
+- 实现以 `6e47751` 提交推送，主CI `44251449362` 与插件工作流 `44251444754` 均success；原生测试（含新增进度流解析边界）、release编译、包检查/打包及publish-plugin全部成功。Release `luxe-image-sync-v0.1.7` 于 `2026-11-18T06:35:06Z` 公开，包含.hvp、.sha256及两份说明。
+- 独立下载公开 `luxe-image-sync-0.1.7-windows-x86_64.hvp`（9,619,410字节），SHA256为 `8da6ca4091f1ed29b6629f7b8ae1990fd0ad57f0ea8d19574723727913aafb94`，与.sha256及稳定目录一致。ZIP4文件、EXE MZ头、manifest平台/权限/版本及3个payload摘要全部通过；对实际解压产物运行 `node scripts/plugin-package.mjs check .tmp-plugin-v017/published/package` 通过。
+- GitHub原地址与gh-proxy稳定目录一致并已指向0.1.7，应用latest仍v0.2.18；公开0.1.6及0.1.7两份包的manifest除version外完全相同，兼容现有授权自更新。未实际执行HiViewer跨版本更新/窗口交接；未改宿主、未本地Cargo编译，最后以纯文档提交记录验证结果，不重建或覆盖公开同版包。
 
 ### 2026-11-18：发布可安装联动插件0.1.6并校验线上目录
 
