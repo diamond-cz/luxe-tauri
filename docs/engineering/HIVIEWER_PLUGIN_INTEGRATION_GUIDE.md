@@ -1,5 +1,22 @@
 # HiViewer 插件启用、状态检查与更新安装改造指南
 
+## 0.1.7：卡片触发一键流程，插件窗口展示进度
+
+本轮继续只读HiViewer。`src/hiviewer/plugins/PluginCenter.tsx` 的卡片仅显示清单命令按钮；`PluginProvider.executeContext` 对native-view直接调用 `pluginIpc.openNative` 并返回，不创建 `PluginRunDialog` 任务。虽然sidecar支持plugin/progress，现有卡片没有订阅native-view进度；将命令改为sidecar还会转为独立运行流程，受到普通任务60秒期限且不等同原生视图会话交接。因此0.1.7保持manifest契约不变，在现有updater/open处理返回accepted后由原进程 `start_from_host` 启动一次后台任务，并打开插件进度窗口。
+
+`get_bridge_state.updateProgress` 与plugin-update-progress事件共享递增sequence快照；WebView只呈现任务，不再通过恢复状态重发更新。下载进度来自实际HTTP读取字节，校验/安装不确定，不伪造百分比。同一进程内重复请求或窗口按钮点击不启动并行任务，更新不依赖窗口就绪；错误/无更新/手动包路径/已安装均为明确终态。当前 `native_view::open_inner` 仍会结束旧会话再新建，重复点击宿主卡片不能保证保留原任务；需宿主实现后文的会话复用后才能保证跨卡片重复调用幂等。
+
+如果后续必须在截图所示卡片内直接显示进度条，需要在HiViewer另行实现以下宿主变更，本仓库未代为实现：
+
+| 宿主入口 | 建议接线及可验证要求 |
+| --- | --- |
+| `src-tauri/src/plugins/native_view.rs / sidecar.rs` | 基于当前owner/plugin/revision关联运行会话，公开受限的native-view进度查询或事件；不能接受任意插件指定其他session/token读取状态 |
+| `src/hiviewer/plugins/pluginIpc.ts / PluginProvider.tsx` | 订阅该宿主进度，按插件ID/revision隔离任务；事件解绑、窗口关闭、停用/卸载时清理；重开时读取最新快照 |
+| `src/hiviewer/plugins/PluginCenter.tsx` | 在对应卡片命令栏下渲染阶段、下载字节和进度条；未知total用indeterminate，不用普通sidecar任务60秒期限强杀长下载 |
+| 安装交接 | commit成功后刷新安装记录及版本；旧revision进度不能覆盖新revision，结束旧任务时不展示正常交接为安装失败 |
+
+0.1.6→0.1.7不新增权限、命令或数据版本，原自更新接口可直接导入；旧版0.1.6仍先检查再点击下载，新的一键及进度能力在0.1.7运行后生效。
+
 ## 2026-11-18：新版宿主自更新接口已接入 LUXE 插件0.1.6
 
 本节优先于下方2026-11-14的历史分析。只读核对 `D:/Image_process/hiviewer_rs` 提交 `faa06671`：`docs/plugins/native-updates.md`、`plugins/sdk/rust/src/lib.rs`、`src-tauri/src/plugins/{sidecar,update_rpc,native_update}.rs` 已定义可用的原生自更新契约，旧结论“无host安装回调”不再适用于支持该能力的宿主。当前修改仅在LUXE仓库，不改HiViewer。

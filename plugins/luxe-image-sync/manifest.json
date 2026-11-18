@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "luxe.image-sync",
   "name": "LUXE 图片联动",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "author": "LUXE",
   "description": "同步 HiViewer 焦点图片到 LUXE，在插件中控制 LUXE，并显示 LUXE 当前选择。",
   "entry": "main.js",

@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tauri::Emitter;
 
 static UPDATING: AtomicBool = AtomicBool::new(false);
 
@@ -22,19 +25,124 @@ pub struct UpdateResult {
     installed: bool,
 }
 
-#[tauri::command]
-pub async fn update_plugin(
-    download: bool,
-    state: tauri::State<'_, std::sync::Arc<crate::BridgeState>>,
-) -> Result<UpdateResult, String> {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgress {
+    pub sequence: u64,
+    pub phase: String,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub error: Option<String>,
+}
+
+fn publish(
+    app: &tauri::AppHandle,
+    state: &crate::BridgeState,
+    phase: &str,
+    downloaded: u64,
+    total: Option<u64>,
+    version: Option<String>,
+    path: Option<String>,
+    error: Option<String>,
+) {
+    if let Ok(mut latest) = state.update_progress.lock() {
+        let progress = UpdateProgress {
+            sequence: latest.as_ref().map_or(1, |old| old.sequence + 1),
+            phase: phase.into(),
+            downloaded,
+            total,
+            version,
+            path,
+            error,
+        };
+        *latest = Some(progress.clone());
+        // Store before emitting: listeners registered later recover this snapshot.
+        let _ = app.emit("plugin-update-progress", &progress);
+    }
+}
+
+fn begin(app: &tauri::AppHandle, state: &crate::BridgeState) -> Result<UpdateGuard, String> {
     if UPDATING.swap(true, Ordering::AcqRel) {
         return Err("plugin update already running".into());
     }
-    let guard = UpdateGuard;
-    let host = state.host_update.clone();
+    publish(app, state, "checking", 0, None, None, None, None);
+    Ok(UpdateGuard)
+}
+
+fn execute(
+    app: &tauri::AppHandle,
+    state: &crate::BridgeState,
+    download: bool,
+) -> Result<UpdateProgress, String> {
+    let report = |phase: &str, downloaded, total, version| {
+        publish(app, state, phase, downloaded, total, version, None, None)
+    };
+    match run_update(download, &state.host_update, &report) {
+        Ok(result) => {
+            let phase = if result.installed {
+                "installed"
+            } else if result.path.is_some() {
+                "manual"
+            } else if result.available {
+                "available"
+            } else {
+                "latest"
+            };
+            publish(
+                app,
+                state,
+                phase,
+                0,
+                None,
+                Some(result.version),
+                result.path,
+                None,
+            );
+        }
+        Err(error) => publish(app, state, "error", 0, None, None, None, Some(error)),
+    }
+    state
+        .update_progress
+        .lock()
+        .map_err(|_| "update state poisoned".to_owned())?
+        .clone()
+        .ok_or_else(|| "update state unavailable".into())
+}
+
+/// A card click starts work here, independently of WebView initialization.
+pub fn start_from_host(app: tauri::AppHandle, state: Arc<crate::BridgeState>) {
+    let Ok(guard) = begin(&app, &state) else {
+        return;
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        run_update(download, &host)
+        let _ = execute(&app, &state, true);
+    });
+}
+
+#[tauri::command]
+pub async fn update_plugin(
+    app: tauri::AppHandle,
+    download: bool,
+    state: tauri::State<'_, std::sync::Arc<crate::BridgeState>>,
+) -> Result<UpdateProgress, String> {
+    let guard = match begin(&app, &state) {
+        Ok(guard) => guard,
+        Err(error) => {
+            return state
+                .update_progress
+                .lock()
+                .map_err(|_| "update state poisoned".to_owned())?
+                .clone()
+                .ok_or(error)
+        }
+    };
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        execute(&app, &state, download)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -44,8 +152,13 @@ pub async fn update_plugin(
 fn run_update(
     download: bool,
     host: &crate::host_update::HostUpdate,
+    report: &impl Fn(&str, u64, Option<u64>, Option<String>),
 ) -> Result<UpdateResult, String> {
-    use std::{os::windows::process::CommandExt, path::PathBuf, process::Command};
+    use std::{
+        os::windows::process::CommandExt,
+        path::PathBuf,
+        process::{Command, Stdio},
+    };
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let directory = PathBuf::from(
         std::env::var_os("HIVIEWER_PLUGIN_DATA_DIR").ok_or("plugin data directory unavailable")?,
@@ -58,7 +171,7 @@ fn run_update(
         PathBuf::from(std::env::var_os("SystemRoot").ok_or("SystemRoot unavailable")?);
     let powershell = system_root.join("System32/WindowsPowerShell/v1.0/powershell.exe");
     let native_install = host.available();
-    let output = Command::new(powershell)
+    let mut child = Command::new(powershell)
         .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
         .arg(include_str!("../update.ps1"))
         .env(
@@ -66,6 +179,7 @@ fn run_update(
             if download { "download" } else { "check" },
         )
         .env("LUXE_PLUGIN_CURRENT_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("LUXE_PLUGIN_PROGRESS", "1")
         .env("LUXE_PLUGIN_UPDATE_DIRECTORY", &directory)
         .env(
             "LUXE_PLUGIN_NATIVE_INSTALL",
@@ -76,13 +190,36 @@ fn run_update(
             include_str!("../../manifest.json"),
         )
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    let stderr = child.stderr.take().ok_or("updater stderr unavailable")?;
+    let error_reader = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let _ = stderr.take(8192).read_to_end(&mut bytes);
+        String::from_utf8_lossy(&bytes).trim().to_owned()
+    });
+    let stdout = child.stdout.take().ok_or("updater stdout unavailable")?;
+    let parsed = read_update_stream(std::io::BufReader::new(stdout), report);
+    if parsed.is_err() {
+        let _ = child.kill();
     }
-    let mut result: UpdateResult =
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    let status = child.wait().map_err(|error| error.to_string())?;
+    let stderr = error_reader
+        .join()
+        .unwrap_or_else(|_| "updater stderr reader failed".into());
+    if !status.success() {
+        return Err(if stderr.is_empty() {
+            parsed
+                .err()
+                .unwrap_or_else(|| "plugin updater failed".into())
+        } else {
+            stderr
+        });
+    }
+    let mut result = parsed?;
     // Only our verified host commit can mark an update installed.
     result.installed = false;
     if let Some(path) = &result.path {
@@ -107,7 +244,10 @@ fn run_update(
             {
                 return Err("unexpected update executable path".into());
             }
-            let receipt = match host.install(executable, &result.version) {
+            report("preparing", 0, None, Some(result.version.clone()));
+            let receipt = match host.install_with_progress(executable, &result.version, || {
+                report("installing", 0, None, Some(result.version.clone()))
+            }) {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     // On timeout the host may still be importing; retain the
@@ -140,6 +280,7 @@ fn run_update(
                 eprintln!("Update installed; could not save optional receipt: {error}");
             }
             result.installed = true;
+            report("installed", 0, None, Some(result.version.clone()));
             // commit copied the runtime into a managed revision. Retire our
             // candidate before complete can terminate the old process.
             cleanup_runtime(&executable_path, &directory);
@@ -189,6 +330,107 @@ fn cleanup_runtime(executable: &std::path::Path, directory: &std::path::Path) {
 fn run_update(
     _download: bool,
     _host: &crate::host_update::HostUpdate,
+    _report: &impl Fn(&str, u64, Option<u64>, Option<String>),
 ) -> Result<UpdateResult, String> {
     Err("plugin updates require Windows x64".into())
+}
+
+fn read_update_stream(
+    mut reader: impl std::io::BufRead,
+    report: &impl Fn(&str, u64, Option<u64>, Option<String>),
+) -> Result<UpdateResult, String> {
+    let mut result = None;
+    loop {
+        let mut line = Vec::new();
+        loop {
+            let chunk = reader.fill_buf().map_err(|error| error.to_string())?;
+            if chunk.is_empty() {
+                if line.is_empty() {
+                    return result.ok_or_else(|| "updater returned no result".into());
+                }
+                return Err("truncated update progress frame".into());
+            }
+            let count = chunk
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(chunk.len(), |index| index + 1);
+            if line.len() + count > 16384 {
+                return Err("update progress frame exceeds limit".into());
+            }
+            let complete = chunk[count - 1] == b'\n';
+            line.extend_from_slice(&chunk[..count]);
+            reader.consume(count);
+            if complete {
+                break;
+            }
+        }
+        let frame: Value = serde_json::from_slice(&line).map_err(|error| error.to_string())?;
+        match frame["kind"].as_str() {
+            Some("progress") => {
+                let phase = frame["phase"].as_str().ok_or("missing update phase")?;
+                if !matches!(
+                    phase,
+                    "checking" | "downloading" | "verifying" | "extracting"
+                ) {
+                    return Err("invalid updater phase".into());
+                }
+                let downloaded = frame["downloaded"].as_u64().unwrap_or(0);
+                let total = frame["total"].as_u64().filter(|total| *total > 0);
+                if downloaded > 128 * 1024 * 1024
+                    || total.is_some_and(|total| downloaded > total || total > 128 * 1024 * 1024)
+                {
+                    return Err("invalid update byte progress".into());
+                }
+                report(
+                    phase,
+                    downloaded,
+                    total,
+                    frame["version"].as_str().map(str::to_owned),
+                );
+            }
+            Some("result") if result.is_none() => {
+                result = Some(
+                    serde_json::from_value(frame["result"].clone())
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+            _ => return Err("invalid updater response".into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    #[test]
+    fn progress_stream_preserves_bytes_and_requires_final_result() {
+        let frames = concat!("{\"kind\":\"progress\",\"phase\":\"downloading\",\"downloaded\":64,\"total\":128,\"version\":\"0.1.8\"}\n",
+            "{\"kind\":\"result\",\"result\":{\"available\":true,\"version\":\"0.1.8\",\"path\":null}}\n");
+        let observed = std::cell::RefCell::new(Vec::new());
+        let result = read_update_stream(
+            std::io::Cursor::new(frames),
+            &|phase, bytes, total, version| {
+                observed
+                    .borrow_mut()
+                    .push((phase.to_owned(), bytes, total, version))
+            },
+        )
+        .unwrap();
+        assert_eq!(result.version, "0.1.8");
+        assert_eq!(
+            observed.borrow()[0],
+            ("downloading".into(), 64, Some(128), Some("0.1.8".into()))
+        );
+        for invalid in [
+            "",
+            "{}\n",
+            "{\"kind\":\"progress\",\"phase\":\"installed\"}\n",
+            "{\"kind\":\"progress\",\"phase\":\"downloading\",\"downloaded\":2,\"total\":1}\n",
+        ] {
+            assert!(read_update_stream(std::io::Cursor::new(invalid), &|_, _, _, _| {}).is_err());
+        }
+        assert!(
+            read_update_stream(std::io::Cursor::new(vec![b'x'; 16385]), &|_, _, _, _| {}).is_err()
+        );
+    }
 }

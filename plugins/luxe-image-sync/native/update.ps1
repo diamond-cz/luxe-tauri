@@ -8,6 +8,19 @@ if ($PSVersionTable.PSEdition -eq 'Desktop') {
     $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 }
 
+function Write-UpdateProgress([string]$Phase, [long]$Downloaded = 0, $Total = $null, [string]$Version = '') {
+    if ($env:LUXE_PLUGIN_PROGRESS -ne '1') { return }
+    $frame = @{ kind = 'progress'; phase = $Phase; downloaded = $Downloaded; total = $Total; version = $Version }
+    [Console]::Out.WriteLine(($frame | ConvertTo-Json -Compress))
+    [Console]::Out.Flush()
+}
+
+function Write-DownloadProgress([long]$Downloaded, $Total) {
+    $known = if ($null -ne $Total -and $Total -gt 0) { [long]$Total } else { $null }
+    # Do not fabricate percentages for chunked/unknown-length responses.
+    Write-UpdateProgress 'downloading' $Downloaded $known $script:UpdateVersion
+}
+
 function Get-VersionParts([string]$Version) {
     if ($Version -notmatch '^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$') { throw 'Invalid plugin version' }
     return @($Version.Split('.') | ForEach-Object { [int]$_ })
@@ -77,12 +90,21 @@ function Receive-HttpsFile([string]$Address, [string]$Destination, [long]$Limit,
         $outputStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         $buffer = New-Object byte[] 65536
         [long]$total = 0
+        $packageTransfer = $Limit -eq 128MB
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        [long]$lastReport = -150
+        if ($packageTransfer) { Write-DownloadProgress 0 $response.Content.Headers.ContentLength }
         while (($count = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $cancel.Token).GetAwaiter().GetResult()) -gt 0) {
             $total += $count
             if ($total -gt $Limit) { throw 'Download exceeds size limit' }
             $outputStream.Write($buffer, 0, $count)
+            if ($packageTransfer -and $clock.ElapsedMilliseconds - $lastReport -ge 150) {
+                Write-DownloadProgress $total $response.Content.Headers.ContentLength
+                $lastReport = $clock.ElapsedMilliseconds
+            }
         }
         $outputStream.Flush($true)
+        if ($packageTransfer) { Write-DownloadProgress $total $response.Content.Headers.ContentLength }
     } finally {
         if ($outputStream) { $outputStream.Dispose() }
         if ($inputStream) { $inputStream.Dispose() }
@@ -233,21 +255,30 @@ function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Di
     $catalogPath = Join-Path $Directory ('catalog-' + [Guid]::NewGuid().ToString('N') + '.json')
     $partial = Join-Path $Directory ('package-' + [Guid]::NewGuid().ToString('N') + '.partial')
     try {
+        Write-UpdateProgress 'checking'
         Receive-PluginCatalog $catalogPath
         $catalog = [IO.File]::ReadAllText($catalogPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
         $artifact = Select-PluginUpdate $catalog $CurrentVersion
         if ($null -eq $artifact) { return @{ available = $false; version = $CurrentVersion; path = $null } }
         if ($Mode -eq 'check') { return @{ available = $true; version = $artifact.version; path = $null } }
+        $script:UpdateVersion = $artifact.version
         $destination = Join-Path $Directory "luxe-image-sync-$($artifact.version)-windows-x86_64.hvp"
-        if ([IO.File]::Exists($destination)) { Test-PluginArchive $destination $artifact }
+        if ([IO.File]::Exists($destination)) {
+            Write-UpdateProgress 'verifying' 0 $null $artifact.version
+            Test-PluginArchive $destination $artifact
+        }
         else {
             Receive-HttpsFile $artifact.url $partial 128MB
+            Write-UpdateProgress 'verifying' 0 $null $artifact.version
             Test-PluginArchive $partial $artifact
             # File.Move refuses to replace an existing package. The live installed package is never modified.
             [IO.File]::Move($partial, $destination)
         }
         $executable = $null
-        if ($NativeInstall) { $executable = Expand-PluginRuntime $destination $Directory $artifact.version $CurrentManifestJson }
+        if ($NativeInstall) {
+            Write-UpdateProgress 'extracting' 0 $null $artifact.version
+            $executable = Expand-PluginRuntime $destination $Directory $artifact.version $CurrentManifestJson
+        }
         return @{ available = $true; version = $artifact.version; path = $destination; executable = $executable }
     } finally {
         foreach ($temporary in @($catalogPath, $partial)) {
@@ -258,7 +289,8 @@ function Invoke-PluginUpdate([string]$Mode, [string]$CurrentVersion, [string]$Di
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        Invoke-PluginUpdate $env:LUXE_PLUGIN_UPDATE_MODE $env:LUXE_PLUGIN_CURRENT_VERSION $env:LUXE_PLUGIN_UPDATE_DIRECTORY ($env:LUXE_PLUGIN_NATIVE_INSTALL -eq '1') $env:LUXE_PLUGIN_CURRENT_MANIFEST | ConvertTo-Json -Compress
+        $result = Invoke-PluginUpdate $env:LUXE_PLUGIN_UPDATE_MODE $env:LUXE_PLUGIN_CURRENT_VERSION $env:LUXE_PLUGIN_UPDATE_DIRECTORY ($env:LUXE_PLUGIN_NATIVE_INSTALL -eq '1') $env:LUXE_PLUGIN_CURRENT_MANIFEST
+        @{ kind = 'result'; result = $result } | ConvertTo-Json -Depth 6 -Compress
     } catch {
         [Console]::Error.WriteLine($_.Exception.Message)
         exit 1

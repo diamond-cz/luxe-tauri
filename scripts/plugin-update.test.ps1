@@ -151,6 +151,25 @@ try {
     $native = Invoke-PluginUpdate 'download' '0.1.7' $updates $true $contract
     Assert-True ([IO.File]::Exists($native.path) -and [IO.File]::Exists($native.executable)) 'real updater returns both verified package and isolated runtime'
     Assert-Throws { Expand-PluginRuntime $runtimeArchive $updates '0.1.8' $contract } 'Too many unresolved'
+    # Progress is separate JSONL, never PowerShell pipeline output (which would
+    # corrupt the updater's result). Unknown lengths remain null.
+    $oldProgressFlag = $env:LUXE_PLUGIN_PROGRESS
+    $oldConsole = [Console]::Out
+    $capture = [IO.StringWriter]::new()
+    try {
+        $env:LUXE_PLUGIN_PROGRESS = '1'
+        [Console]::SetOut($capture)
+        Write-DownloadProgress 64 128
+        Write-DownloadProgress 64 $null
+        Write-UpdateProgress 'verifying' 0 $null '0.1.8'
+    } finally {
+        [Console]::SetOut($oldConsole)
+        $env:LUXE_PLUGIN_PROGRESS = $oldProgressFlag
+    }
+    $frames = @($capture.ToString().Trim().Split("`n") | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($frames.Count -eq 3 -and $frames[0].downloaded -eq 64 -and $frames[0].total -eq 128) 'actual byte counters are emitted'
+    Assert-True ($null -eq $frames[1].total -and $frames[1].downloaded -eq 64) 'unknown transfer length has no fabricated percentage'
+    Assert-True ($frames[2].phase -eq 'verifying') 'verification is its own phase'
     Write-Output 'Plugin update version, identity, digest, download, reuse, runtime contract and cleanup assertions passed.'
 } finally {
     # Only this explicitly created test directory may be removed.

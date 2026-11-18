@@ -125,11 +125,21 @@ impl HostUpdate {
     }
 
     pub fn install(&self, executable: &str, version: &str) -> Result<Value, String> {
+        self.install_with_progress(executable, version, || {})
+    }
+
+    pub fn install_with_progress(
+        &self,
+        executable: &str,
+        version: &str,
+        prepared_callback: impl FnOnce(),
+    ) -> Result<Value, String> {
         let prepared = self.call(
             "host/plugin.update.prepare",
             json!({"executable":executable,"version":version}),
         )?;
         let params = commit_params(&prepared, version)?;
+        prepared_callback();
         let receipt = self.call("host/plugin.update.commit", params)?;
         validate_receipt(&receipt, version)?;
         Ok(receipt)

@@ -4,6 +4,32 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-18：插件0.1.7卡片一键更新与真实下载进度
+
+**亮点**
+
+- `native/src/main.rs` 在updater/open返回accepted后调用 `plugin_update::start_from_host`，由原进程启动完整检查/下载/校验/安装，不等待WebView就绪或第二次点击。窗口按钮复用同一任务入口，原子guard拦截重复任务；更新状态保存于BridgeState单条快照并递增sequence，晚注册监听的WebView经get_bridge_state恢复。
+- `native/update.ps1` 将实际HTTP字节计数以JSONL帧输出，约150ms限流；`plugin_update.rs` 使用有界16KiB逐帧读取与8KiB stderr收集，继续复用原stdout宿主回调及原会话交接。下载Content-Length已知才显示百分比，未知总大小/校验/准备/安装使用不确定进度；只有commit成功显示已安装。
+- `native/ui/bridge.js / index.html` 增加进度条、已下载/总MiB及阶段显示，屏蔽过期快照与重入，保持错误可重试、图片联动和隐藏窗口继续运行。五种语言同步补充状态；manifest/Cargo/Tauri四处升至0.1.7，和公开0.1.6清单逐项比较，除version外完全相同，允许原native.update授权下兼容导入。
+
+**痛点**
+
+- 截图中的卡片由HiViewer PluginCenter绘制，native-view分支只openNative而不挂载PluginRunDialog；卡片无原位进度订阅入口。保持不修改hiviewer_rs的边界时，卡片可一键触发，但进度必须显示于插件自己的窗口，不能声称嵌入原卡片。指南已给出后续宿主事件/状态/卡片渲染接线范围。
+- 0.1.6只在前端就绪后检查并等待第二次下载点击，PowerShell使用output()聚合输出直到退出，无法展示流式下载进度。本次将启动归属移至原生后台，前端仅呈现恢复状态；不能保留旧updateRequested恢复后再启动任务，否则会重复更新。
+- 将命令改为普通sidecar虽然有宿主progress轮询，但会改变清单契约、普通任务60秒超时与原生视图恢复语义，因此保留现有native-view/updater/open命令，不通过改变handler破坏0.1.6兼容。
+
+**闭坑**
+
+- 下载字节与百分比仅来自实际读取，不能把阶段映射为虚构总进度。JSONL最终result与progress分开，拒绝截断、未知阶段、过大帧和超限字节；进度不能被当成安装回执，下载到100%仍需校验及commit。
+- 一键任务不依赖窗口初始化/隐藏；同一进程内重复请求返回现有进度，不排队第二个安装。只读复查native_view::open_inner发现宿主再次点击卡片仍会结束旧会话再创建进程，因此不能承诺跨卡片重复调用保持原任务，需宿主会话复用，当前更新期间查看已打开的进度窗口。complete后宿主可终止旧进程，因此已安装事件和必要回执写入须在通知前完成。0.1.6需用旧检查/下载流程升级后，才具有0.1.7的一键及进度能力。
+- 不修改宿主、不新加manifest权限/命令，不重发同版本包覆盖公开资产；当前LUXE应用仍0.2.18。浏览器夹具及截图仅放忽略目录.tmp-plugin-v017，不重新生成docs证据PNG。
+
+**验证**
+
+- Node22合并运行sync:test与plugin:test对应7脚本148项通过；专项25项通过，实际JS覆盖一键download=true、后台快照恢复、50%字节进度、未知total、安装不确定阶段、过期事件与失败重试，PowerShell5.1用实际Console JSONL捕获验证字节计数、null总量和独立校验阶段。
+- `npm run typecheck`、3个Rust文件rustfmt检查、`git diff --check`通过；Rust新增流协议用例已写入，未在本地编译执行，等待本轮CI。公开0.1.6包manifest与0.1.7仅version不同。
+- `python .tmp-plugin-v017/check_ui.py` 在headless Edge中执行实际HTML/bridge和模拟Tauri，深浅两主题验证已知/未知大小、阶段/错误/重试、恢复不重发任务及无横向溢出，无浏览器异常；临时截图已查看。该验证不是Windows宿主卡片操作或真实安装交接验收。本记录写入时尚未提交发布，后续结果另补。
+
 ### 2026-11-18：发布可安装联动插件0.1.6并校验线上目录
 
 **亮点**

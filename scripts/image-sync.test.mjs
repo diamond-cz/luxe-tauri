@@ -212,8 +212,10 @@ test('sync labels have the same keys and placeholders in all five languages with
   }
 });
 
-async function pluginUiHarness(update = async () => ({ available: false, version: '0.1.6', path: null }), initialUpdateRequested = false, nativeUpdateAvailable = false) {
-  const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next', '#update', '#update-status'].map((key) => [key, {}]));
+async function pluginUiHarness(update = async () => ({ sequence: 1, phase: 'latest', version: '0.1.7' }), initialUpdateProgress = null, nativeUpdateAvailable = false) {
+  const nodes = new Map(['h1', '#path', '#status', '#connection', '#previous', '#next', '#update', '#update-status', '#update-progress', '#update-progress-detail'].map((key) => [key, {
+    setAttribute(name,value) { this[name] = value; }, removeAttribute(name) { delete this[name]; },
+  }]));
   const events = {}, windowEvents = {}, commands = [];
   const window = {
     addEventListener: (name, callback) => { windowEvents[name] = callback; },
@@ -227,7 +229,7 @@ async function pluginUiHarness(update = async () => ({ available: false, version
         if (command === 'get_bridge_state') return {
           snapshot: { files: ['C:/a.jpg', 'C:/b.jpg'], currentPath: 'C:/a.jpg' },
           connected: true, pendingSequence: 1,
-          updateRequested: initialUpdateRequested,
+          updateProgress: initialUpdateProgress,
           nativeUpdateAvailable,
         };
       } },
@@ -277,34 +279,29 @@ test('plugin routes only the active test-machine column and honors keyboard focu
   assert.equal(h.nodes.get('#previous').disabled, true);
 });
 
-test('plugin checks then downloads updates, blocks double clicks and explains host installation', async () => {
+test('plugin checks and downloads in one click, blocks double clicks and explains legacy host installation', async () => {
   const pending = deferred();
-  const h = await pluginUiHarness(({ download }) => download
-    ? Promise.resolve({ available: true, version: '0.1.5', path: 'C:/data/updates/plugin.hvp' })
-    : pending.promise);
+  const h = await pluginUiHarness(() => pending.promise);
   const button = h.nodes.get('#update');
   const first = button.onclick();
   assert.equal(button.disabled, true);
   await button.onclick();
   assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
-  pending.resolve({ available: true, version: '0.1.5', path: null });
+  pending.resolve({ sequence: 1, phase: 'manual', version: '0.1.8', path: 'C:/data/updates/plugin.hvp' });
   await first;
-  assert.match(button.textContent, /0.1.5/);
   assert.equal(button.disabled, false);
-  await button.onclick();
   assert.equal(h.commands.at(-1)[1].download, true);
   assert.match(h.nodes.get('#update-status').textContent, /C:\/data\/updates\/plugin.hvp/);
   assert.match(h.nodes.get('#update-status').textContent, /HiViewer/);
 });
 
 test('authorized plugin UI offers installation and treats only the host commit receipt as installed', async () => {
-  const h = await pluginUiHarness(async ({ download }) => ({ available: true, version: '0.1.7',
-    path: download ? 'C:/private/updates/plugin.hvp' : null, installed: download }), false, true);
+  const h = await pluginUiHarness(async () => ({ sequence: 1, phase: 'installed', version: '0.1.8' }), null, true);
   assert.equal(h.nodes.get('#update-status').textContent, bundles.en_US['image_sync.update_auto_hint']);
+  assert.equal(h.nodes.get('#update').textContent, bundles.en_US['image_sync.update_one_click']);
   await h.nodes.get('#update').onclick();
-  assert.equal(h.nodes.get('#update').textContent, 'Download and install v0.1.7');
-  await h.nodes.get('#update').onclick();
-  assert.match(h.nodes.get('#update-status').textContent, /0.1.7 installed/);
+  assert.match(h.nodes.get('#update-status').textContent, /0.1.8 installed/);
+  assert.equal(h.commands.find(([name]) => name === 'update_plugin')[1].download, true);
   assert.equal(h.nodes.get('#update').disabled, true);
   const count = h.commands.length;
   await h.nodes.get('#update').onclick();
@@ -342,20 +339,37 @@ test('plugin update failures permit retry and do not change image sync connectio
   assert.equal(h.nodes.get('#next').disabled, false);
 });
 
-test('card update command automatically checks after WebView initialization', async () => {
-  const h = await pluginUiHarness(async () => ({ available: false, version: '0.1.5', path: null }), true);
-  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
-  assert.equal(h.commands.find(([name]) => name === 'update_plugin')[1].download, false);
-  assert.match(h.nodes.get('#update-status').textContent, /0.1.5/);
+test('card background update restores progress without starting duplicate work from WebView', async () => {
+  const h = await pluginUiHarness(undefined, { sequence: 4, phase: 'downloading', version: '0.1.8', downloaded: 524288, total: 1048576 }, true);
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 0);
+  assert.equal(h.nodes.get('#update').disabled, true);
+  assert.equal(h.nodes.get('#update-progress').value, 0.5);
+  assert.match(h.nodes.get('#update-progress-detail').textContent, /50%/);
+  await h.nodes.get('#update').onclick();
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 0);
 });
 
-test('a live card update request checks without downloading or installing', async () => {
+test('live card progress displays bytes, unknown totals and stages without WebView launching a second task', async () => {
   const h = await pluginUiHarness();
   assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 0);
-  h.emit('plugin-update-requested', null);
-  await tick();
-  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 1);
-  assert.equal(h.commands.at(-1)[1].download, false);
+  h.emit('plugin-update-progress', { sequence: 1, phase: 'checking' });
+  assert.equal(h.nodes.get('#update-progress').value, undefined);
+  h.emit('plugin-update-progress', { sequence: 2, phase: 'downloading', downloaded: 1048576, total: 2097152, version: '0.1.8' });
+  assert.equal(h.nodes.get('#update-progress').value, 0.5);
+  h.emit('plugin-update-progress', { sequence: 1, phase: 'latest', version: '0.1.7' });
+  assert.equal(h.nodes.get('#update-progress').value, 0.5, 'stale snapshot cannot overwrite real progress');
+  h.emit('plugin-update-progress', { sequence: 3, phase: 'downloading', downloaded: 1048576, total: null, version: '0.1.8' });
+  assert.equal(h.nodes.get('#update-progress').value, undefined);
+  assert.match(h.nodes.get('#update-progress-detail').textContent, /1.00 MiB.*unknown/);
+  for (const [i, phase] of ['verifying', 'extracting', 'preparing', 'installing'].entries()) {
+    h.emit('plugin-update-progress', { sequence: 4+i, phase, version: '0.1.8' });
+    assert.equal(h.nodes.get('#update-progress').value, undefined, 'no invented installation percentage');
+    assert.equal(h.nodes.get('#update').disabled, true);
+  }
+  h.emit('plugin-update-progress', { sequence: 8, phase: 'error', error: 'network-failure' });
+  assert.equal(h.nodes.get('#update').disabled, false);
+  assert.equal(h.nodes.get('#update-progress').hidden, true);
+  assert.equal(h.commands.filter(([name]) => name === 'update_plugin').length, 0);
 });
 
 test('unpublished catalog explains the publishing requirement instead of exposing an HTTP exception', async () => {

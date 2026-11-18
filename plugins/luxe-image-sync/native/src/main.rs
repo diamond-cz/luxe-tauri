@@ -26,7 +26,7 @@ struct BridgeState {
     last_selection: RwLock<Option<SyncEnvelope>>,
     luxe_connected: std::sync::atomic::AtomicBool,
     snapshot: RwLock<ViewerSnapshot>,
-    update_requested: std::sync::atomic::AtomicBool,
+    update_progress: Mutex<Option<plugin_update::UpdateProgress>>,
     host_update: Arc<host_update::HostUpdate>,
 }
 
@@ -37,7 +37,7 @@ impl Default for BridgeState {
             last_selection: RwLock::new(None),
             luxe_connected: std::sync::atomic::AtomicBool::new(false),
             snapshot: RwLock::new(ViewerSnapshot::default()),
-            update_requested: std::sync::atomic::AtomicBool::new(false),
+            update_progress: Mutex::new(None),
             host_update: Arc::new(host_update::HostUpdate::default()),
         }
     }
@@ -87,7 +87,7 @@ fn get_bridge_state(state: State<'_, Arc<BridgeState>>) -> Result<Value, String>
         .map_err(|_| "selection state poisoned")?;
     Ok(
         json!({ "snapshot": *snapshot, "connected": is_connected(&state),
-        "updateRequested": state.update_requested.load(std::sync::atomic::Ordering::Acquire),
+        "updateProgress": state.update_progress.lock().map_err(|_| "update state poisoned")?.clone(),
         "nativeUpdateAvailable": state.host_update.available(),
         "pendingSequence": queue.pending_sequence(), "lastAck": queue.last_ack, "lastSelection": *selection }),
     )
@@ -265,13 +265,6 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         false
                     };
                     let method = message.get("method").and_then(Value::as_str);
-                    if accepted && method == Some("updater/open") {
-                        // Recovery state retains the request if the WebView has not registered its listener yet.
-                        state
-                            .update_requested
-                            .store(true, std::sync::atomic::Ordering::Release);
-                        let _ = app.emit("plugin-update-requested", ());
-                    }
                     if accepted && matches!(method, Some("view/open" | "updater/open")) {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
@@ -285,6 +278,9 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                             "jsonrpc": "2.0", "id": id, "result": { "accepted": accepted }
                         }),
                     );
+                    if accepted && method == Some("updater/open") {
+                        plugin_update::start_from_host(app.clone(), state.clone());
+                    }
                 }
                 Some("plugin/shutdown") => break,
                 _ => {
