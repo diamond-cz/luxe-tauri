@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-19：插件0.1.8与配套HiViewer后台联动、卡片内更新
+
+**亮点**：`plugins/luxe-image-sync/native/src/main.rs` 将窗口显示限定为 view/open，updater/open 默认只检查，显式 install 才下载。`plugin_update.rs` 复用已有 plugin/progress 输出有界 JSON 快照。配套 HiViewer 的 native_view 协调会话复用、授权后台恢复与升级后 viewer/start；PluginCardUpdate 负责卡片进度、发现新版按钮、revision 隔离和卸载清理。插件清单除版本外保持 0.1.7 契约，可沿用现有授权自更新。
+
+**痛点**：截图卡片与启用生命周期归 HiViewer 宿主，单改插件无法实现。宿主原生 open 每次结束旧会话，更新交接若恢复 updater/open 会重复触发更新；本轮分别增加复用和后台恢复方法。宿主初始 node_modules 缺失 react-i18next / Vitest，首次构建失败；npm ci 按锁文件恢复后通过，未升级依赖。插件版本与 LUXE 应用版本独立。
+
+**闭坑**：检查不能隐式下载或弹状态窗口；卡片进度必须来自真实字节，安装只信 commit 回执。后台启动须校验安装摘要与全部授权，握手中停用不得提交旧会话。新旧 revision 不共享 UI 状态；已合法但迟到的 viewer 快照不能阻止用户更新动作。首次从旧插件升级可能仍显示旧窗口，完整包安装可直接切换。必须同时交付配套 HiViewer，不能宣称仅 .hvp 已改变旧宿主。
+
+**验证**：LUXE npm run typecheck、plugin:test 7 项与 sync:test 141 项通过（初次运行 Node 24；Node 22 复核结果另行追加）。HiViewer npm ci 后 build、test:i18n 19 项、test:plugins 46 项 Vitest + 9 项 Node 通过。原生新增默认检查/明确安装、进度预算、后台恢复/进程复用、握手中停用测试由 CI 执行。本地不编译 Rust；CI、公开包摘要与 Windows 实际安装结果另行追加，不将待验收写成通过。
+
 ### 2026-11-18：插件0.1.7卡片一键更新与真实下载进度
 
 **亮点**

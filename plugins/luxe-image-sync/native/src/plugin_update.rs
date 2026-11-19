@@ -60,6 +60,15 @@ fn publish(
         *latest = Some(progress.clone());
         // Store before emitting: listeners registered later recover this snapshot.
         let _ = app.emit("plugin-update-progress", &progress);
+        // Existing plugin/progress transports a bounded card snapshot without
+        // adding permissions or changing the installed manifest contract.
+        let _ = state.host_update.send(&serde_json::json!({
+            "jsonrpc": "2.0", "method": "plugin/progress", "params": {
+                "value": total.filter(|total| *total > 0)
+                    .map_or(0.0, |total| downloaded as f64 / total as f64),
+                "message": card_progress(&progress).to_string()
+            }
+        }));
     }
 }
 
@@ -112,14 +121,31 @@ fn execute(
 }
 
 /// A card click starts work here, independently of WebView initialization.
-pub fn start_from_host(app: tauri::AppHandle, state: Arc<crate::BridgeState>) {
+pub fn start_from_host(app: tauri::AppHandle, state: Arc<crate::BridgeState>, download: bool) {
     let Ok(guard) = begin(&app, &state) else {
         return;
     };
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        let _ = execute(&app, &state, true);
+        let _ = execute(&app, &state, download);
     });
+}
+
+fn card_progress(progress: &UpdateProgress) -> Value {
+    serde_json::json!({
+        "kind": "plugin-update-v1", "sequence": progress.sequence,
+        "phase": progress.phase, "downloaded": progress.downloaded,
+        "total": progress.total, "version": progress.version.as_ref().map(|version| version.chars().take(48).collect::<String>()),
+        "error": progress.error.as_ref().map(|error| error.chars().take(40).collect::<String>())
+    })
+}
+
+pub fn host_download(params: &Value) -> Result<bool, &'static str> {
+    match params.get("updateAction").and_then(Value::as_str) {
+        None | Some("check") => Ok(false),
+        Some("install") => Ok(true),
+        _ => Err("invalid update action"),
+    }
 }
 
 #[tauri::command]
@@ -402,6 +428,36 @@ fn read_update_stream(
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+    #[test]
+    fn card_check_does_not_download_and_install_is_explicit() {
+        assert_eq!(host_download(&serde_json::json!({})), Ok(false));
+        assert_eq!(
+            host_download(&serde_json::json!({"updateAction":"check"})),
+            Ok(false)
+        );
+        assert_eq!(
+            host_download(&serde_json::json!({"updateAction":"install"})),
+            Ok(true)
+        );
+        assert!(host_download(&serde_json::json!({"updateAction":"anything"})).is_err());
+    }
+
+    #[test]
+    fn card_snapshot_fits_the_existing_host_message_budget() {
+        let progress = UpdateProgress {
+            sequence: u64::MAX,
+            phase: "error".into(),
+            downloaded: 128 * 1024 * 1024,
+            total: Some(128 * 1024 * 1024),
+            version: Some("0.1.8".into()),
+            path: Some("x".repeat(8192)),
+            error: Some("\"\\\n".repeat(200)),
+        };
+        let snapshot = card_progress(&progress);
+        assert!(snapshot.to_string().chars().count() <= 500);
+        assert!(snapshot.get("path").is_none());
+        assert_eq!(snapshot["kind"], "plugin-update-v1");
+    }
     #[test]
     fn progress_stream_preserves_bytes_and_requires_final_result() {
         let frames = concat!("{\"kind\":\"progress\",\"phase\":\"downloading\",\"downloaded\":64,\"total\":128,\"version\":\"0.1.8\"}\n",

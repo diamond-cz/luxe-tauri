@@ -1,6 +1,23 @@
 # LUXE 图片联动插件
 
-当前插件版本 **0.1.7**，仅支持 Windows x64。HiViewer 通过 `native-view` 快照推送图片路径，LUXE 将路径映射到已扫描工作区中的图片 index；两个应用的列表排序可以不同，不直接复制数字 index。
+当前插件版本 **0.1.8**，仅支持 Windows x64。HiViewer 通过 `native-view` 快照推送图片路径，LUXE 将路径映射到已扫描工作区中的图片 index；两个应用的列表排序可以不同，不直接复制数字 index。
+
+## 0.1.8：卡片内更新与启用即联动
+
+本节覆盖下方历史版本说明。本轮同时修改 `D:/Image_process/hiviewer_rs`；需安装配套 HiViewer 宿主。仅安装插件无法给旧宿主增加卡片进度或启用启动能力。
+
+- 授权启用后由宿主启动隐藏后台会话，重启 HiViewer 后恢复，无需打开“HiViewer 图片联动”窗口。关闭状态窗口继续同步，禁用或卸载停止联动。
+- 在插件卡片底部点击“检查插件更新”只检查，不弹窗、不下载或安装；发现新版后显示“更新至版本号”按钮，点击才开始下载安装。
+- 同一卡片显示实际下载字节、已知大小的百分比和校验/解包/准备/安装阶段；未知总大小和非下载阶段使用不确定进度，失败可重试。
+- 状态检查与更新复用已有会话；安装交接恢复 viewer/start 和最新选图，不重放更新命令。
+
+`updater/open` 默认检查，宿主明确传入 `updateAction:"install"` 才安装；进度使用已有 `plugin/progress` 的有界递增快照。0.1.8 与 0.1.7 的 manifest 除版本外一致，保留原权限、数据版本与宿主 prepare/commit/complete 审查。旧 0.1.7 在首次升级前仍可能弹旧窗口，也可直接通过完整包安装。
+
+下载 [luxe-image-sync-v0.1.8](https://github.com/diamond-cz/luxe-tauri/releases/tag/luxe-image-sync-v0.1.8) 中的 `luxe-image-sync-0.1.8-windows-x86_64.hvp`，在配套 HiViewer **设置 → 自定义插件 → 从插件包安装／更新** 安装、启用并授权。启动 LUXE、启用图片联动并加载图片工作区后直接切图验证。插件版本独立于 LUXE 应用版本 0.2.18。
+
+本地只执行前端/脚本验证与 rustfmt，原生测试、插件包及配套 HiViewer Windows NSIS 安装包由 GitHub Actions 构建。具体结果见经验账本；构建或浏览器模拟通过不等于 Windows 实际安装与联动已经验收。
+
+## 以下为历史版本说明
 
 设置测试机列后，跟随宿主快照的 `testMachineCurrentPath`：点击参考机图片时，同步同一行的测试机图片；该行缺少测试机图片时停止该次同步，不跳首图或参考机。未设置测试机列时跟随 `currentPath`。关闭插件窗口会隐藏窗口并保持后台同步；A/D 和上一张/下一张按钮控制 LUXE 的图片选择。
 

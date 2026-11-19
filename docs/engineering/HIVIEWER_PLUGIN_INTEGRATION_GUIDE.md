@@ -1,5 +1,23 @@
 # HiViewer 插件启用、状态检查与更新安装改造指南
 
+## 0.1.8：配套宿主卡片进度与后台联动
+
+本节覆盖下文“本轮只读 HiViewer”的历史边界。本轮已同时修改 `D:/Image_process/hiviewer_rs`，插件 0.1.8 与配套宿主须一起安装；只更新插件不能改变旧宿主的卡片或启用行为。
+
+| 层级 | 当前实现 |
+| --- | --- |
+| 插件 main.rs | 仅 view/open 显示状态窗口。updater/open 默认 check，显式 updateAction:"install" 才下载安装；过时但合法的 viewer 快照不阻止用户命令 |
+| 插件 plugin_update.rs | 经 plugin/progress.params.message 输出 JSON，带 kind、sequence、phase、downloaded、total、version 与有界 error，不新增清单权限或命令 |
+| 宿主 native_view.rs | 协调并复用同 revision 的后台会话；启动追补最新快照；更新交接恢复 viewer/start，不重放 updater/open |
+| 宿主 sessions.rs / configure | 已授权启用后安排后台启动；进程监视器恢复后台插件并有界重试，不依赖设置页；禁用/卸载撤销会话 |
+| 宿主 native_progress / pluginIpc | 按插件 ID 与 expectedRevision 读取当前授权会话进度，前端不接触 token |
+| 宿主 PluginCardUpdate.tsx | 卡片底部检查、显示阶段和真实字节进度；available 时出现更新按钮；每秒串行查询，卸载清理并忽略迟到结果，新 revision 重置状态 |
+| 宿主 CI | plugin-host-validation.yml 执行前端、语言、插件与原生生命周期测试，构建 Windows NSIS artifact；本地不编译 Rust/Tauri |
+
+0.1.8 的 manifest 与 0.1.7 除 version 外一致，保留 prepare/commit/complete、摘要、平台和契约审查。旧 0.1.7 在首次升级前仍按原行为弹窗，可直接完整 .hvp 安装。验证结果见两个仓库各自的经验/插件验证账本；真实 Windows 安装和联动不由模拟测试代替。
+
+## 以下为 0.1.7 及更早版本的历史分析
+
 ## 0.1.7：卡片触发一键流程，插件窗口展示进度
 
 本轮继续只读HiViewer。`src/hiviewer/plugins/PluginCenter.tsx` 的卡片仅显示清单命令按钮；`PluginProvider.executeContext` 对native-view直接调用 `pluginIpc.openNative` 并返回，不创建 `PluginRunDialog` 任务。虽然sidecar支持plugin/progress，现有卡片没有订阅native-view进度；将命令改为sidecar还会转为独立运行流程，受到普通任务60秒期限且不等同原生视图会话交接。因此0.1.7保持manifest契约不变，在现有updater/open处理返回accepted后由原进程 `start_from_host` 启动一次后台任务，并打开插件进度窗口。

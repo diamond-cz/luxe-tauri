@@ -227,6 +227,9 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         .and_then(|params| params.get("viewer"))
                         .cloned()
                         .and_then(|value| serde_json::from_value::<ViewerSnapshot>(value).ok());
+                    let valid_snapshot = snapshot
+                        .as_ref()
+                        .is_some_and(|value| value.validate().is_ok());
                     let accepted = if let Some(snapshot) = snapshot {
                         if snapshot.validate().is_ok() {
                             if let Ok(mut current) = state.snapshot.write() {
@@ -265,7 +268,7 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                         false
                     };
                     let method = message.get("method").and_then(Value::as_str);
-                    if accepted && matches!(method, Some("view/open" | "updater/open")) {
+                    if valid_snapshot && method == Some("view/open") {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.unminimize();
@@ -278,8 +281,13 @@ fn start_host_protocol(app: tauri::AppHandle, state: Arc<BridgeState>) {
                             "jsonrpc": "2.0", "id": id, "result": { "accepted": accepted }
                         }),
                     );
-                    if accepted && method == Some("updater/open") {
-                        plugin_update::start_from_host(app.clone(), state.clone());
+                    if valid_snapshot && method == Some("updater/open") {
+                        match plugin_update::host_download(&message["params"]) {
+                            Ok(download) => {
+                                plugin_update::start_from_host(app.clone(), state.clone(), download)
+                            }
+                            Err(error) => eprintln!("{error}"),
+                        }
                     }
                 }
                 Some("plugin/shutdown") => break,
