@@ -53,6 +53,8 @@ function withoutRemovedImageInfo(next: Isp6sAeVisual): Isp6sAeVisual {
 interface VisualState {
   visual: Isp6sAeVisual;
   selectionSyncEnabled: boolean;
+  toneLceFormulaExpanded: { curve: boolean; targetWeight: boolean };
+  toggleToneLceFormula: (card: "curve" | "targetWeight") => void;
   setVisual: (next: Isp6sAeVisual) => void;
   patch:     (patch: Partial<Isp6sAeVisual>) => void;
   setSelectionSyncEnabled: (enabled: boolean) => void;
@@ -62,6 +64,11 @@ export const useIsp6sVisualStore = create<VisualState>()(
   immer((set) => ({
     visual: DEFAULT,
     selectionSyncEnabled: true,
+    // Keep formula visibility across page remounts for the current app session.
+    toneLceFormulaExpanded: { curve: true, targetWeight: true },
+    toggleToneLceFormula: (card) => set((s) => {
+      s.toneLceFormulaExpanded[card] = !s.toneLceFormulaExpanded[card];
+    }),
     setVisual: (next) => set((s) => {
       // Merge defaults with whatever came from state.toml so newly-added
       // fields (e.g. after a schema bump) always have a sane value.

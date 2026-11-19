@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-19：LCE 两张图表卡片保留会话折叠状态
+
+**亮点**：`src/stores/isp6sVisualStore.ts` 增加会话内的 `toneLceFormulaExpanded` 与 `toggleToneLceFormula`，`ToneLceCurve.tsx` 和 `ToneLceTargetWeight.tsx` 分别订阅自身布尔值。两张卡片独立记忆公式栏展开状态，切换页面后重新挂载仍读取原状态；该入口可复用于同类页面重挂载场景。
+
+**痛点**：原实现分别使用组件内 `useState(true)`，组件卸载后状态丢失，返回页面必定展开。将状态放到同样会被卸载的父组件仍不能保留，因此复用现有视觉 store。
+
+**闭坑**：会话字段置于 `visual` 持久化对象之外，点击折叠不改变 TOML 配置，不触发其保存链路；`setVisual` 只更新持久化偏好，不能重置折叠状态。两个卡片分别更新，图标、`aria-expanded` 与公式栏 `hidden` 继续共用同一布尔值。当前需求只记忆页面切换，应用重新启动仍默认展开。
+
+**验证**：`npm run typecheck` 与 `node --test scripts/tone-lce-target.test.mjs`（16 项）通过；随后使用缓存的 Node `22.23.5` 执行同一测试与 `node node_modules/typescript/bin/tsc --noEmit`，均通过。扩展现有折叠用例，调用真实 store action 后重新执行组件函数，验证四种展开组合、恢复展开、`setVisual` 不重置及持久化对象不变。`git diff --check` 通过。未运行 Rust/Tauri 编译，未在实际 Tauri 窗口手动验收页面切换或生成桌面截图。
+
 ### 2026-11-19：插件0.1.8与配套HiViewer后台联动、卡片内更新
 
 **亮点**：`plugins/luxe-image-sync/native/src/main.rs` 将窗口显示限定为 view/open，updater/open 默认只检查，显式 install 才下载。`plugin_update.rs` 复用已有 plugin/progress 输出有界 JSON 快照。配套 HiViewer 的 native_view 协调会话复用、授权后台恢复与升级后 viewer/start；PluginCardUpdate 负责卡片进度、发现新版按钮、revision 隔离和卸载清理。插件清单除版本外保持 0.1.7 契约，可沿用现有授权自更新。

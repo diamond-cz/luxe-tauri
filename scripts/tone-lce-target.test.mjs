@@ -26,6 +26,7 @@ function load(relative, globals = {}, onlyFunction) {
     if (id === './toneLceCurveModel') return curveModel;
     if (id === '@/components/common/HoverTooltip') return { HoverTooltip: 'HoverTooltip' };
     if (id === './ToneLceChartHeader') return { ToneLceChartHeader: 'ToneLceChartHeader' };
+    if (id === '@/stores/isp6sVisualStore') return { useIsp6sVisualStore: selector => selector(visualStore.getState()) };
     if (id === '@fluentui/react-components') return { Button: 'Button' };
     if (id === '@fluentui/react-icons') return { ChevronUp20Regular: 'ChevronUp', ChevronDown20Regular: 'ChevronDown' };
     if (id === 'zustand' || id === 'zustand/middleware/immer') return require(id);
@@ -38,6 +39,7 @@ const bundles = locales.map(locale => JSON.parse(readFileSync(new URL(`../src-ta
 const t = (key, args = {}) => bundles[0][key].replace(/\{\{(\w+)\}\}/g, (_, name) => String(args[name] ?? ''));
 const { calculateLceTarget, lceTargetWeights } = load('../src/views/mtk/isp6s/ImagePane/toneLceTarget.ts');
 const curveModel = load('../src/views/mtk/isp6s/ImagePane/toneLceCurveModel.ts');
+const { useIsp6sVisualStore: visualStore } = load('../src/stores/isp6sVisualStore.ts');
 const { ToneLceCurve } = load('../src/views/mtk/isp6s/ImagePane/ToneLceCurve.tsx');
 const { ToneLceTargetWeight } = load('../src/views/mtk/isp6s/ImagePane/ToneLceTargetWeight.tsx');
 const text = node => node == null ? '' : Array.isArray(node) ? node.map(text).join('')
@@ -284,6 +286,25 @@ test('chart headers expose independent formula-row toggles and place data before
     assert.equal(children[2].props.className, 'tone-lce-chart-body');
     assert.equal(nodes(children[1], 'tr').length, 4);
   }
+  // Render fresh component instances after each click, as on return from another page.
+  const render = () => [ToneLceCurve({ tomlData: curveInput() }), ToneLceTargetWeight({ calculation: calculateLceTarget(fixture, 2000) })];
+  const assertExpanded = expected => render().forEach((tree, index) => {
+    assert.equal(tree.props.children[0].props.expanded, expected[index]);
+    assert.equal(tree.props.children[1].props.hidden, !expected[index]);
+  });
+  const savedVisual = visualStore.getState().visual;
+  render()[0].props.children[0].props.onToggle();
+  assertExpanded([false, true]);
+  render()[1].props.children[0].props.onToggle();
+  assertExpanded([false, false]);
+  // Updating saved layout preferences must not reset session visibility.
+  visualStore.getState().setVisual(savedVisual);
+  assertExpanded([false, false]);
+  render()[0].props.children[0].props.onToggle();
+  assertExpanded([true, false]);
+  render()[1].props.children[0].props.onToggle();
+  assertExpanded([true, true]);
+  assert.deepEqual(visualStore.getState().visual, savedVisual, 'formula toggles do not change TOML preferences');
 });
 
 test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting Cal in LVTarget', () => {

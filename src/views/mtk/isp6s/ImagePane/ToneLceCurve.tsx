@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import { buildLceCurve, LCE_CURVE_MAX } from "./toneLceCurveModel";
 import { ToneLceChartHeader } from "./ToneLceChartHeader";
 
@@ -11,7 +12,8 @@ export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> })
   const { t } = useTranslation();
   const curve = buildLceCurve(tomlData);
   const [hover, setHover] = useState<number | null>(null);
-  const [expanded, setExpanded] = useState(true);
+  const expanded = useIsp6sVisualStore((state) => state.toneLceFormulaExpanded.curve);
+  const toggleFormula = useIsp6sVisualStore((state) => state.toggleToneLceFormula);
   const formulaId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewport, setViewport] = useState({ width: 620, height: 380 });
@@ -35,7 +37,7 @@ export function ToneLceCurve({ tomlData }: { tomlData: Record<string, string> })
   const visibleTicks = viewport.width < 360 ? ticks.filter((value) => value % 1000 === 0) : ticks;
   const active = hover === null ? null : curve.nodes[hover];
   return <section className="tone-lce-chart-card" aria-label="LCE Curve">
-    <ToneLceChartHeader title="LCE Curve" expanded={expanded} controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
+    <ToneLceChartHeader title="LCE Curve" expanded={expanded} controls={formulaId} onToggle={() => toggleFormula("curve")} />
     <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
       <table className="w-full table-fixed border-collapse text-center tabular-nums" aria-label={t("tone_lce.curve_nodes")}>
         <thead><tr>

@@ -1,6 +1,7 @@
-import { useId, useState } from "react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { HoverTooltip } from "@/components/common/HoverTooltip";
+import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { LceTargetCalculation } from "./toneLceTarget";
 import { ToneLceChartHeader } from "./ToneLceChartHeader";
 
@@ -15,7 +16,8 @@ const numberText = (value: number) => Number.isFinite(value) ? String(value) : "
 /** Fixed, three-segment SVG; no image decoding, observers, chart library or persistent state. */
 export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCalculation }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(true);
+  const expanded = useIsp6sVisualStore((state) => state.toneLceFormulaExpanded.targetWeight);
+  const toggleFormula = useIsp6sVisualStore((state) => state.toggleToneLceFormula);
   const formulaId = useId();
   const { weights, lumaProb, flatProb, recordedLumaFlatProb, lvProb,
     lvTarget, recordedLumaFlatTarget, lumaTarget, flatTarget } = calculation;
@@ -52,7 +54,7 @@ export function ToneLceTargetWeight({ calculation }: { calculation: LceTargetCal
 
   return <section className="tone-lce-chart-card" aria-label="LCE Target Weight">
     <ToneLceChartHeader title="LCE Target Weight" source={t("tone_lce.weight_source")} expanded={expanded}
-      controls={formulaId} onToggle={() => setExpanded((value) => !value)} />
+      controls={formulaId} onToggle={() => toggleFormula("targetWeight")} />
     <div id={formulaId} className="tone-lce-chart-formula formula-panel" hidden={!expanded}>
       <table className="w-full table-auto border-collapse text-left tabular-nums" aria-label="LCE Target Weight · EXIF">
         <tbody>{values.map(([key, value, target, targetKey]) => <tr key={key}>
