@@ -20,6 +20,8 @@
 
 配套 HiViewer 实现提交 `56778761`，合并远端 6 项新提交为 `ef63f397` 后重新通过 build、20 项 i18n、46 项插件 Vitest + 9 项 Node；语言冲突保留完整远端内容再加入 pluginCardUpdate。摘要校验补丁 `83124da6` 将所有新后台会话启动集中到同一验证入口并加入篡改包拒绝测试，已推送并由工作流 `44449504697` 原生验证/打包；上一轮验证因新提交被并发策略取消，不当作失败或通过。本地只运行受影响文件 rustfmt 静态检查；没有本地 Rust/Tauri 编译。
 
+**最终产物交付：0.1.8**：配套 HiViewer 工作流 `44449504697` 最终 success，SDK 2 项与宿主 60 项原生测试通过，cargo check 通过，Release 编译与 NSIS 打包完成。下载 artifact 后核对 GitHub ZIP 摘要 `43a6ed2d47215a039984c0de6cae9c95b01d9d8f0cb3b56b2b20e572d3bf117d`、ZIP CRC 和 Windows PE 结构通过。安装包 `Hiviewer_0.3.68_x64-setup.exe` 为 37,554,144 字节，SHA-256 `7f599cb31dc75c64eba6a15ec1d2ce708e33960fce077e87beb0aff0bbfff818`。插件与配套宿主、各自 .sha256 和安装说明另整理为 `LUXE-HiViewer-plugin-v0.1.8-Windows-x64.zip`，保存在忽略目录 `.tmp-plugin-v018/`，未提交生成产物。配套宿主界面版本仍 0.3.68，构建来源 83124da6；LUXE 主应用仍 0.2.18。未替换用户正在运行的 HiViewer，完整桌面安装、切图及跨版本升级交接仍待用户从产物验收。
+
 ### 2026-11-18：插件0.1.7卡片一键更新与真实下载进度
 
 **亮点**
