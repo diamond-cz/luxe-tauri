@@ -14,6 +14,12 @@
 
 **验证**：LUXE npm run typecheck、plugin:test 7 项与 sync:test 141 项通过（初次运行 Node 24；Node 22 复核结果另行追加）。HiViewer npm ci 后 build、test:i18n 19 项、test:plugins 46 项 Vitest + 9 项 Node 通过。原生新增默认检查/明确安装、进度预算、后台恢复/进程复用、握手中停用测试由 CI 执行。本地不编译 Rust；CI、公开包摘要与 Windows 实际安装结果另行追加，不将待验收写成通过。
 
+**发布及运行补验**：实现提交 `3f6fa56` 已推送；插件工作流 `44447694411` 的 build-plugin 与 publish-plugin 均 success，主 CI `44447694379` success。Node 22.23.5 合并运行 7 个测试脚本，148 项全部通过。Release `luxe-image-sync-v0.1.8` 于 `2026-11-19T03:02:04Z` 发布；公开包 9,628,626 字节，SHA-256 为 `111ce9a7dd759d775cf56aebf1d95ee46717764267258cf6c901ee6ecdc612f1`。实际下载后核对 `.sha256`、ZIP 内 3 个 payload 摘要、EXE MZ、平台、清单版本与包 check 全部通过；GitHub 及 gh-proxy 稳定目录均指向 0.1.8 且摘要一致，应用 latest 仍 v0.2.18。0.1.7 公开包与当前清单除 version 外一致。
+
+使用公开 EXE、独立临时插件数据目录执行 Windows 原生冒烟：plugin/initialize 返回 0.1.8，viewer/start 接受；updater/open + check 实际访问线上目录并返回 latest/0.1.8，期间无可见状态窗口、无安装回调，shutdown 退出码 0。窗口枚举使用 64 位 HWND 正确类型并排除没有可视界面的系统辅助窗口；这只验证插件运行和检查更新，不代表 HiViewer 启用、真实选图与升级交接已桌面验收。实际 PluginCenter / PluginCardUpdate 在 headless Edge 深浅主题中完成检查/单独安装按钮、50% 字节进度、未知 total、安装阶段、错误重试与无横向溢出模拟，无 pageerror，截图和结果位于忽略目录 `.tmp-card-browser/`。
+
+配套 HiViewer 实现提交 `56778761`，合并远端 6 项新提交为 `ef63f397` 后重新通过 build、20 项 i18n、46 项插件 Vitest + 9 项 Node；语言冲突保留完整远端内容再加入 pluginCardUpdate。摘要校验补丁 `83124da6` 将所有新后台会话启动集中到同一验证入口并加入篡改包拒绝测试，已推送并由工作流 `44449504697` 原生验证/打包；上一轮验证因新提交被并发策略取消，不当作失败或通过。本地只运行受影响文件 rustfmt 静态检查；没有本地 Rust/Tauri 编译。
+
 ### 2026-11-18：插件0.1.7卡片一键更新与真实下载进度
 
 **亮点**
