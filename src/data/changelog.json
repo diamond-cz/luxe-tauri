@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.2.19",
+    "date": "2026-11-20",
+    "items": [
+      { "type": "优化", "content": "LCE Curve、LCE Target Weight 和 Target 支持独立折叠公式栏，并在本次应用会话中记住切页前的展开状态。" },
+      { "type": "优化", "content": "Target 采用与 Normal Target 一致的公式和 EXIF／参数计算对照表，提供来源比较与完整推导；参数侧 LVTarget 使用下方 LVTarget 表格的插值结果，其余输入继续来自 EXIF。" },
+      { "type": "优化", "content": "编辑 LVTarget 表格时实时预览插值与最终值，无需回车；保留回车或失焦提交、Escape 撤销，并隔离源码替换后的过期输入。" },
+      { "type": "新增", "content": "LCE 详情在 LV 上方显示 IsFrontLight，读取 SW_LCE_IsFrontLight：0 标注逆光人脸、1 标注顺光人脸，缺失值显示横线。" },
+      { "type": "优化", "content": "精简 LCE 双图公式数据栏，保留节点、Gain、权重表和悬浮提示，减少重复公式占用。" },
+      { "type": "修复", "content": "修复笛卡尔热力图命中数模式的图片选择，左键可选中当前单元格全部命中图片，右键继续跳转参数。" },
+      { "type": "优化", "content": "配套 HiViewer 图片联动插件独立更新至0.1.8，完善授权自更新、卡片检查与真实下载进度；后台启动及卡片更新体验需配套新版 HiViewer 宿主，插件包通过独立发布渠道安装。" }
+    ]
+  },
+  {
     "version": "0.2.18",
     "date": "2026-11-16",
     "items": [
