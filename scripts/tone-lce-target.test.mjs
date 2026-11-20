@@ -339,6 +339,8 @@ test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting 
   const { interpolateFields } = load(path, {}, 'interpolateFields');
   const { ToneLceTargetCard } = load('../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx', {
     useState: initial => [initial, () => {}],
+    useId: () => 'target-formula-test-id',
+    useIsp6sVisualStore: selector => selector(visualStore.getState()), ToneLceChartHeader: 'ToneLceChartHeader',
     axisBracket, indexedBracket, interpolateFields,
     calculateLceTarget, lceCardStyle: {}, lceHeaderStyle: {},
     ToneLceValueGrid: 'ToneLceValueGrid', ToneLceCalCard: 'ToneLceCalCard', ToneLceProbCard: 'ToneLceProbCard',
@@ -348,7 +350,8 @@ test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting 
   const props = { tables, position: { lv: 2.5, lvLow: 0, lvHigh: 1 }, tomlData: fixture };
   const tree = ToneLceTargetCard(props);
   assert.equal(tree.props['aria-label'], 'Tone LCE Target');
-  assert.equal(tree.props.children[0].props.children, 'Target');
+  assert.equal(tree.props.children[0].props.title, 'Target');
+  assert.equal(tree.props.children[0].props.controls, tree.props.children[1].props.id);
   assert.equal(tree.props.children[1].props['data-tone-lce-target-formula'], 'true');
   assert.equal(nodes(tree.props.children[1], 'ToneLceCalCard').length, 1);
   const grids = nodes(tree, 'ToneLceValueGrid');
@@ -374,6 +377,22 @@ test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting 
     assert.ok(Number.isNaN(missing.parameterFinalTarget));
     assert.equal(missing.finalTarget, 1988, 'missing parameters cannot fall back to EXIF LVTarget');
   }
+  const savedVisual = visualStore.getState().visual;
+  tree.props.children[0].props.onToggle();
+  const collapsed = ToneLceTargetCard(props); // Remount after switching pages.
+  assert.equal(collapsed.props.children[0].props.expanded, false);
+  assert.equal(collapsed.props.children[1].props.hidden, true);
+  assert.equal(nodes(collapsed, 'ToneLceCalCard').length, 0, 'collapse unmounts formula and its source popover');
+  assert.equal(nodes(collapsed, 'ToneLceValueGrid').length, 2);
+  assert.equal(nodes(collapsed, 'ToneLceProbCard').length, 1);
+  assert.deepEqual(visualStore.getState().toneLceFormulaExpanded, { curve: true, targetWeight: true, target: false });
+  visualStore.getState().setVisual(savedVisual);
+  assert.equal(ToneLceTargetCard(props).props.children[1].props.hidden, true);
+  collapsed.props.children[0].props.onToggle();
+  const reopened = ToneLceTargetCard(props);
+  assert.equal(reopened.props.children[1].props.hidden, false);
+  assert.equal(nodes(reopened, 'ToneLceCalCard')[0].props.calculation.parameterFinalTarget, 1417);
+  assert.deepEqual(visualStore.getState().visual, savedVisual);
 });
 
 test('LVTarget input previews interpolation before commit and cancels without changing source', () => {
@@ -401,6 +420,8 @@ test('LVTarget input previews interpolation before commit and cancels without ch
   const cardState = stateHost(), cellState = stateHost();
   const { ToneLceTargetCard } = load(path, {
     useState: cardState.useState, axisBracket, indexedBracket, interpolateFields, isToneNumberText,
+    useId: () => 'target-formula-test-id',
+    useIsp6sVisualStore: selector => selector(visualStore.getState()), ToneLceChartHeader: 'ToneLceChartHeader',
     calculateLceTarget, lceCardStyle: {}, lceHeaderStyle: {},
     ToneLceValueGrid: 'ToneLceValueGrid', ToneLceCalCard: 'ToneLceCalCard', ToneLceProbCard: 'ToneLceProbCard',
   }, 'ToneLceTargetCard');

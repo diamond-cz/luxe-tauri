@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Code24Regular, DataHistogram24Regular, Save24Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 
@@ -9,6 +9,7 @@ import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { calculateLceTarget, type LceTargetCalculation } from "./toneLceTarget";
 import { ToneLceCharts } from "./ToneLceCharts";
+import { ToneLceChartHeader } from "./ToneLceChartHeader";
 import { DerivedTargetFormula } from "./DerivedTargetFormula";
 import { tabButtonStyle, tabStripWrapStyle } from "./chartMapTabStyles";
 
@@ -738,6 +739,9 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
 
 function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition }) {
   const { tables, position } = props;
+  const expanded = useIsp6sVisualStore((state) => state.toneLceFormulaExpanded.target);
+  const toggleFormula = useIsp6sVisualStore((state) => state.toggleToneLceFormula);
+  const formulaId = useId();
   const [preview, setPreview] = useState<{ field: FieldEntry; value: string } | null>(null);
   const previewCell = (field: FieldEntry, value: string | null) => {
     if (value === null) setPreview(null);
@@ -757,9 +761,10 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
   const calculation = calculateLceTarget(props.tomlData, parameterLvTarget);
   return (
     <section style={lceCardStyle} aria-label="Tone LCE Target">
-      <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
-      <div className="border-b" data-tone-lce-target-formula="true" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
-        <ToneLceCalCard calculation={calculation} embedded />
+      <ToneLceChartHeader title="Target" className="min-h-9" expanded={expanded} controls={formulaId}
+        onToggle={() => toggleFormula("target")} />
+      <div id={formulaId} hidden={!expanded} className="border-b" data-tone-lce-target-formula="true" style={{ borderColor: "var(--colorNeutralStroke2)" }}>
+        {expanded && <ToneLceCalCard calculation={calculation} embedded />}
       </div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
         <ToneLceValueGrid tableId="ratio" title="Ratio" labels={ratioLabels} rows={tables.ratio} bracket={ratioBracket} controls={props} />

@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-20：Target 标题栏公式折叠按钮
+
+**亮点**：`ToneChartMapMode.tsx` 的 Target 标题复用 `ToneLceChartHeader.tsx`，增加右侧 Fluent 上下箭头；共用组件支持可选 `className`，保持 Target 原36px最小标题高度。`isp6sVisualStore.ts` 在既有会话折叠对象中增加独立 `target` 字段，切页重挂载仍保留状态，默认展开。公式栏唯一ID与按钮的 `aria-controls` 对应，使用已有五语言显示/隐藏提示。
+
+**痛点**：公式内的来源对比使用 Portal，若只隐藏父容器而不卸载公式，已经打开的弹层可能继续显示。因此折叠保留带ID的隐藏容器、卸载公式子组件，使弹层与其状态一并释放。
+
+**闭坑**：仅公式与计算摘要受控，下方Ratio/LVTarget/Prob始终挂载；折叠期间仍可编辑参数并在展开后显示最新计算。`target`、`curve`、`targetWeight` 分别切换，`setVisual`不重置会话值，折叠不写TOML。不要复用ID或将整个Target卡片隐藏。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`执行 `node --test --test-reporter=dot scripts/tone-lce-target.test.mjs scripts/face-link-target.test.mjs`，64项通过，扩展已有用例验证折叠/恢复、重挂载、控件ID、三张参数卡片保留、双图状态独立与持久化对象不变。`python .tmp-lce-formula/check-collapse.py`在Edge headless深浅主题验证点击及Enter/Space切换、1260/560/420px无溢出、整体高度真实缩减、折叠时参数可编辑、恢复显示最新值与来源Portal清理；`python .tmp-lce-formula/check-live.py`原实时输入回归通过，无pageerror。截图位于忽略目录 `.tmp-lce-formula/target-{collapsed,expanded}-{light,dark}.png`。`git diff --check`通过。未本地编译Rust/Tauri，未在完整原生桌面应用中验收页面切换。
+
 ### 2026-11-19：LVTarget 数值输入实时预览与最终值联动
 
 **亮点**：`ToneChartMapMode.tsx` 的 `ToneNumberCell` 增加可选 `onPreview`，仅 LVTarget 参数网格接入。`ToneLceTargetCard` 保存当前单元格的有效预览，`ToneLceValueGrid.previewRows` 与参数最终值共用该行和原插值器。输入无需 Enter 即可观察标题插值、摘要、来源详情的变化；输入框继续消费原始行，预览不写 Tone.cpp 草稿、不增加撤销记录或触发保存/解析/IPC。已有 Enter、失焦与右键提交复用原入口。

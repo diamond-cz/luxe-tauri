@@ -2,16 +2,17 @@ import { Button } from "@fluentui/react-components";
 import { ChevronDown20Regular, ChevronUp20Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 
-export function ToneLceChartHeader({ title, source, expanded, controls, onToggle }: {
+export function ToneLceChartHeader({ title, source, expanded, controls, onToggle, className = "" }: {
   title: string;
   source?: string;
   expanded: boolean;
   controls: string;
   onToggle: () => void;
+  className?: string;
 }) {
   const { t } = useTranslation();
   const label = t(expanded ? "tone_lce.hide_formula" : "tone_lce.show_formula", { title });
-  return <div className="tone-lce-chart-header">
+  return <div className={`tone-lce-chart-header ${className}`}>
     <strong title={source}>{title}</strong>
     <Button appearance="subtle" size="small" icon={expanded ? <ChevronUp20Regular /> : <ChevronDown20Regular />}
       aria-label={label} title={label} aria-expanded={expanded} aria-controls={controls} onClick={onToggle}
