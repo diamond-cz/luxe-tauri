@@ -1,4 +1,6 @@
 {
+  "lce_details.front_lit_face": "Front-lit face",
+  "lce_details.backlit_face": "Backlit face",
   "tone_lce.hide_formula": "Hide {{title}} formula row",
   "tone_lce.show_formula": "Show {{title}} formula row",
   "tone_lce.curve_legend": "LCE curve legend",

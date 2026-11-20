@@ -126,6 +126,10 @@ toml_key = "SW_DCE_dce_smooth_speed"
 
 # LCE 预览信息：toml_key 为单值，toml_keys 为同一行的多个值。
 [[preview_info.items]]
+label = "IsFrontLight"
+toml_key = "SW_LCE_IsFrontLight"
+
+[[preview_info.items]]
 label = "LV"
 toml_keys = ["SW_LCE_LV", "SW_LCE_LVIdx_L", "SW_LCE_LVIdx_H"]
 

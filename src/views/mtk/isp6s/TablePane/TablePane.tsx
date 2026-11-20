@@ -2951,6 +2951,7 @@ function LcePreviewInfoTable({
   schema: Isp6sSchemaRoot;
   tomlData: Record<string, string>;
 }) {
+  const { t } = useTranslation();
   const items = schema.preview_info?.items ?? [];
   return (
     <div className="h-full w-full overflow-auto p-3" data-isp6s-details-scroll="true">
@@ -2963,7 +2964,9 @@ function LcePreviewInfoTable({
                 {it.label}
               </td>
               <td className="whitespace-nowrap px-2 py-1.5" style={{ color: "var(--colorNeutralForeground1)" }}>
-                {formatLcePreviewInfoValue(it, tomlData)}
+                {formatLcePreviewInfoValue(it, tomlData, {
+                  front: t("lce_details.front_lit_face"), back: t("lce_details.backlit_face"),
+                })}
               </td>
             </tr>
           ))}
@@ -2988,7 +2991,14 @@ type LcePreviewInfoItem = {
 function formatLcePreviewInfoValue(
   item: LcePreviewInfoItem,
   tomlData: Record<string, string>,
+  frontLightLabels?: { front: string; back: string },
 ): string {
+  if (item.toml_key === "SW_LCE_IsFrontLight") {
+    const raw = tomlLookup(tomlData, item.toml_key).trim();
+    if (!raw || raw === "-" || !Number.isFinite(Number(raw))) return "-";
+    const label = Number(raw) === 0 ? frontLightLabels?.back : Number(raw) === 1 ? frontLightLabels?.front : undefined;
+    return label ? `${raw}, ${label}` : raw;
+  }
   if (item.toml_key === "SW_LCE_AEGain") {
     const raw = tomlLookup(tomlData, item.toml_key);
     const aeGain = Number(raw);

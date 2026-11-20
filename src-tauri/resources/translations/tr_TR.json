@@ -1,4 +1,6 @@
 {
+  "lce_details.front_lit_face": "Önden aydınlatılmış yüz",
+  "lce_details.backlit_face": "Arkadan aydınlatılmış yüz",
   "tone_lce.hide_formula": "{{title}} formül satırını gizle",
   "tone_lce.show_formula": "{{title}} formül satırını göster",
   "tone_lce.curve_legend": "LCE eğrisi göstergesi",

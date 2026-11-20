@@ -52,6 +52,35 @@ const fixture = {
   SW_LCE_LumaFlatProb: '253', SW_LCE_LumaFlatTarget: '1774', SW_LCE_LVTarget: '2048', SW_LCE_LVProb: '715',
 };
 
+test('LCE detail inserts IsFrontLight before LV and distinguishes zero, one and missing EXIF', () => {
+  const path = '../src/views/mtk/isp6s/TablePane/TablePane.tsx';
+  const { tomlLookup } = load(path, {}, 'tomlLookup');
+  const { formatLcePreviewInfoValue } = load(path, { tomlLookup }, 'formatLcePreviewInfoValue');
+  const { LcePreviewInfoTable } = load(path, {
+    useTranslation: () => ({ t }), formatLcePreviewInfoValue,
+  }, 'LcePreviewInfoTable');
+  const config = readFileSync(new URL('../src-tauri/resources/Isp6s.toml', import.meta.url), 'utf8');
+  const items = [...config.matchAll(/\[\[preview_info\.items\]\]([\s\S]*?)(?=\n\[|$)/g)]
+    .map(([, block]) => ({ label: block.match(/label = "([^"]+)"/)?.[1], toml_key: block.match(/toml_key = "([^"]+)"/)?.[1] }));
+  assert.deepEqual(items.slice(0, 2).map(item => item.label), ['IsFrontLight', 'LV']);
+  assert.equal(items[0].toml_key, 'SW_LCE_IsFrontLight');
+  const value = data => {
+    const tree = LcePreviewInfoTable({ schema: { preview_info: { items: [items[0]] } }, tomlData: data });
+    return nodes(tree, 'td').map(text);
+  };
+  assert.deepEqual(value({ SW_LCE_IsFrontLight: '0' }), ['IsFrontLight', '0, 逆光人脸']);
+  assert.deepEqual(value({ SW_LCE_IsFrontLight: '1' }), ['IsFrontLight', '1, 顺光人脸']);
+  assert.deepEqual(value({ sw_lce_isfrontlight: '0' }), ['IsFrontLight', '0, 逆光人脸']);
+  for (const missing of [undefined, '', ' ', '-', 'NaN']) {
+    assert.deepEqual(value({ SW_LCE_IsFrontLight: missing }), ['IsFrontLight', '-']);
+  }
+  assert.deepEqual(value({ SW_LCE_IsFrontLight: '2' }), ['IsFrontLight', '2']);
+  for (const bundle of bundles) {
+    assert.ok(bundle['lce_details.front_lit_face']);
+    assert.ok(bundle['lce_details.backlit_face']);
+  }
+});
+
 test('raw LumaProb and LumaTarget feed a normalized chain, independently of recorded intermediate values', () => {
   const result = calculateLceTarget(fixture, 2000);
   assert.equal(result.lumaProb, 1000);

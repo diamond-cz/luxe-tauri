@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-20：LCE 详情新增 IsFrontLight 顺逆光人脸信息
+
+**亮点**：在 `src-tauri/resources/Isp6s.toml` 的 `preview_info.items` 首行添加 `IsFrontLight → SW_LCE_IsFrontLight`，位于LV上方；`TablePane.tsx` 的既有详情格式化入口读取当前图片字段，0显示“0, 逆光人脸”，1显示“1, 顺光人脸”。沿用已有关键字大小写/路径查找和表格主题样式，五种翻译资源补齐顺光/逆光文案，无新增IPC或状态。
+
+**痛点**：缺失或空字符串不能直接通过 `Number` 转换判定，否则空文本会被当成0并误标逆光。此处先检查缺失、占位符、空白和非有限值，再识别0/1；不认识的有限数值保留数值而不附加人脸说明。
+
+**闭坑**：行始终显示，缺失时数值为 `-` 且不附顺逆光说明；不得以真值判断跳过合法0，也不得从其他关键字推测光照类别。详情页已通过原 `loadImageToml` 加载完整字段，使用新配置行即可取值；原LV/DR与其余信息格式不变。核对既有 `src-tauri/tests/lce_preview_info.rs` 无固定行数或首行假设，不需要变更Rust代码。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`运行 `node --test --test-reporter=dot scripts/tone-lce-target.test.mjs`，18项通过。新增用例执行生产详情组件和格式化函数，覆盖配置行在LV前、0/1、小写关键字、缺失/空白/占位符/NaN与其他有限值，并核对五语言文案。Python `tomllib`解析 `Isp6s.toml`确认前两行为IsFrontLight、LV；`git diff --check`通过。未运行Rust/Tauri编译或桌面截图验收。
+
 ### 2026-11-20：Target 标题栏公式折叠按钮
 
 **亮点**：`ToneChartMapMode.tsx` 的 Target 标题复用 `ToneLceChartHeader.tsx`，增加右侧 Fluent 上下箭头；共用组件支持可选 `className`，保持 Target 原36px最小标题高度。`isp6sVisualStore.ts` 在既有会话折叠对象中增加独立 `target` 字段，切页重挂载仍保留状态，默认展开。公式栏唯一ID与按钮的 `aria-controls` 对应，使用已有五语言显示/隐藏提示。

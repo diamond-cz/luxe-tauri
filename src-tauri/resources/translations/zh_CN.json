@@ -1,4 +1,6 @@
 {
+  "lce_details.front_lit_face": "顺光人脸",
+  "lce_details.backlit_face": "逆光人脸",
   "tone_lce.hide_formula": "隐藏 {{title}} 公式栏",
   "tone_lce.show_formula": "显示 {{title}} 公式栏",
   "tone_lce.curve_legend": "LCE 曲线图例",

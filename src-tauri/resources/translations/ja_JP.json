@@ -1,4 +1,6 @@
 {
+  "lce_details.front_lit_face": "順光の顔",
+  "lce_details.backlit_face": "逆光の顔",
   "tone_lce.hide_formula": "{{title}} の数式欄を非表示",
   "tone_lce.show_formula": "{{title}} の数式欄を表示",
   "tone_lce.curve_legend": "LCE 曲線の凡例",
