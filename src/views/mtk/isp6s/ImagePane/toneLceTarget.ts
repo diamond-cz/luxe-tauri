@@ -36,7 +36,7 @@ export function calculateLceTarget(data: Record<string, string>, parameterLvTarg
   const blend = (target: number) => probability(lvProb)
     ? Math.round((target * lvProb + lumaFlatTarget * (1000 - lvProb)) / 1000) : NaN;
   return {
-    lvTarget, lvProb, lumaTarget, lumaProb, flatTarget, flatProb,
+    lvTarget, parameterLvTarget, lvProb, lumaTarget, lumaProb, flatTarget, flatProb,
     lumaFlatProb, lumaFlatTarget, finalTarget: blend(lvTarget), parameterFinalTarget: blend(parameterLvTarget),
     recordedLumaFlatProb, recordedLumaFlatTarget, recordedFinalTarget,
     weights: lceTargetWeights(lvProb, recordedLumaFlatProb),

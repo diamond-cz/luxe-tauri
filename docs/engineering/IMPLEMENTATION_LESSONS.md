@@ -4,6 +4,26 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-19：LVTarget 数值输入实时预览与最终值联动
+
+**亮点**：`ToneChartMapMode.tsx` 的 `ToneNumberCell` 增加可选 `onPreview`，仅 LVTarget 参数网格接入。`ToneLceTargetCard` 保存当前单元格的有效预览，`ToneLceValueGrid.previewRows` 与参数最终值共用该行和原插值器。输入无需 Enter 即可观察标题插值、摘要、来源详情的变化；输入框继续消费原始行，预览不写 Tone.cpp 草稿、不增加撤销记录或触发保存/解析/IPC。已有 Enter、失焦与右键提交复用原入口。
+
+**痛点**：原输入 `onChange` 只调用局部 `setDraft`，父级插值必须等待 `onCommit` 更新源码，导致看起来不能实时计算。直接每键提交会改变 Escape 语义并反复替换源码；将预览覆盖到输入的 `field.value` 又会使提交逻辑误判“值没变”。因此用独立预览行计算，保留原始输入行用于提交比较与撤销。
+
+**闭坑**：仅有效且有限的数值更新预览；空文本、未完成负号/指数和溢出保留最后有效预览，合法零仍参与插值。Escape 和失焦清除预览；Enter 接失焦只提交一次。源字段身份变化自动隔离旧预览，`ToneNumberCell` 同步重置聚焦中的输入文字，防止随后失焦将旧输入写入新源码。预览状态仅一个单元格，无计时器、观察器或跨页面缓存；不将代码路径改进表述为已测得性能增益。
+
+**验证**：`npm run typecheck` 通过；Node `22.23.5` 执行 `node --test --test-reporter=dot scripts/tone-lce-target.test.mjs scripts/face-link-target.test.mjs`，64 项通过。新增用例直接执行生产输入事件、预览状态、插值和计算器：输入1400时提交次数为0，插值1550、最终值1632，EXIF最终值1988；覆盖不完整/溢出输入、Escape、Enter/blur去重、零、右键及新字段隔离。`python .tmp-lce-formula/check-live.py` 使用实际 Target、表格、单元格与主题组件，在Edge headless深浅两主题实测保持焦点时实时变化、无提前草稿写入/保存、科学计数/十六进制、Escape、Enter、Tab、右键与源码替换后失焦不污染，无pageerror。截图在忽略目录 `.tmp-lce-formula/live-preview-{light,dark}.png`。首次浏览器夹具生成错误来自JS模板转义，改为String.raw后通过，不涉及产品代码。`git diff --check` 通过。未本地编译Rust/Tauri，未在完整原生应用中验收真实文件保存与切页。
+
+### 2026-11-19：Target 复用 Normal Target 公式样式并显式对照 LVTarget 参数插值
+
+**亮点**：`DerivedTargetFormula.tsx` 导出既有通用公式摘要组件，增加可选数值格式化入口；Normal Target 等现有调用保持默认精度，Tone LCE 继续最多两位小数。`ToneChartMapMode.tsx` 的 `ToneLceCalCard` 直接复用三条公式、EXIF/参数两行表格与 `FormulaHeader` 来源弹层，移除额外 Cal 标题和常驻代入块；完整推导保留记录对照。`toneLceTarget.ts` 返回 `parameterLvTarget`，用于参数侧摘要、代入过程和来源说明，避免只展示参数最终值却无法核对输入。
+
+**痛点**：检查发现原调用已将 LVTarget 表格首行插值传入计算器，并非完全没有接入参数值；但常驻公式仅展示 EXIF 代入过程，参数侧只有标题栏单个最终值，相同或接近的结果难以判断来源。此轮以实际调用证据为准，显式展示两侧输入，不额外改变其余原始数据源或混合算法。
+
+**闭坑**：参数侧 LVTarget 必须与下方 LVTarget 卡片共用 `tables.target[0]`、`targetBracket` 和 `interpolateFields`，并消费 `sourceDraftText` 覆盖后的表格；不得取 MaxLceGain、MaxFinalTarget、EXIF 回退值或显示舍入值。LVProb、LumaProb、FlatProb、LumaTarget、FlatTarget 两侧继续使用 EXIF，混合中间结果继续由原计算器重算。问号弹层列出全部六个原始输入，只有 LVTarget 的参数来源为 Tone.cpp 表格插值；缺失参数值和最终值显示 `-`，EXIF 侧继续独立可用。
+
+**验证**：`npm run typecheck` 通过；缓存 Node `22.23.5` 执行 `node --test scripts/tone-lce-target.test.mjs scripts/face-link-target.test.mjs`，63 项全部通过。扩展真实插值调用测试，验证 LV=2.5 对 1000/2000 插值为1250、参数最终值1417；修改草稿行至1400/2400后插值1650、最终值1703，EXIF最终值始终1988；缺失行与无效单元格不回退。浏览器夹具使用实际 `ToneLceCalCard` 函数、通用公式组件、Fluent主题和项目CSS，`python .tmp-lce-formula/check.py` 在深浅主题×1260/900/560/420px共8组合验证无溢出、13px公式及两行数值，通过问号键盘打开、来源/差值、完整推导与关闭检查，无pageerror。截图与测量结果位于忽略目录 `.tmp-lce-formula/`。`git diff --check` 通过。未编译Rust/Tauri，未在原生桌面中验收完整参数文件编辑与页面切换。
+
 ### 2026-11-19：LCE 两张图表卡片保留会话折叠状态
 
 **亮点**：`src/stores/isp6sVisualStore.ts` 增加会话内的 `toneLceFormulaExpanded` 与 `toggleToneLceFormula`，`ToneLceCurve.tsx` 和 `ToneLceTargetWeight.tsx` 分别订阅自身布尔值。两张卡片独立记忆公式栏展开状态，切换页面后重新挂载仍读取原状态；该入口可复用于同类页面重挂载场景。

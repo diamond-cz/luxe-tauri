@@ -26,6 +26,7 @@ function load(relative, globals = {}, onlyFunction) {
     if (id === './toneLceCurveModel') return curveModel;
     if (id === '@/components/common/HoverTooltip') return { HoverTooltip: 'HoverTooltip' };
     if (id === './ToneLceChartHeader') return { ToneLceChartHeader: 'ToneLceChartHeader' };
+    if (id === './FormulaHeader') return { FormulaHeader: 'FormulaHeader' };
     if (id === '@/stores/isp6sVisualStore') return { useIsp6sVisualStore: selector => selector(visualStore.getState()) };
     if (id === '@fluentui/react-components') return { Button: 'Button' };
     if (id === '@fluentui/react-icons') return { ChevronUp20Regular: 'ChevronUp', ChevronDown20Regular: 'ChevronDown' };
@@ -147,19 +148,43 @@ test('ring renders the four EXIF keys, three proportions and semantic colors; mi
   assert.equal(nodes(missing, 'p').find(node => node.props.role === 'status').props.children, t('tone_lce.invalid_weights'));
 });
 
-test('calculation card shows the connected formulas and recorded comparisons', () => {
+test('calculation card shares Normal Target layout and compares EXIF against interpolated LVTarget', () => {
+  const { DerivedTargetFormula } = load('../src/views/mtk/isp6s/ImagePane/DerivedTargetFormula.tsx');
   const { ToneLceCalCard } = load('../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx', {
     useTranslation: () => ({ t }), formatInterpolation: value => Number.isFinite(value) ? String(Number(value.toFixed(2))) : '-',
-    lceCardStyle: {}, lceHeaderStyle: {},
+    lceCardStyle: {}, DerivedTargetFormula,
   }, 'ToneLceCalCard');
   const tree = ToneLceCalCard({ calculation: calculateLceTarget({ ...fixture, SW_LCE_FinalTarget: '1970' }, 2000) });
-  const visible = text(tree);
-  assert.ok(visible.indexOf('LumaFlatProb =') < visible.indexOf('LumaFlatTarget ='));
-  assert.ok(visible.indexOf('LumaFlatTarget =') < visible.indexOf('FinalTarget ='));
-  assert.ok(visible.includes('(1000 * 253) / 1000 = 253'));
-  assert.ok(visible.includes('(523 * 253 + 2282 * (1000 - 253)) / 1000 = 1836.97'));
-  assert.ok(visible.includes('(2048 * 715 + 1836.97 * (1000 - 715)) / 1000 = 1988'));
-  for (const key of ['SW_LCE_LumaFlatProb', 'SW_LCE_LumaFlatTarget', 'SW_LCE_FinalTarget']) assert.ok(visible.includes(key));
+  const summary = DerivedTargetFormula(tree.props.children.props);
+  const header = nodes(summary, 'FormulaHeader')[0].props;
+  assert.deepEqual(header.formulas, [
+    'LumaFlatProb = LumaProb × FlatProb / 1000',
+    'LumaFlatTarget = (FlatTarget × LumaFlatProb + LumaTarget × (1000 − LumaFlatProb)) / 1000',
+    'FinalTarget = (LVTarget × LVProb + LumaFlatTarget × (1000 − LVProb)) / 1000',
+  ]);
+  const rows = nodes(summary, 'tbody')[0].props.children;
+  assert.deepEqual(rows.map(row => nodes(row, 'td').map(text)), [
+    ['2048', '715', '1836.97', '1988'], ['2000', '715', '1836.97', '1954'],
+  ]);
+  assert.deepEqual(rows.map(row => text(nodes(row, 'th')[0])), ['EXIF', t('face_link_formula.parameter')]);
+  const lv = header.sources.find(source => source.name === 'LVTarget');
+  assert.equal(lv.exif.value, 2048);
+  assert.equal(lv.exif.source, 'EXIF · SW_LCE_LVTarget');
+  assert.equal(lv.parameter.value, 2000);
+  assert.match(lv.parameter.source, /Tone\.cpp.*LVTarget.*\[0\]\[0\]\[0\]\[0\]\[3\]/);
+  for (const source of header.sources.filter(source => source.name !== 'LVTarget')) {
+    assert.deepEqual(source.parameter, source.exif, `${source.name} continues to use EXIF`);
+    assert.equal(source.exif.source, `EXIF · SW_LCE_${source.name}`);
+  }
+  const details = text(header.details);
+  assert.ok(details.includes('(1000 × 253) / 1000 = 253'));
+  assert.ok(details.includes('(523 × 253 + 2282 × (1000 − 253)) / 1000 = 1836.97'));
+  assert.ok(details.includes('(2048 × 715 + 1836.97 × (1000 − 715)) / 1000 = 1988'));
+  assert.ok(details.includes('(2000 × 715 + 1836.97 × (1000 − 715)) / 1000 = 1954'));
+  for (const key of ['SW_LCE_LumaFlatProb', 'SW_LCE_LumaFlatTarget', 'SW_LCE_FinalTarget']) assert.ok(details.includes(key));
+  const missing = ToneLceCalCard({ calculation: calculateLceTarget(fixture, NaN) });
+  const missingSummary = DerivedTargetFormula(missing.props.children.props);
+  assert.deepEqual(nodes(nodes(missingSummary, 'tbody')[0].props.children[1], 'td').map(text), ['-', '715', '1836.97', '-']);
 });
 
 test('all five locales provide complete calculation and chart text with matching placeholders', () => {
@@ -308,13 +333,20 @@ test('chart headers expose independent formula-row toggles and place data before
 });
 
 test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting Cal in LVTarget', () => {
+  const path = '../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx';
+  const { axisBracket } = load(path, {}, 'axisBracket');
+  const { indexedBracket } = load(path, { axisBracket }, 'indexedBracket');
+  const { interpolateFields } = load(path, {}, 'interpolateFields');
   const { ToneLceTargetCard } = load('../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx', {
-    axisBracket: () => ({ low: 0, high: 0, ratio: 0 }), indexedBracket: () => ({ low: 0, high: 0, ratio: 0 }),
-    calculateLceTarget, interpolateFields: () => 1800, lceCardStyle: {}, lceHeaderStyle: {},
+    useState: initial => [initial, () => {}],
+    axisBracket, indexedBracket, interpolateFields,
+    calculateLceTarget, lceCardStyle: {}, lceHeaderStyle: {},
     ToneLceValueGrid: 'ToneLceValueGrid', ToneLceCalCard: 'ToneLceCalCard', ToneLceProbCard: 'ToneLceProbCard',
   }, 'ToneLceTargetCard');
-  const tables = { ratio: [[], [], []], target: [[], [], []] };
-  const tree = ToneLceTargetCard({ tables, position: { lv: 70, lvLow: 7, lvHigh: 8 }, tomlData: fixture });
+  const fields = values => values.map(value => ({ value: String(value) }));
+  const tables = { ratio: [[], [], []], target: [fields([1000, 2000]), fields([9999, 9999]), fields([8888, 8888])] };
+  const props = { tables, position: { lv: 2.5, lvLow: 0, lvHigh: 1 }, tomlData: fixture };
+  const tree = ToneLceTargetCard(props);
   assert.equal(tree.props['aria-label'], 'Tone LCE Target');
   assert.equal(tree.props.children[0].props.children, 'Target');
   assert.equal(tree.props.children[1].props['data-tone-lce-target-formula'], 'true');
@@ -323,6 +355,117 @@ test('Target owns its calculation row, Ratio, LVTarget and Prob without nesting 
   assert.deepEqual(grids.map(node => [node.props.tableId, node.props.title]), [['ratio', 'Ratio'], ['target', 'LVTarget']]);
   assert.ok(grids.every(node => node.props.formula === undefined));
   assert.equal(nodes(tree, 'ToneLceProbCard').length, 1);
+  const calculation = nodes(tree, 'ToneLceCalCard')[0].props.calculation;
+  const grid = grids.find(node => node.props.tableId === 'target');
+  assert.equal(calculation.parameterLvTarget, 1250);
+  assert.equal(calculation.parameterLvTarget, interpolateFields(grid.props.rows[0], grid.props.bracket));
+  assert.equal(calculation.parameterFinalTarget, 1417);
+  assert.equal(calculation.finalTarget, 1988);
+  // A committed draft-cell edit updates only parameter LVTarget and its downstream result.
+  const edited = ToneLceTargetCard({ ...props, tables: { ...tables, target: [fields([1400, 2400]), ...tables.target.slice(1)] } });
+  const changed = nodes(edited, 'ToneLceCalCard')[0].props.calculation;
+  assert.equal(changed.parameterLvTarget, 1650);
+  assert.equal(changed.parameterFinalTarget, 1703);
+  assert.equal(changed.finalTarget, calculation.finalTarget);
+  assert.equal(changed.lumaFlatTarget, calculation.lumaFlatTarget);
+  for (const target of [[[], ...tables.target.slice(1)], [fields(['-', 2000]), ...tables.target.slice(1)]]) {
+    const missing = nodes(ToneLceTargetCard({ ...props, tables: { ...tables, target } }), 'ToneLceCalCard')[0].props.calculation;
+    assert.ok(Number.isNaN(missing.parameterLvTarget));
+    assert.ok(Number.isNaN(missing.parameterFinalTarget));
+    assert.equal(missing.finalTarget, 1988, 'missing parameters cannot fall back to EXIF LVTarget');
+  }
+});
+
+test('LVTarget input previews interpolation before commit and cancels without changing source', () => {
+  const path = '../src/views/mtk/isp6s/ImagePane/ToneChartMapMode.tsx';
+  const { axisBracket } = load(path, {}, 'axisBracket');
+  const { indexedBracket } = load(path, { axisBracket }, 'indexedBracket');
+  const { interpolateFields } = load(path, {}, 'interpolateFields');
+  const { isToneNumberText } = load(path, {}, 'isToneNumberText');
+  const stateHost = () => {
+    let cursor = 0;
+    const values = [];
+    return {
+      reset: () => { cursor = 0; },
+      useState: initial => {
+        const index = cursor++;
+        if (!(index in values)) values[index] = initial;
+        return [values[index], value => { values[index] = value; }];
+      },
+      useRef: initial => {
+        const index = cursor++;
+        return values[index] ??= { current: initial };
+      },
+    };
+  };
+  const cardState = stateHost(), cellState = stateHost();
+  const { ToneLceTargetCard } = load(path, {
+    useState: cardState.useState, axisBracket, indexedBracket, interpolateFields, isToneNumberText,
+    calculateLceTarget, lceCardStyle: {}, lceHeaderStyle: {},
+    ToneLceValueGrid: 'ToneLceValueGrid', ToneLceCalCard: 'ToneLceCalCard', ToneLceProbCard: 'ToneLceProbCard',
+  }, 'ToneLceTargetCard');
+  const { ToneNumberCell } = load(path, {
+    useState: cellState.useState, useRef: cellState.useRef, useEffect: () => {},
+    fieldChangeColor: () => undefined, lceGridColor: '',
+  }, 'ToneNumberCell');
+  const first = { path: 'LVTarget[0]', value: '1000' };
+  const tables = { ratio: [[], [], []], target: [[first, { path: 'LVTarget[1]', value: '2000' }], [], []] };
+  const commits = [], jumps = [];
+  const props = { tables, sourceDraftText: 'source draft', position: { lv: 2.5, lvLow: 0, lvHigh: 1 }, tomlData: fixture,
+    onCommit: (field, value) => {
+      if (!isToneNumberText(value)) return false;
+      commits.push(value.trim());
+      tables.target = tables.target.map(row => row.map(item => item === field ? { ...item, value: value.trim() } : item));
+      return true;
+    }, onCellJump: (...args) => jumps.push(args),
+  };
+  const renderCard = () => { cardState.reset(); return ToneLceTargetCard(props); };
+  const targetGrid = () => nodes(renderCard(), 'ToneLceValueGrid').find(node => node.props.tableId === 'target').props;
+  const calculation = () => nodes(renderCard(), 'ToneLceCalCard')[0].props.calculation;
+  let input;
+  const renderInput = () => {
+    const grid = targetGrid();
+    cellState.reset();
+    input = nodes(ToneNumberCell({ field: grid.rows[0][0], tableId: 'target', controls: grid.controls }), 'input')[0].props;
+    return input;
+  };
+  const change = value => { renderInput().onChange({ target: { value } }); renderInput(); };
+  const key = name => renderInput().onKeyDown({ key: name, preventDefault: () => {}, currentTarget: { blur: () => renderInput().onBlur() } });
+  assert.equal(calculation().parameterLvTarget, 1250);
+  change('1400');
+  assert.equal(calculation().parameterLvTarget, 1550);
+  assert.equal(calculation().parameterFinalTarget, 1632);
+  assert.equal(calculation().finalTarget, 1988);
+  assert.equal(interpolateFields(targetGrid().previewRows[0], targetGrid().bracket), 1550);
+  assert.equal(targetGrid().rows[0][0].value, '1000');
+  assert.deepEqual(commits, [], 'typing must not commit the source');
+  for (const partial of ['', '-', '1e', '0x', '1e9999']) {
+    change(partial);
+    assert.equal(calculation().parameterLvTarget, 1550, 'partial/invalid text retains the last valid preview');
+  }
+  key('Escape');
+  assert.equal(calculation().parameterLvTarget, 1250);
+  assert.equal(renderInput().value, '1000');
+  assert.deepEqual(commits, []);
+  change('1400');
+  key('Enter');
+  assert.deepEqual(commits, ['1400'], 'Enter followed by blur commits only once');
+  assert.equal(calculation().parameterLvTarget, 1550);
+  change('0');
+  assert.equal(calculation().parameterLvTarget, 500, 'zero previews as a valid number');
+  renderInput().onBlur();
+  assert.deepEqual(commits, ['1400', '0']);
+  change('1600');
+  renderInput().onContextMenu({ preventDefault: () => {} });
+  assert.equal(jumps[0][2], '1600');
+  assert.deepEqual(commits, ['1400', '0', '1600']);
+  change('1800');
+  tables.target = tables.target.map(row => row.map(field => ({ ...field, value: '2000' })));
+  assert.equal(calculation().parameterLvTarget, 2000, 'replaced source fields cannot inherit an old preview');
+  change('-');
+  renderInput().onBlur();
+  assert.equal(calculation().parameterLvTarget, 2000);
+  assert.deepEqual(commits, ['1400', '0', '1600'], 'invalid blur must not commit partial text');
 });
 
 test('LCE chart divider restores, validates and remembers proportions in the visual store', () => {

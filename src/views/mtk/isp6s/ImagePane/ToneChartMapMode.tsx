@@ -9,6 +9,7 @@ import type { FieldEntry, ParseResult, StructNode } from "@/types/cpp_parser";
 import type { ChartSourceJumpDetails } from "./ChartMapMode";
 import { calculateLceTarget, type LceTargetCalculation } from "./toneLceTarget";
 import { ToneLceCharts } from "./ToneLceCharts";
+import { DerivedTargetFormula } from "./DerivedTargetFormula";
 import { tabButtonStyle, tabStripWrapStyle } from "./chartMapTabStyles";
 
 const TONE_TABS = ["LTM", "LCE", "GMA", "DCE", "CA-LTM"] as const;
@@ -200,6 +201,11 @@ function interpolateMatrix(rows: FieldEntry[][], row: AxisBracket | null, column
 
 function formatInterpolation(value: number): string {
   return Number.isFinite(value) ? String(Number(value.toFixed(2))) : "-";
+}
+
+function isToneNumberText(value: string): boolean {
+  return /^[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(value.trim())
+    && Number.isFinite(Number(value));
 }
 
 function bracketHits(bracket: AxisBracket | null, index: number): boolean {
@@ -458,7 +464,7 @@ export function ToneChartMapMode({
   }, [lceTables, lineFields, sourceDraftText]);
   const commitCell = (field: FieldEntry, value: string): boolean => {
     const trimmed = value.trim();
-    if (!/^[-+]?(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed)) return false;
+    if (!isToneNumberText(trimmed)) return false;
     const current = sourceDraftRef.current;
     if (!current) return false;
     const next = replaceFieldToken(current, field, lineFields, trimmed);
@@ -570,6 +576,7 @@ interface ToneTableProps {
   sourceSavedText: string | null;
   onSaveSourceDraft: () => Promise<void>;
   onCommit: (field: FieldEntry, value: string) => boolean;
+  onPreview?: (field: FieldEntry, value: string | null) => void;
   onCellJump: (tableId: ToneLceTableId, field: FieldEntry, value: string) => void;
   onSourceJump: Props["onSourceJump"];
   heatmapModes: Record<ToneLceTableId, HeatmapMode>;
@@ -675,7 +682,9 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
   const [focused, setFocused] = useState(false);
   const lastCommitted = useRef<string | null>(null);
   const discardOnBlur = useRef(false);
-  useEffect(() => { if (!focused) setDraft(value); }, [focused, value]);
+  // Preview does not alter field/value. A replaced source field must reset even
+  // a focused input so its stale text cannot later be committed to the new source.
+  useEffect(() => { setDraft(value); }, [focused, value, field]);
   const commit = () => {
     if (!field || draft.trim() === value) return true;
     if (lastCommitted.current === draft.trim()) return true;
@@ -711,21 +720,41 @@ function ToneNumberCell({ field, fallback, active, heat, hitCount, showCount, on
       inputMode="decimal" className="h-full w-full min-w-0 bg-transparent px-1 text-center font-mono text-[10px] outline-none"
       style={{ color: "inherit", cursor: field ? "text" : "default" }}
       onFocus={(event) => { setFocused(true); event.currentTarget.select(); }}
-      onBlur={() => { setFocused(false); if (discardOnBlur.current) discardOnBlur.current = false; else commit(); }}
-      onChange={(event) => { lastCommitted.current = null; setDraft(event.target.value); }}
-      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); } else if (event.key === "Escape") { discardOnBlur.current = true; setDraft(value); event.currentTarget.blur(); } }}
-      onContextMenu={(event) => { if (!field) return; event.preventDefault(); const ok = commit(); controls.onCellJump(tableId, field, ok ? draft.trim() : value); }} />
+      onBlur={() => {
+        setFocused(false);
+        if (discardOnBlur.current) discardOnBlur.current = false;
+        else commit();
+        if (field) controls.onPreview?.(field, null);
+      }}
+      onChange={(event) => {
+        lastCommitted.current = null;
+        setDraft(event.target.value);
+        if (field && controls.sourceDraftText) controls.onPreview?.(field, event.target.value);
+      }}
+      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); } else if (event.key === "Escape") { event.preventDefault(); discardOnBlur.current = true; setDraft(value); if (field) controls.onPreview?.(field, null); event.currentTarget.blur(); } }}
+      onContextMenu={(event) => { if (!field) return; event.preventDefault(); const ok = commit(); controls.onPreview?.(field, null); controls.onCellJump(tableId, field, ok ? draft.trim() : value); }} />
   </div>;
 }
 
 function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition }) {
   const { tables, position } = props;
+  const [preview, setPreview] = useState<{ field: FieldEntry; value: string } | null>(null);
+  const previewCell = (field: FieldEntry, value: string | null) => {
+    if (value === null) setPreview(null);
+    else if (isToneNumberText(value)) setPreview({ field, value: value.trim() });
+  };
+  // Field identity invalidates the preview when the source draft/file is replaced.
+  // Keep committed rows on inputs so Escape and commit comparisons use the original value.
+  const previewRows = tables.target.map((row) => row.map((field) =>
+    field === preview?.field ? { ...field, value: preview.value } : field));
   const ratioLabels = ["LV(Base10)", "DStrenthRatio", "BStrenthRatio"];
   const targetLabels = ["LVTarget", "MaxLceGain", "MaxFinalTarget"];
   const targetWidth = Math.max(1, ...tables.target.map((fields) => fields.length));
   const ratioBracket = axisBracket(position.lv, tables.ratio[0].map((field) => Number(field.value)));
   const targetBracket = indexedBracket(position.lv / 10, position.lvLow, position.lvHigh, targetWidth);
-  const calculation = calculateLceTarget(props.tomlData, interpolateFields(tables.target[0] ?? [], targetBracket));
+  // Use the same draft row and bracket as the LVTarget grid's displayed result.
+  const parameterLvTarget = interpolateFields(previewRows[0] ?? [], targetBracket);
+  const calculation = calculateLceTarget(props.tomlData, parameterLvTarget);
   return (
     <section style={lceCardStyle} aria-label="Tone LCE Target">
       <div className="flex min-h-9 items-center border-b px-3 text-xs font-bold" style={lceHeaderStyle}>Target</div>
@@ -734,7 +763,8 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
       </div>
       <div className="flex min-w-0 flex-col gap-2 p-2">
         <ToneLceValueGrid tableId="ratio" title="Ratio" labels={ratioLabels} rows={tables.ratio} bracket={ratioBracket} controls={props} />
-        <ToneLceValueGrid tableId="target" title="LVTarget" labels={targetLabels} rows={tables.target} bracket={targetBracket} controls={props} />
+        <ToneLceValueGrid tableId="target" title="LVTarget" labels={targetLabels} rows={tables.target} previewRows={previewRows}
+          bracket={targetBracket} controls={{ ...props, onPreview: previewCell }} />
         <ToneLceProbCard {...props} />
       </div>
     </section>
@@ -743,38 +773,43 @@ function ToneLceTargetCard(props: ToneTableProps & { position: LceImagePosition 
 
 function ToneLceCalCard({ calculation, embedded = false }: { calculation: LceTargetCalculation; embedded?: boolean }) {
   const { t } = useTranslation();
-  const { lvTarget, lvProb, lumaTarget, lumaProb, flatProb, flatTarget, lumaFlatProb, lumaFlatTarget,
+  const { lvTarget, parameterLvTarget, lvProb, lumaTarget, lumaProb, flatProb, flatTarget, lumaFlatProb, lumaFlatTarget,
     finalTarget, parameterFinalTarget, recordedLumaFlatProb, recordedLumaFlatTarget, recordedFinalTarget } = calculation;
   const value = formatInterpolation;
-  const comparison = (key: string, recorded: number, computed: number) => <div className="text-[10px]"
-    style={{ color: "var(--colorNeutralForeground3)" }}>
-    {t("tone_lce.recorded_comparison", { key, value: value(recorded), delta: value(computed - recorded) })}
-  </div>;
+  const comparison = (key: string, recorded: number, computed: number) =>
+    t("tone_lce.recorded_comparison", { key, value: value(recorded), delta: value(computed - recorded) });
+  const formulas = [
+    "LumaFlatProb = LumaProb × FlatProb / 1000",
+    "LumaFlatTarget = (FlatTarget × LumaFlatProb + LumaTarget × (1000 − LumaFlatProb)) / 1000",
+    "FinalTarget = (LVTarget × LVProb + LumaFlatTarget × (1000 − LVProb)) / 1000",
+  ];
+  const rows = (["exif", "parameter"] as const).map((key) => {
+    const target = key === "exif" ? lvTarget : parameterLvTarget;
+    const result = key === "exif" ? finalTarget : parameterFinalTarget;
+    return { key, values: [target, lvProb, lumaFlatTarget, result], steps: [
+      { title: comparison("SW_LCE_LumaFlatProb", recordedLumaFlatProb, lumaFlatProb), formula: formulas[0],
+        substitution: `(${value(lumaProb)} × ${value(flatProb)}) / 1000`, result: lumaFlatProb },
+      { title: comparison("SW_LCE_LumaFlatTarget", recordedLumaFlatTarget, lumaFlatTarget), formula: formulas[1],
+        substitution: `(${value(flatTarget)} × ${value(lumaFlatProb)} + ${value(lumaTarget)} × (1000 − ${value(lumaFlatProb)})) / 1000`, result: lumaFlatTarget },
+      { title: comparison("SW_LCE_FinalTarget", recordedFinalTarget, result), formula: formulas[2],
+        substitution: `(${value(target)} × ${value(lvProb)} + ${value(lumaFlatTarget)} × (1000 − ${value(lvProb)})) / 1000`, result },
+    ] };
+  });
+  const sources = [
+    { name: "LVTarget", exif: { value: lvTarget, source: "EXIF · SW_LCE_LVTarget" },
+      parameter: { value: parameterLvTarget, source: `Tone.cpp · LVTarget.LVTarget [0][0][0][0][3] · ${t("face_fdsz_parameter")}` } },
+    ...([
+      ["LVProb", lvProb], ["LumaProb", lumaProb], ["FlatProb", flatProb],
+      ["LumaTarget", lumaTarget], ["FlatTarget", flatTarget],
+    ] as const).map(([name, input]) => ({ name,
+      exif: { value: input, source: `EXIF · SW_LCE_${name}` },
+      parameter: { value: input, source: `EXIF · SW_LCE_${name}` },
+    })),
+  ];
 
-  return <section className="formula-panel flex min-w-0 flex-col" style={embedded ? undefined : lceCardStyle}>
-    <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 border-b px-2 text-xs font-semibold"
-      style={lceHeaderStyle}>
-      <span>Cal <span className="font-mono font-normal">{t("tone_lce.recalculated")}: {value(finalTarget)}</span></span>
-      <span className="font-mono font-normal" title={t("tone_lce.parameter_hint")}>{t("tone_lce.parameter_blend")}: {value(parameterFinalTarget)}</span>
-    </div>
-    <div className="flex min-w-0 flex-col gap-2 p-2 font-mono text-[11px] leading-5"
-      style={{ color: "var(--colorNeutralForeground1)", overflowWrap: "anywhere" }}>
-      <div>
-        <div>LumaFlatProb = LumaProb * FlatProb / 1000</div>
-        <div>({value(lumaProb)} * {value(flatProb)}) / 1000 = <strong>{value(lumaFlatProb)}</strong></div>
-        {comparison("SW_LCE_LumaFlatProb", recordedLumaFlatProb, lumaFlatProb)}
-      </div>
-      <div>
-        <div>LumaFlatTarget = (FlatTarget * LumaFlatProb + LumaTarget * (1000 - LumaFlatProb)) / 1000</div>
-        <div>({value(flatTarget)} * {value(lumaFlatProb)} + {value(lumaTarget)} * (1000 - {value(lumaFlatProb)})) / 1000 = <strong>{value(lumaFlatTarget)}</strong></div>
-        {comparison("SW_LCE_LumaFlatTarget", recordedLumaFlatTarget, lumaFlatTarget)}
-      </div>
-      <div>
-        <div>FinalTarget = (LVTarget * LVProb + LumaFlatTarget * (1000 - LVProb)) / 1000</div>
-        <div>({value(lvTarget)} * {value(lvProb)} + {value(lumaFlatTarget)} * (1000 - {value(lvProb)})) / 1000 = <strong>{value(finalTarget)}</strong></div>
-        {comparison("SW_LCE_FinalTarget", recordedFinalTarget, finalTarget)}
-      </div>
-    </div>
+  return <section className="min-w-0 px-3 py-2" style={embedded ? undefined : lceCardStyle}>
+    <DerivedTargetFormula title="Target" columns={["LVTarget", "LVProb", "LumaFlatTarget"]}
+      rows={rows} formulas={formulas} sources={sources} formatValue={value} />
   </section>;
 }
 
@@ -877,11 +912,12 @@ function ToneLceStrengthCard(props: ToneTableProps & { position: LceImagePositio
   );
 }
 
-function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, showResult = true, fillHeight = false, embedded = false, formula, controls }: {
+function ToneLceValueGrid({ tableId, title, labels, rows, previewRows, bracket, rowTooltips, showResult = true, fillHeight = false, embedded = false, formula, controls }: {
   tableId: ToneLceTableId;
   title: string;
   labels: string[];
   rows: FieldEntry[][];
+  previewRows?: FieldEntry[][];
   bracket: AxisBracket | null;
   rowTooltips?: Array<string | undefined>;
   showResult?: boolean;
@@ -897,7 +933,7 @@ function ToneLceValueGrid({ tableId, title, labels, rows, bracket, rowTooltips, 
     [mode.enabled, tableId, controls.heatmapPoints, controls.tables, rows.length, count]);
   const maximum = Math.max(0, ...hits.flat().map((paths) => paths.length));
   const result = showResult ? labels.slice(tableId === "ratio" ? 1 : 0)
-    .map((label, index) => `${label}: ${formatInterpolation(interpolateFields(rows[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
+    .map((label, index) => `${label}: ${formatInterpolation(interpolateFields((previewRows ?? rows)[index + (tableId === "ratio" ? 1 : 0)] ?? [], bracket))}`)
     .join(" | ") : "";
   return <div className={`${fillHeight ? "flex min-h-0 flex-1 flex-col " : ""}min-w-0`} data-tone-lce-table={tableId} style={embedded ? undefined : lceCardStyle}>
     {!embedded && <ToneLceTableHeader tableId={tableId} title={title} result={result} rows={rows} controls={controls} />}

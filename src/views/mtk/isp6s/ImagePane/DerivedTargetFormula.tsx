@@ -31,15 +31,16 @@ const detailExpression = (expression: string) => expression.replace(/(?:\d+(?:\.
   (value) => detailNumber(Number(value)));
 
 /** Read-only two-source summary. Supplied results remain owned by the existing calculators. */
-function DerivedTargetFormula({ title, columns, rows, formulas, sources }: {
+export function DerivedTargetFormula({ title, columns, rows, formulas, sources, formatValue }: {
   title: string; columns: string[]; rows: SummaryRow[]; formulas: string[]; sources: FormulaSourceComparison[];
+  formatValue?: (value: number) => string;
 }) {
   const { t } = useTranslation();
   const details = rows.map(({ key, steps }) => <div key={key} className="grid gap-2 text-xs leading-5">
     <div className="font-semibold">{title} · {key === "exif" ? "EXIF" : t("face_link_formula.parameter")}</div>
     {steps.map((step, index) => <section key={index}>
       <div style={{ color: "var(--colorNeutralForeground3)" }}>{step.title}</div>
-      <code className="block whitespace-normal break-words">{step.substitution} = <strong>{detailNumber(step.result)}</strong></code>
+      <code className="block whitespace-normal break-words">{step.substitution} = <strong>{(formatValue ?? detailNumber)(step.result)}</strong></code>
     </section>)}
   </div>);
   return <div className="formula-panel w-full min-w-0 text-xs" style={{ color: "var(--colorNeutralForeground2)" }}>
@@ -55,8 +56,8 @@ function DerivedTargetFormula({ title, columns, rows, formulas, sources }: {
           <th scope="row" className="break-words px-1.5 py-1.5 font-medium">{key === "exif" ? "EXIF" : t("face_link_formula.parameter")}</th>
           {values.map((value, index) => <td key={index} className="break-words px-1.5 py-1.5 tabular-nums">
             {index === values.length - 1
-              ? <strong style={{ color: "var(--colorNeutralForeground1)" }}>{summaryNumber(value)}</strong>
-              : summaryNumber(value)}
+              ? <strong style={{ color: "var(--colorNeutralForeground1)" }}>{(formatValue ?? summaryNumber)(value)}</strong>
+              : (formatValue ?? summaryNumber)(value)}
           </td>)}
         </tr>)}</tbody>
     </table>
