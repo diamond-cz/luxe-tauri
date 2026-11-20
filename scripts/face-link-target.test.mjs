@@ -793,6 +793,194 @@ test('HS Weight BV/B2D/Mid axis drafts change the same trilinear interpolation u
   assert.equal(normal.previewHsWeightSourceFromDraft(weight, hsFixture().draft), weight, 'unchanged drafts retain the loaded object');
 });
 
+test('HS and NS keep source identity across temporary draft revisions but isolate a different file', () => {
+  const parsed = ts.createSourceFile(chartPath, readFileSync(new URL(chartPath, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let callback;
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'sourceIdentity') callback = node.initializer.arguments[0];
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  assert.ok(callback);
+  const identity = new Function('filePath', 'sourceBasePath', 'sourceRevision', 'tab', 'isFaceTab', `return (${callback.getText(parsed)})();`);
+  const original = identity('AE.cpp', 'AE.cpp', 0, 'HS', false);
+  assert.equal(identity('temp.cpp', 'AE.cpp', 1, 'HS', false), original);
+  assert.equal(identity('temp.cpp', 'AE.cpp', 0, 'HS', false), original, 'pending temp write must preserve HS state too');
+  assert.equal(identity('temp.cpp', 'AE.cpp', 2, 'HS', false), original);
+  const nsOriginal = identity('AE.cpp', 'AE.cpp', 0, 'NS', false);
+  assert.equal(identity('temp.cpp', 'AE.cpp', 1, 'NS', false), nsOriginal);
+  assert.equal(identity('temp.cpp', 'AE.cpp', 0, 'NS', false), nsOriginal);
+  assert.notEqual(identity('other.cpp', 'other.cpp', 0, 'NS', false), nsOriginal);
+  assert.notEqual(identity('other.cpp', 'other.cpp', 0, 'HS', false), original);
+  assert.notEqual(identity('AE.cpp', 'AE.cpp', 0, 'MainT', false), identity('temp.cpp', 'AE.cpp', 1, 'MainT', false));
+});
+
+test('HS Weight BV edits retain row reconciliation keys and do not restart resize subscriptions', async () => {
+  const [source] = await hsSources('base');
+  const dependencies = [];
+  const { HsWeightGrid, previewHsWeightSourceTarget } = loadSelected(chartPath, ['HsWeightGrid', 'previewHsWeightSourceTarget'], {
+    useRef: () => ({ current: null }), useState: value => [value, () => {}],
+    useLayoutEffect: (_, deps) => { dependencies.push(deps); }, Fragment: 'fragment', HsWeightEditableCell: 'HsWeightEditableCell',
+  });
+  const selected = { bvIndexes: new Set(), midIndexes: new Set(), drIndexesByBv: new Map() };
+  const render = value => HsWeightGrid({ source: value, selected, editable: true });
+  const rowKeys = tree => nodesOfType(tree, 'div').filter(node => node.props.children?.[0]?.props?.title === 'BV').map(node => node.key);
+  const before = render(source);
+  const after = render(previewHsWeightSourceTarget(source, { kind: 'bv', bvIndex: 0 }, '250'));
+  assert.equal(rowKeys(before).length, 2);
+  assert.deepEqual(rowKeys(after), rowKeys(before), 'typing a BV value must not replace that group of inputs');
+  assert.deepEqual(dependencies[0], dependencies[1], 'numeric edits must not disconnect and reattach the layout observer');
+});
+
+test('HS Weight save tracks all axes/channels, focused previews, committed edits and saved state', async () => {
+  const [source] = await hsSources('base');
+  const saved = hsFixture().draft;
+  const api = loadSelected(chartPath, [
+    'hsWeightHasUnsavedChanges', 'previewHsWeightSourceTarget', 'getHsWeightTargetField', 'replaceHsWeightCellInSourceText',
+  ]);
+  assert.equal(api.hsWeightHasUnsavedChanges(source, saved, saved), false);
+  assert.equal(api.hsWeightHasUnsavedChanges(null, saved, saved), false);
+  assert.equal(api.hsWeightHasUnsavedChanges(source, saved, null), false);
+  assert.equal(api.hsWeightHasUnsavedChanges(source, saved + '\n// another card edit', saved), false);
+  const targets = [
+    { kind: 'bv', bvIndex: 0 }, { kind: 'dr', bvIndex: 0, drIndex: 0 }, { kind: 'mid', midIndex: 0 },
+    ...[0, 1, 2, 3].map(channelIndex => ({ kind: 'value', bvIndex: 0, drIndex: 0, midIndex: 0, channelIndex })),
+  ];
+  for (const target of targets) {
+    const field = api.getHsWeightTargetField(source, target);
+    const preview = api.previewHsWeightSourceTarget(source, target, '999');
+    assert.equal(api.hsWeightHasUnsavedChanges(preview, saved, saved), true, `${target.kind}: focused preview enables Save`);
+    const committed = api.replaceHsWeightCellInSourceText(saved, source, field, '999');
+    assert.ok(committed);
+    assert.equal(api.hsWeightHasUnsavedChanges(source, committed, saved), true);
+    const current = normal.previewHsWeightSourceFromDraft(source, committed);
+    assert.equal(api.hsWeightHasUnsavedChanges(current, committed, committed), false, 'successful save clears dirty state');
+    const reverted = api.previewHsWeightSourceTarget(preview, target, field.value);
+    assert.equal(api.hsWeightHasUnsavedChanges(reverted, saved, saved), false);
+  }
+});
+
+function nsFixture() {
+  const text = readFileSync(new URL(chartPath, import.meta.url), 'utf8');
+  const names = [...text.matchAll(/^const (NS_\w+_PATH) =/gm)].map(match => match[1]);
+  const paths = loadSelected(chartPath, names);
+  const groups = new Map(), fields = [], lines = [];
+  for (const name of names) {
+    const path = paths[name];
+    let values = [name.includes('Y1') ? 1024 : name.includes('X1') || name.includes('BRIGHTEST') ? 10
+      : name.includes('LIMIT') ? 1000 : name.includes('DARK_Y') ? 100
+      : name.includes('FLAT_THD') ? 80 : name.includes('NS_PCNT') ? 20 : name.includes('LOWBND_THD') ? 40 : 0];
+    if (name === 'NS_NORT_BV_PATH') values = [0, 10];
+    if (name === 'NS_NORT_THD_PATH') values = [40, 80];
+    if (name === 'NS_BT_THD_PATH') values = [60, 100];
+    if (name === 'NS_NORT_NS_EN_PATH') values = [25, 75];
+    const line = lines.length + 1;
+    const entries = values.map((value, index) => ({
+      path: values.length > 1 ? `${path}.${index}` : path,
+      value: String(value), line, index: fields.length + index,
+      column_start: values.slice(0, index).join(', ').length + (index ? 3 : 1),
+      column_end: values.slice(0, index).join(', ').length + (index ? 3 : 1) + String(value).length,
+    }));
+    groups.set(path, entries); fields.push(...entries); lines.push(values.join(', ') + ',');
+  }
+  return { groups, fields, draft: lines.join('\n') };
+}
+
+test('NS save covers probability curves and both area tables, including focused previews', async () => {
+  const fixture = nsFixture();
+  const api = loadSelected(chartPath, [
+    'loadNsProbabilityCurveSource', 'loadNsNorTSource', 'loadNsBTSource', 'nsTableHasUnsavedChanges',
+    'previewNsProbabilitySourceTarget', 'previewNsNorTSourceTarget',
+    'getNsProbabilityTargetField', 'getNsNorTTargetField',
+    'replaceNsProbabilityCellInSourceText', 'replaceNsNorTCellInSourceText',
+    'updateNsProbabilitySourceField', 'updateNsNorTSourceTarget',
+  ], { cppGetFieldsAtPath: async (_, path) => fixture.groups.get(path) ?? [] });
+  const probability = await api.loadNsProbabilityCurveSource('AE.cpp');
+  const normalArea = await api.loadNsNorTSource('AE.cpp');
+  const btArea = await api.loadNsBTSource('AE.cpp');
+  const saved = fixture.draft;
+  const curveTargets = ['bv', 'cdf'].flatMap(curveId => ['x0', 'x1', 'y0', 'y1'].map(fieldId => ({ curveId, fieldId })));
+  const areaTargets = source => [
+    ...['bv', 'thd'].flatMap(row => source.bvValues.map((_, index) => ({ kind: 'thdTable', row, index }))),
+    ...['interval', 'pcnt'].flatMap(row => source.nsEvdDefineFields.map((_, index) => ({ kind: 'evdDefine', row, index }))),
+    ...Object.entries(source.flatSettings).filter(([, setting]) => setting.field).map(([id]) => ({ kind: 'flatSetting', id })),
+    ...['x0', 'x1', 'y0', 'y1'].map(fieldId => ({ kind: 'flatProb', fieldId })),
+  ];
+  for (const [source, targets, preview, getField, replace, update] of [
+    [probability, curveTargets, api.previewNsProbabilitySourceTarget, api.getNsProbabilityTargetField, api.replaceNsProbabilityCellInSourceText,
+      (src, target, field, value) => api.updateNsProbabilitySourceField(src, field, value)],
+    ...[normalArea, btArea].map(source => [source, areaTargets(source), api.previewNsNorTSourceTarget,
+      api.getNsNorTTargetField, api.replaceNsNorTCellInSourceText, api.updateNsNorTSourceTarget]),
+  ]) {
+    assert.equal(api.nsTableHasUnsavedChanges(source, saved, saved), false);
+    assert.equal(api.nsTableHasUnsavedChanges(source, saved + '\n// unrelated', saved), false);
+    for (const target of targets) {
+      const field = getField(source, target);
+      assert.ok(field);
+      const value = String(Number(field.value) + 1);
+      const pending = preview(source, target, value);
+      assert.equal(api.nsTableHasUnsavedChanges(pending, saved, saved), true, JSON.stringify(target));
+      const committed = replace(saved, source, field, value);
+      assert.ok(committed, `must locate every editable source token: ${JSON.stringify(target)}`);
+      assert.equal(api.nsTableHasUnsavedChanges(source, committed, saved), true);
+      const current = update(pending, target, field, value);
+      assert.equal(api.nsTableHasUnsavedChanges(current, committed, committed), false, 'saving clears all preview metadata');
+      assert.equal(api.nsTableHasUnsavedChanges(preview(source, target, field.value), saved, saved), false);
+    }
+  }
+  const secondDefine = normalArea.nsEvdDefineFields[1];
+  assert.ok(normalArea.fields.some(field => field.path === secondDefine.path), 'NorT must retain the second same-line percentage field');
+  const updated = api.replaceNsNorTCellInSourceText(saved, normalArea, secondDefine, '90');
+  assert.equal(updated.split('\n')[secondDefine.line - 1], '25, 90,', 'editing the second percentage must preserve the first token');
+  assert.equal(api.nsTableHasUnsavedChanges(null, saved, saved), false);
+  assert.equal(api.nsTableHasUnsavedChanges(normalArea, saved, null), false);
+  const uniqueThd = api.replaceNsNorTCellInSourceText(saved, normalArea, normalArea.thdFields[0], '99');
+  assert.equal(api.nsTableHasUnsavedChanges(btArea, uniqueThd, saved), false, 'NorT-only THD does not dirty BT');
+  const sharedBv = api.replaceNsNorTCellInSourceText(saved, normalArea, normalArea.bvFields[0], '2');
+  assert.equal(api.nsTableHasUnsavedChanges(normalArea, sharedBv, saved), true);
+  assert.equal(api.nsTableHasUnsavedChanges(btArea, sharedBv, saved), true, 'the shared BV axis belongs to both cards');
+});
+
+test('NS background parse updates preserve the current input preview and clear it on source removal', async () => {
+  const fixture = nsFixture();
+  const api = loadSelected(chartPath, [
+    'loadNsProbabilityCurveSource', 'loadNsNorTSource', 'previewNsProbabilitySourceTarget', 'previewNsNorTSourceTarget',
+  ], { cppGetFieldsAtPath: async (_, path) => fixture.groups.get(path) ?? [] });
+  const parsed = ts.createSourceFile(chartPath, readFileSync(new URL(chartPath, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const syncSource = (name, globals) => {
+    const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    let callback;
+    const visit = node => {
+      if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'useEffect'
+        && node.arguments[0]?.getText(parsed).includes('const preview = cellPreviewRef.current')) callback = node.arguments[0];
+      ts.forEachChild(node, visit);
+    };
+    visit(declaration);
+    assert.ok(callback, name);
+    const code = ts.transpileModule(`return (${callback.getText(parsed)})();`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    return new Function(...Object.keys(globals), code)(...Object.values(globals));
+  };
+  for (const [name, source, target, readValue] of [
+    ['NsProbabilityCard', await api.loadNsProbabilityCurveSource('AE.cpp'), { curveId: 'cdf', fieldId: 'y1' }, source => source.cdf.y1],
+    ['NsNorTAreaCard', await api.loadNsNorTSource('AE.cpp'), { kind: 'flatSetting', id: 'nsPcnt' }, source => source.flatSettings.nsPcnt.value],
+  ]) {
+    let current;
+    const ref = { current: { target, value: '257' } };
+    const apply = source => syncSource(name, { source, cellPreviewRef: ref,
+      setEditableSource: next => { current = next; }, ...api });
+    apply({ ...source }); // Previous save's parser result arrives during the next edit.
+    assert.equal(readValue(current), 257);
+    assert.notEqual(readValue(source), 257, 'loaded source remains immutable');
+    ref.current = null;
+    apply(source);
+    assert.equal(current, source, 'committed or cancelled input no longer overlays new parser data');
+    ref.current = { target, value: '258' };
+    apply(null);
+    assert.equal(current, null);
+    assert.equal(ref.current, null, 'a different/removed source cannot inherit the old preview');
+  }
+});
+
 test('Normal formula comparison retains six parameter paths and both EXIF aggregate sources', () => {
   const { NormalTargetFormula } = loadSelected('../src/views/mtk/isp6s/ImagePane/DerivedTargetFormula.tsx', ['NormalTargetFormula'], {
     useTranslation: () => ({ t }), DerivedTargetFormula: 'DerivedTargetFormula',

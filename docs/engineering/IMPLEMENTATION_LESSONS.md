@@ -4,6 +4,38 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-20：NS 编辑重建修复及 Probability/NorT/BT 保存按钮
+
+**亮点**：`ChartMapMode.tsx` 将NS纳入原文件/标签逻辑身份，临时草稿解析期间保留Probability、NorT、BT、DT数据与输入控件，避免loading占位导致的布局跳动。Probability/NorT/BT标题通过 `sourceSavedText`、`onSaveSourceDraft` 接入共享 `FaceTableSaveButton`，`nsTableHasUnsavedChanges` 覆盖当前聚焦预览和草稿/保存快照。各NS输入卡片增加单格预览ref，后台快照到达时保留未提交输入，清除/提交或source失效时释放。NorT加载器保留完整numericNsEnFields，使第二个EVD百分比字段可定位并保存。
+
+**痛点**：旧NS将临时路径/版本变化视作新来源。浏览器复现Probability/NorT/BT在提交后输入DOM重建，DT虽保留DOM也会短暂清空或变为只读。验证连续保存时另发现前一次后台解析覆盖下一次尚未提交的预览，导致保存按钮失效；仅稳定身份不足，需在新快照上叠加当前预览。NorT原字段列表只放nsEn首字段，第二个百分比的同一行token无法匹配。
+
+**闭坑**：切换原参数文件必须清除旧状态，加载effect继续隔离过期结果；未提交预览只限当前一格，不写新缓存或后台任务。保存标记按真实字段判定，NorT/BT共享BV与flat_thd会同时受影响，NorT专属THD不能误亮BT。聚焦时保存先blur提交，再调用原整份AE.cpp草稿保存入口，保存失败不清标记，不新增DT保存按钮。保留之前未提交的HS身份/保存修复。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`运行 `node --test --test-reporter=dot scripts/face-link-target.test.mjs`，52项通过。新增NS数据夹具调用真实加载/预览/源码替换/修改判定函数，覆盖所有曲线字段、阈值轴/值、区间/百分比、平坦参数、保存/回退/缺失快照、NorT/BT共享与独占字段；第二百分比同一行修改保持首值不变。来源身份覆盖NS临时路径与版本稳定/不同原文件隔离；另执行实际source同步effect验证后台快照保留预览和source失效清理。
+
+Edge headless夹具使用实际完整ChartMapMode/主题/Dnd，仅模拟IPC和临时稿写入时序。读取HEAD旧实现，在深浅主题复现前三卡片DOM替换及DT输入中断；修复后 `python .tmp-ns-edit/check.py` 两主题共66次可编辑输入检查通过，逐帧验证无断连、无临时只读/数值清空、焦点及最终值保持。`python .tmp-ns-edit/check-save.py` 验证三卡片聚焦直接保存最新草稿、成功后禁用、失败保留并重试通过，无pageerror；截图在忽略目录 `.tmp-ns-edit/`。`git diff --check`通过。文件写入为隔离模拟，未本地编译Rust/Tauri或验收原生窗口真实文件保存，未提交/发布新版本。
+
+### 2026-11-20：HS Weight 标题栏保存按钮
+
+**亮点**：`ChartMapMode.tsx` 给 `HsWeightCard` 传入已有 `sourceSavedText`、`onSaveSourceDraft`，在标题动作区复用 `FaceTableSaveButton`。`hsWeightHasUnsavedChanges` 检查BV/B2D/Mid轴和四通道权重，兼顾聚焦中的实时预览与已提交草稿；无修改时禁用，修改显示星号，成功保存后恢复禁用，失败保留错误和重试能力。文件写入继续由原 `useSourceDraft.onSave` 处理，不新增IPC或更改编码流程。
+
+**痛点**：原Weight卡片只有源码跳转/折叠按钮，缺少保存回调和已保存快照。只比较草稿字符串会让仍聚焦的有效输入不能启用保存，必须先Enter/失焦；因此使用预览数值一并判定修改，按钮点击前的blur通过原单元格提交链路把最新值写入草稿。
+
+**闭坑**：保存标记只检查Weight相关字段，其他Area单独修改不能误亮Weight按钮；BV/B2D/Mid与四通道均要覆盖，恢复原值要清除标记。复用回调保存的是当前完整AE.cpp草稿，包括该文件其他已提交修改，不声称只局部写Weight。保存失败不能清除修改或伪造成功；没有保存快照/回调时按钮不可用。保留本轮之前HS控件身份稳定的修复和未提交改动。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`执行 `node --test --test-reporter=dot scripts/face-link-target.test.mjs`，50项通过。新增用例覆盖三类轴与四通道预览/提交、缺失源或快照、无关修改、保存后及恢复原值状态。`python .tmp-hs-edit/check-save.py`使用实际完整ChartMapMode与保存按钮，在深浅主题检查未修改禁用、聚焦输入直接保存最新值、矩阵修改、写入失败保留星号并可重试、成功后清除以及Area修改隔离，无pageerror；文件写入回调使用隔离模拟，未覆盖用户文件。截图位于忽略目录 `.tmp-hs-edit/hs-save-{dirty,clean}-{light,dark}.png`。`git diff --check`通过。未本地编译Rust/Tauri、未验收原生窗口中的真实文件保存，未提交或发布新版本。
+
+### 2026-11-20：HS 表格数值编辑触发重建与焦点丢失
+
+**亮点**：`ChartMapMode.tsx` 让HS与现有Face路径一样按原文件和标签建立逻辑来源身份，保留已加载HS Weight与三个Area快照，草稿临时路径/版本变化时继续使用现有不可变数字投影，后台解析完成后更新数据；首次加载与真正换文件仍按现有链路处理。已有Weight快照时取消重载loading占位，避免纵向跳动。Weight的BV分组改用稳定行索引key，布局观察器仅随Mid列数变化重建，无新增缓存或观察器。
+
+**痛点**：原HS来源身份使用临时文件路径和草稿版本。单元格提交更新草稿后身份改变，`currentHsWeightSource/currentHs*AreaSource`短暂变为null，卡片内输入网格被卸载换为loading，重解析完成才重建，导致用户看到整页重绘、焦点丢失。另BV分组key含当前BV值，预览第一个字符就改变整组key，尚未提交也会替换输入。数值变化还使缩放effect因依赖source对象反复测量/订阅。
+
+**闭坑**：React数值更新仍会渲染相关计算结果，必须避免的是编辑控件被无故卸载重建。逻辑身份不得跨不同原文件复用；临时解析结果继续由原effect取消机制隔离。保持既有插值、源码token替换、保存及Normal_new链路，不能通过关闭预览掩盖问题。稳定key不包含BV数值，尺寸变化继续由已有ResizeObserver处理，不宣称已实测CPU/内存降幅。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`执行 `node --test --test-reporter=dot scripts/face-link-target.test.mjs`，49项通过。新增用例执行生产来源身份回调与Weight网格，验证临时路径/版本稳定、不同原文件隔离、BV预览前后分组key不变及数值更新不重启观察器；原HS草稿插值、Normal_new和来源测试继续通过。浏览器夹具使用实际完整ChartMapMode、Dnd组件、主题与项目CSS，只模拟IPC字段加载和临时稿写入时序；读取HEAD旧实现，在深浅主题均复现BV首字符替换输入、Area提交重解析后替换输入。修复实现的 `python .tmp-hs-edit/check.py` 在两主题覆盖32次轴/权重/矩阵编辑，验证连续输入、即时插值、Enter提交、异步解析结束后DOM身份及焦点保持，无pageerror；截图在忽略目录 `.tmp-hs-edit/hs-edit-{light,dark}.png`。`git diff --check`通过。未本地编译Rust/Tauri，未在原生应用中验收真实AE.cpp写入/保存，未提交或发布新版本。
+
 ### 2026-11-20：MTK 切页重复提示失效参数路径与 Toast 长路径溢出
 
 **亮点**：`MtkView.tsx` 恢复参数路径时复用既有 `imports` 的done/error终态，同路径失败不随路由重挂载重复检查或弹窗；手动选择仍通过 `importCppPath` 重试，路径变化、进程重启及未完成的parsing状态继续恢复。`Toast.tsx` 统一添加任意位置换行、视口宽度约束与border-box，路径完整显示在提示框内；保留原主题与显隐动画。说明更新于 `docs/config/LOCAL_STATE.md`。

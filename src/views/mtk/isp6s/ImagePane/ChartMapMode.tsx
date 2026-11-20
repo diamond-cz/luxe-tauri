@@ -1054,7 +1054,9 @@ export function ChartMapMode({
   }, [isFaceTab, tab, visual.chart_face_heatmap_modes]);
   const sourceIdentity = useMemo(() => {
     if (!filePath) return null;
-    return isFaceTab
+    // Keep editable snapshots mounted for the same original parameter file
+    // while a new temporary draft revision parses in the background.
+    return isFaceTab || tab === "HS" || tab === "NS"
       ? `${sourceBasePath}\u0000${tab}`
       : `${filePath}\u0000${sourceRevision ?? 0}`;
   }, [filePath, isFaceTab, sourceBasePath, sourceRevision, tab]);
@@ -1997,7 +1999,9 @@ export function ChartMapMode({
           midValue={midratioValue}
           wetValues={hsWeightWetValues}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
           onInterpolatedChange={updateLiveHsWeightWetValues}
           initialExpanded={!collapsed}
@@ -2141,7 +2145,9 @@ export function ChartMapMode({
           cdfValue={nsCdfValue}
           source={currentNsProbabilitySource}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
           onComputedChange={updateLiveNsProbability}
           initialExpanded={!collapsed}
@@ -2158,7 +2164,9 @@ export function ChartMapMode({
           nsEvdValue={nsEvdValue}
           nsNormalFinalThdValue={nsNormalFinalThdValue}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
           onComputationChange={updateLiveNsNorTComputation}
           initialExpanded={!collapsed}
@@ -2176,7 +2184,9 @@ export function ChartMapMode({
           nsEvdValue={nsEvdValue}
           nsNormalFinalThdValue={nsBTFinalThdValue}
           sourceDraftText={sourceDraftText}
+          sourceSavedText={sourceSavedText}
           onSourceDraftTextChange={onSourceDraftTextChange}
+          onSaveSourceDraft={onSaveSourceDraft}
           onSourceJump={onSourceJump}
           onComputationChange={updateLiveNsBTComputation}
           initialExpanded={!collapsed}
@@ -2261,7 +2271,8 @@ export function ChartMapMode({
 
       <div className="chart-map-content min-h-0 flex-1 overflow-x-auto overflow-y-scroll px-3 pb-3 pt-2" data-isp6s-chart-scroll="true">
         <div style={innerCanvasStyle}>
-          {loading && (!isFaceTab || !currentFaceFbtSource) && (
+          {loading && (!isFaceTab || !currentFaceFbtSource) && !(tab === "HS" && currentHsWeightSource)
+            && !(tab === "NS" && (currentNsProbabilitySource || currentNsNorTSource || currentNsBTSource || currentNsDtSource)) && (
             <div className="mb-2 text-xs" style={{ color: "var(--colorNeutralForeground3)" }}>
               loading...
             </div>
@@ -2725,7 +2736,7 @@ async function loadNsNorTSource(filePath: string): Promise<NsNorTSource> {
       ...thdFields,
       evdDarkestField,
       evdBrightestField,
-      nsEnField,
+      ...numericNsEnFields,
       nsPcntField,
       flatThdField,
       flatProbX0Field,
@@ -5142,7 +5153,9 @@ function NsProbabilityCard({
   cdfValue,
   source,
   sourceDraftText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
   onComputedChange,
   initialExpanded,
@@ -5155,7 +5168,9 @@ function NsProbabilityCard({
   cdfValue: string | null;
   source: NsProbabilityCurveSource | null;
   sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
+  onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onComputedChange?: (value: number) => void;
   initialExpanded?: boolean;
@@ -5163,9 +5178,12 @@ function NsProbabilityCard({
 }) {
   const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [editableSource, setEditableSource] = useState(source);
+  const cellPreviewRef = useRef<{ target: NsProbabilityCurveCellTarget; value: string } | null>(null);
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
   useEffect(() => {
-    setEditableSource(source);
+    if (!source) cellPreviewRef.current = null;
+    const preview = cellPreviewRef.current;
+    setEditableSource(source && preview ? previewNsProbabilitySourceTarget(source, preview.target, preview.value) : source);
   }, [source]);
   useEffect(() => {
     sourceDraftTextRef.current = sourceDraftText ?? "";
@@ -5188,9 +5206,14 @@ function NsProbabilityCard({
   }, [computedProb, onComputedChange]);
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
 
+  const tableDirty = useMemo(() => nsTableHasUnsavedChanges(editableSource, sourceDraftText, sourceSavedText),
+    [editableSource, sourceDraftText, sourceSavedText]);
+
   const previewCurveCell = (target: NsProbabilityCurveCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
     if (!isSourceNumberText(trimmed)) return;
+    cellPreviewRef.current = editableSource && getNsProbabilityTargetField(editableSource, target)?.value.trim() === trimmed
+      ? null : { target, value: trimmed };
     setEditableSource((current) => current ? previewNsProbabilitySourceTarget(current, target, trimmed) : current);
   };
 
@@ -5202,6 +5225,7 @@ function NsProbabilityCard({
     if (!field) return false;
     const nextText = replaceNsProbabilityCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
     if (nextText === null) return false;
+    cellPreviewRef.current = null;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
     setEditableSource((current) => current ? updateNsProbabilitySourceField(current, field, trimmed) : current);
@@ -5213,6 +5237,7 @@ function NsProbabilityCard({
       <div style={thresholdHeaderStyle}>
         <div style={thresholdTitleStyle}>NS Probability</div>
         <div style={thresholdGroupActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             aria-label="Jump to NS Probability source"
@@ -5704,7 +5729,9 @@ function NsNorTAreaCard({
   nsEvdValue,
   nsNormalFinalThdValue,
   sourceDraftText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
   onComputationChange,
   initialExpanded,
@@ -5717,7 +5744,9 @@ function NsNorTAreaCard({
   nsEvdValue: string | null;
   nsNormalFinalThdValue: string | null;
   sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
+  onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onComputationChange?: (computation: NsAreaComputation) => void;
   initialExpanded?: boolean;
@@ -5725,10 +5754,13 @@ function NsNorTAreaCard({
 }) {
   const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [editableSource, setEditableSource] = useState(source);
+  const cellPreviewRef = useRef<{ target: NsNorTCellTarget; value: string } | null>(null);
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
 
   useEffect(() => {
-    setEditableSource(source);
+    if (!source) cellPreviewRef.current = null;
+    const preview = cellPreviewRef.current;
+    setEditableSource(source && preview ? previewNsNorTSourceTarget(source, preview.target, preview.value) : source);
   }, [source]);
   useEffect(() => {
     sourceDraftTextRef.current = sourceDraftText ?? "";
@@ -5816,9 +5848,14 @@ function NsNorTAreaCard({
           NS_NORT_FLAT_PROB_Y1_PATH,
         ];
 
+  const tableDirty = useMemo(() => nsTableHasUnsavedChanges(editableSource, sourceDraftText, sourceSavedText),
+    [editableSource, sourceDraftText, sourceSavedText]);
+
   const previewCell = (target: NsNorTCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
     if (!isSourceNumberText(trimmed)) return;
+    cellPreviewRef.current = editableSource && getNsNorTTargetField(editableSource, target)?.value.trim() === trimmed
+      ? null : { target, value: trimmed };
     setEditableSource((current) => current ? previewNsNorTSourceTarget(current, target, trimmed) : current);
   };
 
@@ -5830,6 +5867,7 @@ function NsNorTAreaCard({
     if (!field) return false;
     const nextText = replaceNsNorTCellInSourceText(sourceDraftTextRef.current, editableSource, field, trimmed);
     if (nextText === null) return false;
+    cellPreviewRef.current = null;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
     setEditableSource((current) => current ? updateNsNorTSourceTarget(current, target, field, trimmed) : current);
@@ -5841,6 +5879,7 @@ function NsNorTAreaCard({
       <div style={thresholdHeaderStyle}>
         <div style={thresholdTitleStyle}>{areaTitle}</div>
         <div style={thresholdGroupActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             aria-label={sourceJumpTitle}
@@ -6104,10 +6143,14 @@ function NsDtAreaCard({
 }) {
   const [expanded, setExpanded] = useState(initialExpanded ?? true);
   const [editableSource, setEditableSource] = useState(source);
+  const cellPreviewRef = useRef<{ id: NsDtCellId; value: number } | null>(null);
   const sourceDraftTextRef = useRef(sourceDraftText ?? "");
 
   useEffect(() => {
-    setEditableSource(source);
+    if (!source) cellPreviewRef.current = null;
+    const preview = cellPreviewRef.current;
+    const field = source && preview ? preview.id === "darkY" ? source.darkYField : preview.id === "thd" ? source.thdField : source.limitField : null;
+    setEditableSource(source && preview ? updateLocalSource(source, preview.id, preview.value, field) : source);
   }, [source]);
   useEffect(() => {
     sourceDraftTextRef.current = sourceDraftText ?? "";
@@ -6147,6 +6190,7 @@ function NsDtAreaCard({
   const previewCell = (id: NsDtCellId, nextValue: string) => {
     const value = parseFiniteNumber(nextValue);
     if (!Number.isFinite(value)) return;
+    cellPreviewRef.current = parseFiniteNumber(getSourceField(id)?.value) === value ? null : { id, value };
     setEditableSource((current) => {
       const field = getSourceField(id);
       return current ? updateLocalSource(current, id, value, field) : current;
@@ -6160,6 +6204,7 @@ function NsDtAreaCard({
     if (!Number.isFinite(value) || !field) return false;
     const nextText = replaceSourceFieldInSourceText(sourceDraftTextRef.current, editableSource.fields, field, nextValue.trim());
     if (nextText === null) return false;
+    cellPreviewRef.current = null;
     sourceDraftTextRef.current = nextText;
     onSourceDraftTextChange?.(nextText);
     setEditableSource((current) => current ? updateLocalSource(current, id, value, field) : current);
@@ -9642,7 +9687,9 @@ function HsWeightCard({
   midValue,
   wetValues,
   sourceDraftText,
+  sourceSavedText,
   onSourceDraftTextChange,
+  onSaveSourceDraft,
   onSourceJump,
   onInterpolatedChange,
   initialExpanded,
@@ -9655,7 +9702,9 @@ function HsWeightCard({
   midValue: string | null;
   wetValues: Record<HsWeightToneId, string | null>;
   sourceDraftText?: string | null;
+  sourceSavedText?: string | null;
   onSourceDraftTextChange?: (text: string) => void;
+  onSaveSourceDraft?: () => Promise<void>;
   onSourceJump?: (label: string, spec: CardSourceSpec, details?: ChartSourceJumpDetails) => void;
   onInterpolatedChange?: (values: Partial<Record<HsWeightToneId, number>>) => void;
   initialExpanded?: boolean;
@@ -9699,6 +9748,9 @@ function HsWeightCard({
   const selectedPointText = formatHsSelectedPoint(bv, b2d, mid);
   const canEdit = Boolean(onSourceDraftTextChange && sourceDraftText !== null && sourceDraftText !== undefined);
 
+  const tableDirty = useMemo(() => hsWeightHasUnsavedChanges(editableSource, sourceDraftText, sourceSavedText),
+    [editableSource, sourceDraftText, sourceSavedText]);
+
   const previewWeightCell = (target: HsWeightCellTarget, nextValue: string) => {
     const trimmed = nextValue.trim();
     if (!isSourceNumberText(trimmed)) return;
@@ -9724,6 +9776,7 @@ function HsWeightCard({
       <div style={thresholdHeaderStyle}>
         <div style={thresholdTitleStyle}>HS Weight</div>
         <div style={thresholdGroupActionsStyle}>
+          <FaceTableSaveButton dirty={tableDirty} onSave={onSaveSourceDraft} />
           <button
             type="button"
             title="Jump to HS Weight source"
@@ -9858,7 +9911,7 @@ function HsWeightGrid({
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [source, midColumnCount]);
+  }, [midColumnCount]);
 
   return (
     <div ref={viewportRef} style={hsWeightScaleViewportStyle}>
@@ -9894,7 +9947,7 @@ function HsWeightGrid({
             const drAxis = source?.drB2dRows[bvIndex] ?? [];
             const bvField = source?.bvAxisFields[bvIndex] ?? null;
             return (
-            <div key={`${bvIndex}:${bv}`} style={hsWeightBvGroupGridStyle(midColumnCount, bvIndex > 0)}>
+            <div key={bvIndex} style={hsWeightBvGroupGridStyle(midColumnCount, bvIndex > 0)}>
               <HsWeightEditableCell
                 value={bvField?.value ?? formatHsWeightCell(bv)}
                 editable={editable && Boolean(bvField)}
@@ -12298,6 +12351,34 @@ function updateMtwvRowsCell(
   });
 }
 
+function nsTableHasUnsavedChanges(
+  source: NsProbabilityCurveSource | NsNorTSource | null,
+  draftText: string | null | undefined,
+  savedText: string | null | undefined,
+): boolean {
+  if (!source || !draftText || !savedText) return false;
+  const pending: Array<{ value: number; field: FieldEntry | null | undefined }> = [];
+  const curves = "bv" in source ? [source.bv, source.cdf] : [source.flatProb];
+  for (const curve of curves) {
+    for (const id of NS_PROBABILITY_CURVE_FIELD_ORDER) pending.push({ value: curve[id], field: curve.fields[id] });
+  }
+  if ("bvValues" in source) {
+    pending.push(
+      ...source.bvValues.map((value, index) => ({ value, field: source.bvFields[index] })),
+      ...source.thdValues.map((value, index) => ({ value, field: source.thdFields[index] })),
+      ...source.nsEvdIntervalValues.map((value, index) => ({ value, field: source.nsEvdIntervalFields[index] })),
+      ...source.nsEvdDefineValues.map((value, index) => ({ value, field: source.nsEvdDefineFields[index] })),
+      ...Object.values(source.flatSettings).map(({ value, field }) => ({ value, field })),
+    );
+  }
+  return pending.some(({ field, value }) => {
+    if (!field) return false;
+    const draft = sourceFieldNumber(draftText, field, source.fields);
+    const saved = sourceFieldNumber(savedText, field, source.fields);
+    return Number.isFinite(saved) && ((Number.isFinite(draft) && draft !== saved) || (Number.isFinite(value) && value !== saved));
+  });
+}
+
 function getNsProbabilityTargetField(
   source: NsProbabilityCurveSource,
   target: NsProbabilityCurveCellTarget,
@@ -12454,6 +12535,29 @@ function getHsWeightTargetField(source: HsWeightSource, target: HsWeightCellTarg
   if (target.kind === "dr") return source.drB2dFields[target.bvIndex]?.[target.drIndex] ?? null;
   if (target.kind === "mid") return source.midAxisFields[target.midIndex] ?? null;
   return source.valueFields[target.bvIndex]?.[target.drIndex]?.[target.midIndex]?.[target.channelIndex] ?? null;
+}
+
+function hsWeightHasUnsavedChanges(
+  source: HsWeightSource | null,
+  draftText: string | null | undefined,
+  savedText: string | null | undefined,
+): boolean {
+  if (!source || !draftText || !savedText) return false;
+  // Include in-focus previews: clicking Save blurs/commits the input before
+  // invoking the shared source save handler, so the latest value is saved.
+  const pendingValues = [
+    ...source.bvAxis.map((value, index) => ({ value, field: source.bvAxisFields[index] })),
+    ...source.midAxis.map((value, index) => ({ value, field: source.midAxisFields[index] })),
+    ...source.drB2dRows.flatMap((row, bv) => row.map((value, dr) => ({ value, field: source.drB2dFields[bv]?.[dr] }))),
+    ...source.values.flatMap((rows, bv) => rows.flatMap((mids, dr) => mids.flatMap((channels, mid) =>
+      channels.map((value, channel) => ({ value, field: source.valueFields[bv]?.[dr]?.[mid]?.[channel] }))))),
+  ];
+  return pendingValues.some(({ field, value }) => {
+    if (!field) return false;
+    const draft = sourceFieldNumber(draftText, field, source.fields);
+    const saved = sourceFieldNumber(savedText, field, source.fields);
+    return Number.isFinite(saved) && ((Number.isFinite(draft) && draft !== saved) || (Number.isFinite(value) && value !== saved));
+  });
 }
 
 function previewHsWeightSourceTarget(source: HsWeightSource, target: HsWeightCellTarget, value: string): HsWeightSource {
