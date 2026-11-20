@@ -23,6 +23,20 @@
 
 **验证**：`npm run version:sync`、`npm run version:check`、`npm run typecheck`通过。Node `22.23.5`合并运行release:test、sync:test、plugin:test对应10个脚本，174项通过；`git diff --check`通过。GitHub Actions和公开产物验收待推送后追加；未本地编译Rust/Tauri，未安装替换用户桌面应用。
 
+**发布补验**：版本提交 `cf0aefd193f09c93766526e834cf725b3ecb754d` 已推送origin/main，主CI [44677662602](https://github.com/diamond-cz/luxe-tauri/actions/runs/44677662602)全部成功后创建annotated tag `v0.2.19`。远端tag解引用与该提交一致。正式发布工作流 [44678266325](https://github.com/diamond-cz/luxe-tauri/actions/runs/44678266325)全部成功，包含更新签名探测、前端及Rust编译、Rust测试、NSIS/MSI打包、资产验证和发布。Release于 `2026-11-20T05:14:52Z` 公开，非draft、非prerelease，GitHub latest与实际gh-proxy更新清单均为0.2.19。
+
+| 公开资产 | 字节数 | SHA-256 |
+| --- | --- | --- |
+| `LUXE_0.2.19_x64-setup.exe` | 5,958,167 | `8432c5a26f65901e78068d90091c46e31d473e8a6f7a288bbf2a5e88718d0fef` |
+| `LUXE_0.2.19_x64_zh-CN.msi` | 10,788,864 | `cea1ccf7487ba5a968ee7c3c59aa46c39ba32f550dea700aef1134ee5dde579f` |
+| `latest.json` | 2,059 | `5406737373f254cb52547bb91d816b2b60615b57a9a70ba9e39914bc1498593c` |
+| `LUXE_0.2.19_x64-setup.exe.sig` | 436 | `41e092f5d1828dd9d2140cb7494a6407de7201a5d1f68908bd8758cbcf4e4d01` |
+| `SHA256SUMS.txt` | 358 | `ec74a568a7a86b09ea757dbb101b352408faa683cbdf60f7c4f1777bab4d3970` |
+
+`python .tmp-release-v0219/verify.py` 独立下载五项公开资产，逐项核对GitHub大小与digest，四项业务资产与SHA256SUMS全部匹配；NSIS MZ、MSI复合文档头、平台windows-x86_64、清单版本/代理下载URL、notes与Release正文均核对通过。清单signature与公开.sig文本一致；此检查不等同于本地密码学验签，安装验签仍由Tauri updater执行。实际请求配置中的gh-proxy latest端点，其JSON与该tag清单完全一致。初次校验脚本使用Windows默认GBK读取UTF-8清单失败，显式指定UTF-8后重跑通过；未修改产品或公开资产。下载和校验记录位于忽略目录 `.tmp-release-v0219/`，未加入Git。
+
+**独立插件边界**：历史功能提交及版本package.json改动触发了插件工作流 `44677002769`、`44677662745`，两次build-plugin均成功，publish-plugin因重建字节与已公开0.1.8不同，被“Published plugin versions are immutable”规则拒绝；不将其报告为全仓所有工作流成功。本轮不覆盖或重发已公开插件，不擅自增加插件版本，应用0.2.19发布不依赖该发布job且已独立成功。最后以独立文档提交记录实际结果，不移动公开tag。未执行Windows安装/升级或整应用桌面验收。
+
 ### 2026-11-20：LCE 详情新增 IsFrontLight 顺逆光人脸信息
 
 **亮点**：在 `src-tauri/resources/Isp6s.toml` 的 `preview_info.items` 首行添加 `IsFrontLight → SW_LCE_IsFrontLight`，位于LV上方；`TablePane.tsx` 的既有详情格式化入口读取当前图片字段，0显示“0, 逆光人脸”，1显示“1, 顺光人脸”。沿用已有关键字大小写/路径查找和表格主题样式，五种翻译资源补齐顺光/逆光文案，无新增IPC或状态。
