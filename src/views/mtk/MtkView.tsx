@@ -160,7 +160,10 @@ export function MtkView() {
       restoredCppPaths.current[savedKey] = path;
       const requestId = cppRequestIds.current[savedKey] = (cppRequestIds.current[savedKey] ?? 0) + 1;
       const currentImport = useMtkStore.getState().imports[savedKey];
-      if (currentImport?.filePath === path && currentImport.status === "done") continue;
+      // Terminal results survive route remounts in the store. Failed restores
+      // should notify once per session, not retry every time MTK is reopened.
+      // Explicit file selection still calls importCppPath and can retry.
+      if (currentImport?.filePath === path && (currentImport.status === "done" || currentImport.status === "error")) continue;
       setImport(savedIsp as IspId, savedTabIdx, { filePath: path, parsed: null, status: "parsing", message: null });
       void isFile(path).then(async (valid) => {
         if (requestId !== cppRequestIds.current[savedKey]) return;

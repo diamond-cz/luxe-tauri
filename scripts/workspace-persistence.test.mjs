@@ -22,6 +22,85 @@ function loadModule(relativePath, mocks = {}) {
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 const entry = (name) => ({ name, jpg_path: `D:/images/${name}`, toml_path: `D:/images/${name}.toml` });
 
+// Execute the actual restore/import callbacks while leaving UI and Tauri outside.
+function mtkCallback(marker, globals) {
+  const relative = '../src/views/mtk/MtkView.tsx';
+  const source = ts.createSourceFile(relative, readFileSync(new URL(relative, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let callback;
+  const visit = node => {
+    if (ts.isArrowFunction(node) && node.body.getText(source).includes(marker)) callback = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.ok(callback, marker);
+  const code = ts.transpileModule(`return (${callback.getText(source)});`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return new Function(...Object.keys(globals), code)(...Object.values(globals));
+}
+
+test('failed CA-LTM restore notifies once across route remounts and explicit selection can retry', async () => {
+  const store = loadModule('../src/stores/mtkStore.ts').useMtkStore;
+  const { ISP_TABS } = loadModule('../src/views/mtk/ispTabs.ts');
+  store.getState().hydrate({ current_isp: 1, current_tab: 1, outer_splitter: [], inner_splitter: [],
+    cpp_paths: { 'ISP6S|0': 'AE.cpp', 'ISP6S|1': 'Tone.cpp', 'ISP6S|CA-LTM': 'missing/CA_LTM.cpp' } });
+  store.getState().setImport('ISP6S', 0, { status: 'done', parsed: { fields: [], comments: [] } });
+  const checked = [], parsed = [], notices = [];
+  let available = false;
+  const globals = () => ({
+    mtk: store.getState().mtk, ISP_TABS, useMtkStore: store,
+    restoredCppPaths: { current: {} }, cppRequestIds: { current: {} },
+    setImport: store.getState().setImport, setCppPath: store.getState().setCppPath,
+    setToast: notice => notices.push(notice),
+    isFile: async path => { checked.push(path); return path === 'Tone.cpp' || available; },
+    parseCppFile: async path => { parsed.push(path); return { fields: [], comments: [] }; },
+  });
+  const mount = () => mtkCallback('const paths = { ...mtk.cpp_paths }', globals())();
+  mount(); await turn();
+  assert.deepEqual(checked, ['Tone.cpp', 'missing/CA_LTM.cpp']);
+  assert.deepEqual(parsed, ['Tone.cpp']);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].detail, 'missing/CA_LTM.cpp');
+  assert.equal(store.getState().imports['ISP6S|CA-LTM'].status, 'error');
+  for (let index = 0; index < 3; index++) { mount(); await turn(); }
+  assert.equal(checked.length, 2, 'returning from Home must not recheck terminal imports');
+  assert.equal(notices.length, 1, 'the same failed saved path must not notify repeatedly');
+  available = true;
+  const select = mtkCallback('const importKey = `${targetIsp}|${targetTab}`', globals());
+  await select('missing/CA_LTM.cpp', 'ISP6S', 'CA-LTM');
+  assert.equal(store.getState().imports['ISP6S|CA-LTM'].status, 'done');
+  assert.equal(parsed.at(-1), 'missing/CA_LTM.cpp');
+  assert.equal(notices.at(-1).title, '解析完成');
+  store.getState().setCppPath('new/CA_LTM.cpp', 'ISP6S', 'CA-LTM');
+  mount(); await turn();
+  assert.equal(checked.at(-1), 'new/CA_LTM.cpp', 'changed saved path should be restored');
+  assert.equal(store.getState().imports['ISP6S|CA-LTM'].filePath, 'new/CA_LTM.cpp');
+});
+
+test('parse and filesystem failures stay terminal until retry while interrupted restore can resume', async () => {
+  const { ISP_TABS } = loadModule('../src/views/mtk/ispTabs.ts');
+  for (const failure of ['parse', 'filesystem']) {
+    const store = loadModule('../src/stores/mtkStore.ts').useMtkStore;
+    store.getState().hydrate({ current_isp: 1, current_tab: 0, outer_splitter: [], inner_splitter: [], cpp_path: 'AE.cpp' });
+    // A navigation interrupted the earlier load before it could settle.
+    store.getState().setImport('ISP6S', 0, { status: 'parsing' });
+    const notices = [], checked = [];
+    const mount = () => mtkCallback('const paths = { ...mtk.cpp_paths }', {
+      mtk: store.getState().mtk, ISP_TABS, useMtkStore: store,
+      restoredCppPaths: { current: {} }, cppRequestIds: { current: {} },
+      setImport: store.getState().setImport, setToast: notice => notices.push(notice),
+      isFile: async path => { checked.push(path); if (failure === 'filesystem') throw new Error('access denied'); return true; },
+      parseCppFile: async () => { throw new Error('invalid source'); },
+    })();
+    mount(); await turn();
+    assert.equal(store.getState().imports['ISP6S|0'].status, 'error');
+    assert.equal(notices.length, 1);
+    mount(); await turn();
+    assert.equal(checked.length, 1);
+    assert.equal(notices.length, 1);
+  }
+});
+
 test('image folder persists before scan completes and keeps its last selection on retry', () => {
   const { useMtkStore } = loadModule('../src/stores/mtkStore.ts');
   const store = useMtkStore.getState();

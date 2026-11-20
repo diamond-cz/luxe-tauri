@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-20：MTK 切页重复提示失效参数路径与 Toast 长路径溢出
+
+**亮点**：`MtkView.tsx` 恢复参数路径时复用既有 `imports` 的done/error终态，同路径失败不随路由重挂载重复检查或弹窗；手动选择仍通过 `importCppPath` 重试，路径变化、进程重启及未完成的parsing状态继续恢复。`Toast.tsx` 统一添加任意位置换行、视口宽度约束与border-box，路径完整显示在提示框内；保留原主题与显隐动画。说明更新于 `docs/config/LOCAL_STATE.md`。
+
+**痛点**：只读检查开发状态发现AE.cpp、TONE.cpp均存在，而 `ISP6S|CA-LTM` 保存的旧 `00_para/1023para_SVN/.../CA_LTM.cpp` 不存在，与截图提示路径一致。恢复effect遍历全部工作区路径，原本只跳过done，error路径每次页面重挂载都会因为本地ref重置而重新报错。Toast原maxWidth仅限制边框，未给无空格Windows路径设置断行，导致文字溢出。文件缺失与反复提示为两个独立原因；不能将其误判为当前Tone.cpp解析失败。
+
+**闭坑**：不清空或重写用户历史路径、不自动猜测替代文件；首次真实失败仍提示，后续保留error以供显式重试。终态只在filePath相同时复用，不跳过未完成请求或不同路径。前端会话缓存不写TOML，不能把失败结果持久化到下次启动。Toast保留完整可复制路径，不靠省略号或overflow隐藏掩盖问题。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`运行 `node --test scripts/workspace-persistence.test.mjs`，9项通过。新增回归执行生产restore/import回调，模拟缺失CA-LTM、三次路由重挂载、同路径手动重选恢复、路径变化、解析失败、文件系统异常及中断parsing重试。`python .tmp-toast-check/check.py`在Edge headless中检查真实Toast，深浅主题×DPR1/1.5×1900/800/420/320/260px共20组合，路径文字Range全部位于边框/视口内、无横向溢出；截图在忽略目录 `.tmp-toast-check/`。本地state仅只读检查，未修改。`git diff --check`通过；未本地Rust/Tauri编译、未在原生应用中手动切页验收，未提交或发布新版本。
+
 ### 2026-11-20：整理历史提交并准备 v0.2.19 发布
 
 **亮点**：以已发布 `v0.2.18` 为比较基线，核对到 `5b9cd03` 共14个后续提交，保留已推送历史，用独立版本提交及 `v0.2.19` 标签建立发布边界。`src/data/changelog.json` 新增2026-11-20的0.2.19条目，GitHub Release及应用更新清单继续由同一 `releaseNotesFor` 入口生成。按 `src-tauri/tauri.conf.json` 同步npm/Cargo清单与锁文件，仅更改应用自身版本，依赖版本不变。

@@ -12,7 +12,7 @@ interface Props {
 }
 
 /**
- * Lightweight self-dismissing toast. Floats at the top-right of the viewport
+ * Lightweight self-dismissing toast. Floats at the top-center of the viewport
  * and fades out after `duration` ms. We render our own rather than wiring up
  * `@fluentui/react-toast` because there's no global Toaster mount point in
  * this app and we only need one tiny variant.
@@ -64,8 +64,11 @@ export function Toast({ kind, title, detail, duration = 3000, onClose }: Props) 
         top:       72,
         left:      "50%",
         zIndex:    1000,
-        minWidth:  280,
-        maxWidth:  420,
+        width:     "max-content",
+        minWidth:  "min(280px, calc(100vw - 32px))",
+        maxWidth:  "min(420px, calc(100vw - 32px))",
+        boxSizing: "border-box",
+        overflowWrap: "anywhere",
         padding:   "10px 14px",
         background:  palette.bg,
         border:      "1px solid " + palette.border,
@@ -80,7 +83,7 @@ export function Toast({ kind, title, detail, duration = 3000, onClose }: Props) 
     >
       <div className="text-sm font-semibold">{title}</div>
       {detail && (
-        <div className="mt-0.5 text-xs" style={{ opacity: 0.85 }}>
+        <div className="mt-0.5 text-xs" style={{ opacity: 0.85, whiteSpace: "pre-wrap" }}>
           {detail}
         </div>
       )}
