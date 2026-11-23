@@ -35,6 +35,7 @@ import {
 } from "@/ipc/client";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { startImageSyncListener } from "@/services/imageSyncService";
+import { validateMtkFilePaths } from "@/services/restoreMtkFiles";
 
 type DebouncedVoid = (() => void) & { cancel: () => void };
 
@@ -77,7 +78,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
       void getVersion().then((version) => {
         if (!disposed) useUpdateStore.getState().setCurrentVersion(version);
       }).catch((error) => console.warn("read app version failed", error));
-      useMtkStore.getState().hydrate(root.mtk);
+      const restoredMtk = await validateMtkFilePaths(root.mtk);
+      if (disposed) return;
+      useMtkStore.getState().hydrate(restoredMtk);
       // The backend already debounces disk writes. Submit path changes now,
       // even when the user leaves MTK or exits before a UI timer could fire.
       unlisteners.push(useMtkStore.subscribe((next, previous) => {
@@ -85,6 +88,9 @@ export function useShellBootstrap(handlers: ShellHandlers) {
           void saveStateSection("mtk", next.mtk).catch((error) => console.warn("save mtk", error));
         }
       }));
+      if (restoredMtk !== root.mtk) {
+        void saveStateSection("mtk", restoredMtk).catch((error) => console.warn("save validated MTK paths", error));
+      }
       useIsp6sVisualStore.getState().setVisual(root.isp6s_ae_visual);
       const route = ["/home", "/mtk", "/qualcomm", "/unisoc", "/settings"].includes(root.last_route ?? "")
         ? root.last_route! : "/home";

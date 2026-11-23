@@ -4,6 +4,16 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-23：启动校验历史导入文件并隐藏不存在的路径
+
+**亮点**：新增 `src/services/restoreMtkFiles.ts`，通过已有 `isFile` IPC去重并行检查 `mtk.cpp_paths` 全部工作区、独立CA-LTM、旧版AE `cpp_path` 与DP路径。`useShellBootstrap.ts` 在hydrate/导航/显示之前等待检查，确认缺失或空白项从恢复状态剔除，参数卡片及其tooltip/复制入口自然显示为未导入，不先闪现无效路径。结果改变时复用 `saveStateSection("mtk", ...)` 队列保存，全部有效则复用原对象且不额外保存。
+
+**痛点**：旧流程先hydrate原始历史路径，进入MTK后才检查；之前只抑制切页重复提示，失效的CA-LTM仍保留在卡片和tooltip里。只清理cpp_paths还会被旧 `cpp_path` 回退再次恢复，DP又有独立路径字段，因此要在共同启动入口覆盖全部文件来源。文件检查异常与确认不存在必须区分，不能因IPC失败清空历史配置。
+
+**闭坑**：验证函数不修改原始快照，仅剔除确认不存在/空白文件；文件存在但解析失败仍保留以便重试，IPC异常记录日志并保留记录。相同路径在多个标签或旧字段中出现只检查一次；图片目录/选图和布局保持原数据。启动effect在校验后再次检查disposed，取消后不hydrate、不写设置、不导航。此改动不删除用户文件、不改Rust契约；先前已授权的排序优化保持完整。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`执行 `node --test scripts/workspace-persistence.test.mjs`，12项通过。新增3项执行生产校验函数、Zustand hydrate和实际 `useShellBootstrap`，覆盖CA-LTM/DP/旧AE缺失、空白、去重、有效项保留、输入不可变、IPC异常保留、校验期间imports为空避免闪现、清理设置只提交一次及启动取消后的结果隔离。随后合并运行sync:test对应7脚本，157项全部通过，`git diff --check`通过。未操作本机真实state.toml或删除文件；未本地编译Rust/Tauri、未在原生窗口重新启动验收，未提交或发布新版本。
+
 ### 2026-11-23：图片列表排序内存检查与有界读取优化
 
 **亮点**：新增 `src/views/mtk/isp6s/TablePane/imageTableSort.ts`，将字符串解析移到当前列加载阶段，使用8N字节Float64Array保存标量；`TablePane.tsx`升/降序复用该列，不反复IPC，直接排序新建局部行数组。顺序读取最多1024行分块，同表一个活动分块/一个最新待处理列，切列、取消和卸载停止后续批次；snapshot按entries/revision/key隔离，不增加全局完成结果缓存。新增正式排序行为测试并加入package.json的sync:test；详细报告在 `docs/performance/IMAGE_TABLE_SORT_AUDIT.md`，同步索引与内存维护说明。

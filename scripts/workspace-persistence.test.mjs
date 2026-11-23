@@ -22,6 +22,110 @@ function loadModule(relativePath, mocks = {}) {
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 const entry = (name) => ({ name, jpg_path: `D:/images/${name}`, toml_path: `D:/images/${name}.toml` });
 
+test('startup filters missing saved imports before hydration, including CA-LTM, DP and legacy AE paths', async () => {
+  const checked = [];
+  const { validateMtkFilePaths } = loadModule('../src/services/restoreMtkFiles.ts', {
+    '@/ipc/shell': { isFile: async path => { checked.push(path); return ['AE.cpp', 'Tone.cpp'].includes(path); } },
+  });
+  const saved = { current_isp: 1, current_tab: 1, outer_splitter: [60, 40], inner_splitter: [50, 50],
+    cpp_path: 'missing-old-AE.cpp', cpp_paths: {
+      'ISP6S|0': 'AE.cpp', 'ISP6S|1': 'Tone.cpp', 'ISP6S|CA-LTM': 'missing-CA_LTM.cpp',
+      'ISP7S|0': 'Tone.cpp', 'ISP7S|1': '   ',
+    }, debug_parser_path: 'missing-DebugParser.exe',
+    image_workspaces: { 'ISP6S|0': { dir: 'D:/images', selected_image: 'D:/images/2.jpg' } } };
+  const original = structuredClone(saved);
+  const restored = await validateMtkFilePaths(saved);
+  assert.deepEqual(restored.cpp_paths, { 'ISP6S|0': 'AE.cpp', 'ISP6S|1': 'Tone.cpp', 'ISP7S|0': 'Tone.cpp' });
+  assert.equal(restored.cpp_path, null);
+  assert.equal(restored.debug_parser_path, null);
+  assert.equal(checked.filter(path => path === 'Tone.cpp').length, 1, 'duplicate saved paths are checked once');
+  assert.ok(!checked.includes('   '));
+  assert.equal(restored.image_workspaces, saved.image_workspaces, 'image folders and selection remain intact');
+  assert.deepEqual(saved, original, 'validation must not mutate the loaded state snapshot');
+  const store = loadModule('../src/stores/mtkStore.ts').useMtkStore;
+  store.getState().hydrate(restored);
+  assert.equal(store.getState().imports['ISP6S|CA-LTM'], undefined);
+  assert.equal(store.getState().imports['ISP6S|0'].filePath, 'AE.cpp');
+  assert.equal(store.getState().debugParserPath, null);
+});
+
+test('valid saved paths keep their identity and check errors do not discard history', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  let fail = false;
+  const { validateMtkFilePaths } = loadModule('../src/services/restoreMtkFiles.ts', {
+    '@/ipc/shell': { isFile: async () => { if (fail) throw new Error('IPC disconnected'); return true; } },
+  });
+  const saved = { current_isp: 1, current_tab: 0, outer_splitter: [], inner_splitter: [], cpp_path: 'AE.cpp' };
+  assert.equal(await validateMtkFilePaths(saved), saved, 'legacy-only valid state does not need another persistent write');
+  fail = true;
+  assert.equal(await validateMtkFilePaths(saved), saved);
+  assert.equal(warn.mock.calls.length, 1);
+  const missing = loadModule('../src/services/restoreMtkFiles.ts', { '@/ipc/shell': { isFile: async () => false } });
+  assert.equal((await missing.validateMtkFilePaths(saved)).cpp_path, null, 'missing legacy path cannot be restored by the fallback');
+});
+
+test('shell waits for path validation before showing saved imports and ignores results after unmount', async () => {
+  for (const cancel of [false, true]) {
+    const store = loadModule('../src/stores/mtkStore.ts').useMtkStore;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const validation = loadModule('../src/services/restoreMtkFiles.ts', {
+      '@/ipc/shell': { isFile: async path => path === 'AE.cpp' || await gate },
+    });
+    let effect;
+    const noop = () => {};
+    const silentStore = selector => selector(new Proxy({}, { get: () => noop }));
+    silentStore.getState = () => new Proxy({}, { get: () => noop });
+    const unlisten = async () => noop;
+    const win = { show: async () => {}, onCloseRequested: unlisten, onResized: unlisten, onMoved: unlisten };
+    const writes = [], routes = [];
+    const root = { mtk: { current_isp: 1, current_tab: 1, outer_splitter: [], inner_splitter: [],
+      cpp_paths: { 'ISP6S|0': 'AE.cpp', 'ISP6S|CA-LTM': 'missing.cpp' } },
+      main_window: {}, settings: { language: 0, auto_update: false }, shortcuts: {}, isp6s_ae_visual: {}, last_route: '/mtk' };
+    const { useShellBootstrap } = loadModule('../src/hooks/useShellBootstrap.ts', {
+      react: { useEffect: callback => { effect = callback; }, useRef: value => ({ current: value }) },
+      '@tauri-apps/api/window': { getCurrentWindow: () => win },
+      '@tauri-apps/api/app': { getVersion: async () => '0.2.19' },
+      '@tauri-apps/api/event': { listen: unlisten },
+      '@/ipc/stateIo': { loadState: async () => root, saveStateSection: async (section, value) => { writes.push({ section, value }); },
+        currentAvailRect: async () => ({}), computeAdaptiveGeometry: async () => ({}), applyWindowGeometry: async () => {} },
+      '@/ipc/shell': { fetchPoetry: async () => {} },
+      '@/stores/windowStore': { useWindowStore: silentStore },
+      '@/stores/settingsStore': { useSettingsStore: silentStore },
+      '@/stores/shortcutStore': { useShortcutStore: silentStore },
+      '@/stores/mtkStore': { useMtkStore: store },
+      '@/stores/isp6sVisualStore': { useIsp6sVisualStore: silentStore },
+      '@/stores/poetryStore': { usePoetryStore: silentStore },
+      '@/services/runUpdateCheck': {}, '@/stores/updateStore': { useUpdateStore: silentStore },
+      '@/ipc/memory': {}, '@/locales/i18n': { bootstrapI18n: async () => {} },
+      '@/locales': { localeAt: () => 'zh_CN' }, '@/ipc/client': {},
+      '@tauri-apps/plugin-notification': {},
+      '@/services/imageSyncService': { startImageSyncListener: unlisten },
+      '@/services/restoreMtkFiles': validation,
+    });
+    useShellBootstrap({ onNavigate: route => { routes.push(route); assert.equal(store.getState().imports['ISP6S|CA-LTM'], undefined); } });
+    const cleanup = effect();
+    await turn();
+    assert.deepEqual(store.getState().imports, {}, 'unchecked history must not flash in the UI');
+    assert.deepEqual(routes, []);
+    if (cancel) cleanup();
+    release(false);
+    await turn();
+    if (cancel) {
+      assert.deepEqual(store.getState().imports, {});
+      assert.deepEqual(writes, []);
+      assert.deepEqual(routes, []);
+    } else {
+      assert.equal(store.getState().imports['ISP6S|0'].filePath, 'AE.cpp');
+      assert.deepEqual(routes, ['/mtk']);
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].section, 'mtk');
+      assert.deepEqual(writes[0].value.cpp_paths, { 'ISP6S|0': 'AE.cpp' });
+      cleanup();
+    }
+  }
+});
+
 // Execute the actual restore/import callbacks while leaving UI and Tauri outside.
 function mtkCallback(marker, globals) {
   const relative = '../src/views/mtk/MtkView.tsx';
