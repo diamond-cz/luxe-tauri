@@ -4,6 +4,18 @@
 
 每次完成修改后，记录已验证的可复用方案、实际遇到的根因和后续修改的闭坑条件；没有新经验时明确记录“无新增亮点或痛点”。本文不替代 .codex/rules/ 中的规范断言。新记录应包含日期、主题、亮点、痛点、闭坑和验证；每项写出具体路径、行为或命令。未运行的验证必须标为“未验证”。
 
+### 2026-11-23：图片列表排序内存检查与有界读取优化
+
+**亮点**：新增 `src/views/mtk/isp6s/TablePane/imageTableSort.ts`，将字符串解析移到当前列加载阶段，使用8N字节Float64Array保存标量；`TablePane.tsx`升/降序复用该列，不反复IPC，直接排序新建局部行数组。顺序读取最多1024行分块，同表一个活动分块/一个最新待处理列，切列、取消和卸载停止后续批次；snapshot按entries/revision/key隔离，不增加全局完成结果缓存。新增正式排序行为测试并加入package.json的sync:test；详细报告在 `docs/performance/IMAGE_TABLE_SORT_AUDIT.md`，同步索引与内存维护说明。
+
+**痛点**：旧effect依赖整个sortState，反向排序也全目录读取；比较器重复正则/Number解析，10万行每次约304万次解析；requestId仅忽略迟到结果，旧全目录读取仍继续。隔离组件1万行100次反向排序读取100万行，快速切列24次读取12万行。首轮Locator操作还造成脱离DOM被测试工具保留，直接DOM操作复测后计数恢复稳定，不能将测试工具引用误认作产品泄漏。试验256行分块令5万行首排约1243ms，调整1024行后约356ms；仍慢于旧单次全量约261ms，如实保留首次大目录等待的取舍。
+
+**闭坑**：检查范围内未发现持续排序泄漏，不等于证明所有进程/运行时长都无泄漏。保留缺失值末尾、相同值原索引排序、复合数值与自定义列原语义；筛选后按原索引取标量。取消不能终止已开始的Tauri invoke，只能停止其后批次；不能把调度优化写成原生命令已取消。真实Tauri宿主/browser/renderer/GPU需同目录同构建分别采样，本轮未重启操作用户现有实例，未本地编译Rust。不要为测试强制频繁trimMemory掩盖保留对象。
+
+**验证**：`npm run typecheck`通过；Node `22.23.5`合并运行sync:test对应7脚本154项全部通过，其中新4项覆盖排序语义、分块、100次最新列覆盖、活动并发上限、取消和失败恢复。`python .tmp-sort-audit/check.py`使用实际ImageTab/Fluent/虚拟列表及原共享请求代码，底层IPC模拟数据；1万行100次正逆序中位98.50→20.18ms，排序请求100→0；快速切列读取120,000→17,168行。两实现排序时DOM1267/监听器223固定，5轮卸载后DOM23/监听器160固定；新版80KB排序数组在卸载后释放。未观察到明显对象累计，少量JIT/框架预热不作泄漏定论。
+
+Node `--expose-gc .tmp-sort-audit/benchmark.mjs`串行12轮算法基准：1万行53.13→4.19ms、5万行355.44→25.04ms、10万行810.49→53.97ms，包含新列一次数值解析，不是原生磁盘耗时。`python .tmp-sort-audit/correctness.py`验证实际正逆序前十行、元数据代次刷新与读取中卸载仅完成当前1024行。首排单次结果、完整GC数据及边界见报告；JSON/堆快照/夹具在忽略目录 `.tmp-sort-audit/`，不提交生成产物。`git diff --check`通过。本次未验收Windows真实目录排序/工作集、未提交或发布新版本。
+
 ### 2026-11-20：NS 编辑重建修复及 Probability/NorT/BT 保存按钮
 
 **亮点**：`ChartMapMode.tsx` 将NS纳入原文件/标签逻辑身份，临时草稿解析期间保留Probability、NorT、BT、DT数据与输入控件，避免loading占位导致的布局跳动。Probability/NorT/BT标题通过 `sourceSavedText`、`onSaveSourceDraft` 接入共享 `FaceTableSaveButton`，`nsTableHasUnsavedChanges` 覆盖当前聚焦预览和草稿/保存快照。各NS输入卡片增加单格预览ref，后台快照到达时保留未提交输入，清除/提交或source失效时释放。NorT加载器保留完整numericNsEnFields，使第二个EVD百分比字段可定位并保存。

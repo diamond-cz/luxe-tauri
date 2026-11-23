@@ -10,6 +10,7 @@
 | 功能 | [参数源码编码兼容](features/SOURCE_ENCODING.md) | AE/Tone/CA-LTM 的 GBK/Unicode 加载、统一坐标、保留编码保存及回归验证 |
 | 功能 | [MTK JPEG 私有 EXIF](features/MTK_NATIVE_EXIF.md) | TOML优先复用、JPEG补缺合并/DP权威覆盖、单一来源、SIMD/有界并发与验证 |
 | 性能 | [CPU 与内存维护](performance/MEMORY_RECOVERY.md) | 缓存预算、异步请求隔离、清理入口及验证方法 |
+| 性能 | [图片列表排序检查](performance/IMAGE_TABLE_SORT_AUDIT.md) | 排序泄漏边界、1万行组件压力测试、10万行算法基准、分块取消与首排取舍 |
 | 配置 | [本地工作状态](config/LOCAL_STATE.md) | 状态文件位置、迁移和开发验证 |
 | 工程 | [实现亮点与痛点账本](engineering/IMPLEMENTATION_LESSONS.md) | 可复用方案、实际根因、闭坑条件和验证记录 |
 | 工程 | [证据目录用途与清理](engineering/EVIDENCE_MAINTENANCE.md) | 截图/分析脚本的作用、清理范围、运行影响与历史材料恢复边界 |

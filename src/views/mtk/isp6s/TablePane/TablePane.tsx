@@ -46,6 +46,7 @@ import { deltaEv, formatCwrEvTriplet, formatDeltaEv, isCwrDeltaFormula, isCwrEvF
 import { COLUMN_SETTINGS_CANCEL_EVENT, COLUMN_SETTINGS_PREVIEW_EVENT, COLUMN_SETTINGS_SAVED_EVENT, COLUMN_SETTINGS_SCOPE_EVENT, collectImageTableCustomColumns, columnScopeForThumbnail, normalizeColumnMode, readLegacyColumnMode, type ColumnMode, type ColumnScope, type ColumnSettingsSaved } from "./imageTableColumnSettings";
 import { prepareColumnSettingsBootstrap } from "./columnSettingsBootstrap";
 import { columnSettingsPlacement } from "./columnSettingsPlacement";
+import { createImageTableSortLoader, sortImageRows, type ImageSortDirection, type ImageSortSnapshot } from "./imageTableSort";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useIsp6sVisualStore } from "@/stores/isp6sVisualStore";
 import type { ScrollPosition } from "../workspaceSession";
@@ -64,7 +65,6 @@ function SceneLeafProtectIcon() {
   );
 }
 
-type ImageSortDirection = "asc" | "desc";
 type ImageSortState = {
   column: string;
   key: string;
@@ -1164,7 +1164,8 @@ export function ImageTab({
   const lastViewportHeightRef = useRef(0);
   const tableViewportFrameRef = useRef<number | null>(null);
   const pendingViewportReloadRef = useRef(false);
-  const sortRequestRef = useRef(0);
+  const sortLoaderRef = useRef<ReturnType<typeof createImageTableSortLoader> | null>(null);
+  if (!sortLoaderRef.current) sortLoaderRef.current = createImageTableSortLoader(loadImageTomlFieldsBatchShared);
   const extraCols = useMemo(
     () => {
       if (!toneMode) return imageTableExtraColumns(schema);
@@ -1410,7 +1411,8 @@ export function ImageTab({
   const [tableReloadVersion, setTableReloadVersion] = useState(0);
   const [sortState, setSortState] = useState<ImageSortState | null>(null);
   const [sortEnabled, setSortEnabled] = useState(false);
-  const [sortValues, setSortValues] = useState<Record<string, string>>({});
+  const [sortValues, setSortValues] = useState<ImageSortSnapshot | null>(null);
+  const sortKey = sortState?.key ?? null;
   const [sortLoading, setSortLoading] = useState(false);
   const [rangePreviewPaths, setRangePreviewPaths] = useState<Set<string> | null>(null);
   const selectionGestureRef = useRef<{
@@ -1708,17 +1710,9 @@ export function ImageTab({
         || shouldShowImageTableRow(classifiedKinds[e.toml_path] ?? "na", activeKindFilter === "scene", activeKindFilter === "portrait"));
     if (!sortState) return rows;
 
-    return rows.slice().sort((a, b) => {
-      const av = parseImageSortNumber(sortValues[a.e.toml_path]);
-      const bv = parseImageSortNumber(sortValues[b.e.toml_path]);
-      const direction = sortState.direction === "asc" ? 1 : -1;
-      if (av === null && bv === null) return a.i - b.i;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-      if (av === bv) return a.i - b.i;
-      return av < bv ? -direction : direction;
-    });
-  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, sortState, sortValues]);
+    if (sortValues?.entries !== entries || sortValues.revision !== imageDataRevision || sortValues.key !== sortState.key) return rows;
+    return sortImageRows(rows, sortValues.values, sortState.direction);
+  }, [activeKindFilter, canFilterKinds, classifiedKinds, entries, imageDataRevision, sortState, sortValues]);
 
   useLayoutEffect(() => {
     scrollPositionChangeRef.current = onScrollPositionChange;
@@ -1969,47 +1963,33 @@ export function ImageTab({
   }, [displayedColumns, sortState]);
 
   useEffect(() => {
-    const requestId = sortRequestRef.current + 1;
-    sortRequestRef.current = requestId;
-
-    if (!sortState || entries.length === 0) {
-      setSortValues({});
+    const loader = sortLoaderRef.current!;
+    let active = true;
+    setSortValues(null);
+    if (!sortKey || entries.length === 0) {
       setSortLoading(false);
       return;
     }
 
     setSortLoading(true);
-    const paths = entries.map((entry) => entry.toml_path);
-    const sortKey = sortState.key;
     const sortKeys = sortKey.startsWith("=") ? imageColumnSourceKeys(sortKey) : [sortKey];
     if (sortKeys.length === 0) {
-      setSortValues({});
       setSortLoading(false);
       return;
     }
-    loadImageTomlFieldsBatchShared(paths, sortKeys, imageMetadataContext)
-      .then((batch) => {
-        if (sortRequestRef.current !== requestId) return;
-        const nextValues: Record<string, string> = {};
-        for (const entry of entries) {
-          const data = batch[entry.toml_path] ?? {};
-          nextValues[entry.toml_path] = sortKey.startsWith("=")
-            ? customImageColumnText(sortKey, (key) => tomlLookup(data, key))
-            : tomlLookup(data, sortKey);
-        }
-        setSortValues(nextValues);
+    loader.load(imageMetadataContext, sortKey, sortKeys, (data) => sortKey.startsWith("=")
+      ? customImageColumnText(sortKey, (key) => tomlLookup(data, key)) : tomlLookup(data, sortKey))
+      .then((snapshot) => {
+        if (active && snapshot) setSortValues(snapshot);
       })
       .catch(() => {
-        if (sortRequestRef.current !== requestId) return;
-        setSortValues({});
+        if (active) setSortValues(null);
       })
       .finally(() => {
-        if (sortRequestRef.current === requestId) {
-          setSortLoading(false);
-        }
+        if (active) setSortLoading(false);
       });
-    return () => { sortRequestRef.current += 1; };
-  }, [entries, imageMetadataContext, sortState]);
+    return () => { active = false; loader.cancel(); };
+  }, [entries, imageMetadataContext, sortKey]);
 
   function rememberTableFieldRows(batch: Record<string, Record<string, string>>) {
     const cache = tableFieldCacheRef.current;
@@ -3180,18 +3160,6 @@ function mergeImageTableColumnOrder(saved: string[], defaults: string[]): string
       ...next.filter((id) => id !== "idx" && id !== "thumbnail" && id !== "name")];
   }
   return next;
-}
-
-function parseImageSortNumber(value: string | undefined): number | null {
-  const text = (value ?? "").trim();
-  if (!text || text === "-") return null;
-  const normalised = text.replace(/[,_\s]/g, "");
-  const direct = Number(normalised);
-  if (Number.isFinite(direct)) return direct;
-  const matched = text.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
-  if (!matched) return null;
-  const parsed = Number(matched);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function ImageSortHeader({
